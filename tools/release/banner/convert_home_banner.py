@@ -54,11 +54,11 @@ for mesh in m.meshes.data.contents:
  if skin:
   assert owner=='mario_mesh';related=related[1:];ps.skinning_mode=1
  ps.related_bones.data.contents=[new[n] for n in related];mesh.mesh_node_name=owner;owners.append(owner)
- if owner.startswith('tire_') or owner in ('body_bob','mario_mesh'):
+ if owner.startswith('tire_') or owner=='body_bob':
   # Original rim is a one-sided disc. Reuse its vertices for explicit back
-  # faces, because HOME ignores the high-level material cull enum. Mario is
-  # one-sided too; the turning banner shows under his hat brim and inside
-  # his cuffs, which the race camera never does.
+  # faces, because HOME ignores the high-level material cull enum. Not on
+  # Mario: doubling his skinned mesh's faces froze the HOME Menu on a New
+  # 3DS as soon as the banner was selected.
   for primitive in ps.primitives.data.contents:
    for idx in primitive.index_streams.data.contents:
     assert int(idx.data_type)==5123
@@ -136,7 +136,7 @@ for name in order:
     keys=[(f,src[f][j][k]) for f in range(nf)]+[(nf,src[0][j][k])];setattr(a,pref+'_'+axis,curve(keys,nf))
  anim.member_animations_data.add(name,a)
 payload=pc.write(cg);assert len(payload)<512*1024,(len(payload),'CGFX size exceeds HOME budget');(O/'banner.cgfx').write_bytes(payload)
-receipt=dict(bytes=len(payload),limit=512*1024,vertices=vertex_count,triangles=sum(meta['counts'].values())+4+sum(v for k,v in meta['counts'].items() if k.startswith('tire_') or k in ('body_bob','mario_mesh')),bones=order,meshOwners=owners,animations=list(anim.member_animations_data),animationTicks=total_ticks,characterPeriodTicks=character_period,vehiclePeriodTicks=360,sourceFrameCount=meta['frameCount'],textureNames=list(cg.data.textures),sourceTRSError=meta['matrixReconstructionError'],materials={name:dict(offset=m.materials[name].offset,stages=[dict(rgb=s.src_rgb,alpha=s.src_alpha,op=s.tev_ops,rgbCombine=s.combine_rgb,alphaCombine=s.combine_alpha) for s in m.materials[name].fragment_shader.texture_combiners]) for name in m.materials},animationOffsets={n:anim.member_animations_data[n].offset for n in anim.member_animations_data},boneOffsets={n:bones[n].offset for n in order})
+receipt=dict(bytes=len(payload),limit=512*1024,vertices=vertex_count,triangles=sum(meta['counts'].values())+4+sum(v for k,v in meta['counts'].items() if k.startswith('tire_') or k=='body_bob'),bones=order,meshOwners=owners,animations=list(anim.member_animations_data),animationTicks=total_ticks,characterPeriodTicks=character_period,vehiclePeriodTicks=360,sourceFrameCount=meta['frameCount'],textureNames=list(cg.data.textures),sourceTRSError=meta['matrixReconstructionError'],materials={name:dict(offset=m.materials[name].offset,stages=[dict(rgb=s.src_rgb,alpha=s.src_alpha,op=s.tev_ops,rgbCombine=s.combine_rgb,alphaCombine=s.combine_alpha) for s in m.materials[name].fragment_shader.texture_combiners]) for name in m.materials},animationOffsets={n:anim.member_animations_data[n].offset for n in anim.member_animations_data},boneOffsets={n:bones[n].offset for n in order})
 mapper=m.materials['banner_logo_alpha'].texture_mappers[0]
 receipt['logoSampler']=dict(offset=mapper.sampler.offset,mapperOffset=mapper.offset,bytes=mapper.sampler.size(),param=mapper.commands[2].head,minFilter=mapper.sampler.min_filter,lodBias=0,textureFormat='RGBA4 single texture')
 receipt['shapes']=[dict(owner=mesh.mesh_node_name,streamOffset=m.shapes.data.contents[mesh.shape_index].vertex_attributes.data.contents[0].offset,primitiveOffset=m.shapes.data.contents[mesh.shape_index].primitive_sets.data.contents[0].offset,indexOffset=m.shapes.data.contents[mesh.shape_index].primitive_sets.data.contents[0].primitives.data.contents[0].index_streams.data.contents[0].offset) for mesh in m.meshes.data.contents]
