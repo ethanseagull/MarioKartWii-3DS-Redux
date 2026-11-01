@@ -12,7 +12,23 @@
 //    model pass a second time with every vertex projected to one point (the
 //    same vertex work, no pixels). Its added GPU time is the pass's vertex
 //    cost; the leave-out cost minus it is mostly fill.
+#ifdef __3DS__
 #include <3ds.h>
+#else
+// Host tools (tools/menu_sprite_scales.cpp and the other offline menu checks)
+// compile the menu sources too. They only need these to exist; nothing they
+// run is timed or contended.
+#include <chrono>
+#define SYSCLOCK_ARM11 268111856ull
+using LightLock = int;
+inline void LightLock_Init(LightLock*) {}
+inline void LightLock_Lock(LightLock*) {}
+inline void LightLock_Unlock(LightLock*) {}
+inline unsigned long long svcGetSystemTick() {
+  return std::chrono::duration_cast<std::chrono::duration<unsigned long long, std::ratio<1, SYSCLOCK_ARM11>>>(
+      std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+#endif
 #include <algorithm>
 #include <atomic>
 #include <cstdint>

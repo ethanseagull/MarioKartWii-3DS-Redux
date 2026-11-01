@@ -1,6 +1,5 @@
 #include <mkw/menu_text_motion.hpp>
-#include <mkw/diag.hpp>
-#include <3ds.h>
+#include <mkw/diag.hpp> // also <3ds.h>, or host stand-ins for LightLock
 #include <array>
 #include <cmath>
 #include <cstdio>
