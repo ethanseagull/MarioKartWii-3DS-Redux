@@ -583,7 +583,7 @@ def cannon_attachment(root):
         ','.join(format(x, '.9f')+'f' for x in matrix) + '};\n}\n')
 
 
-def cook(root, output, course_only=False, balloon_only=False, coin_only=False, course_id=None):
+def cook(root, output, course_only=False, balloon_only=False, coin_only=False, course_id=None, award_source=None):
     if balloon_only and coin_only: raise ValueError("Choose one battle mode bank")
     breff = root / 'assets/common/Effect/RKRace.breff'
     br, reft = breff.read_bytes(), breff.with_suffix('.breft').read_bytes()
@@ -712,6 +712,29 @@ def cook(root, output, course_only=False, balloon_only=False, coin_only=False, c
     # The race actually loads its course bank; package_sd reads every bank's
     # texture dependencies, including these entry textures.
     aggregate = [name for name in order if namespaces[name] != 'entry_']
+    if award_source is not None:
+        # The ceremony's driving scene (src/award_drive.cpp) loads one bank,
+        # award-driving-effects.bin: the always-resident race emitters plus the
+        # surface roots of its course, Win_Demo (55), from the ceremony archive.
+        course = {'key': 'winningrun_demo', 'id': 55}
+        kcl = award_source / 'unpacked/winningrun_demo/course.kcl'
+        stage = output.parent / 'award-course'
+        (stage / 'assets/courses/winningrun_demo').mkdir(parents=True, exist_ok=True)
+        (stage / 'assets/courses/winningrun_demo/course.kcl').write_bytes(kcl.read_bytes())
+        roots = surface_roots(stage, course)
+        selected = {name for name in order if name in always_common}; queue = list(roots)
+        while queue:
+            name = queue.pop()
+            if name in selected: continue
+            if name not in records: raise ValueError('Missing ceremony effect dependency: ' + name)
+            selected.add(name); queue.extend(records[name].references())
+        names_ = [name for name in order if name in selected]
+        textures_, size_ = write_bank(names_, records, namespaces, texture_archives, output, [], 'award-driving-effects.bin', texture_cache)
+        if len(textures_) > 128: raise ValueError('Ceremony effects exceed texture budget')
+        (output / 'award-driving-effects.json').write_text(json.dumps({'id': 55, 'course': course['key'], 'bank': 'award-driving-effects.bin', 'roots': roots,
+            'emitters': len(names_), 'textures': len(textures_), 'payload_bytes': size_, 'kcl_sha256': hashlib.sha256(kcl.read_bytes()).hexdigest()}, indent=2) + '\n')
+        print(f'Cooked award-driving-effects.bin: {len(names_)} emitters, {len(textures_)} textures, surface roots {roots}')
+        return len(names_)
     files, blob_size = ([],0) if course_only or balloon_only or coin_only else write_bank(aggregate, records, namespaces, texture_archives, output, notes, texture_cache=texture_cache)
     from course_catalog import courses
     profiles = []
@@ -764,6 +787,7 @@ if __name__ == '__main__':
     p.add_argument('--course-only', action='store_true', help='Build only the bounded banks loaded by races, without a globally resident aggregate')
     p.add_argument('--balloon-only', action='store_true', help='Stage the ten Balloon Battle banks without touching shared banks or generated headers')
     p.add_argument('--coin-only', action='store_true', help='Stage ten Coin Runners banks and their original coin archive dependencies')
+    p.add_argument('--award-source', type=Path, help='Stage only award-driving-effects.bin, the ceremony driving bank, from this award source (unpacked/winningrun_demo)')
     a = p.parse_args()
     # Build-local output; tools/resource_manifest.py overlays it onto the SD assets.
-    cook(a.root, a.output or a.root / 'build/vfx/textures', a.course_only, a.balloon_only, a.coin_only, a.course_id)
+    cook(a.root, a.output or a.root / 'build/vfx/textures', a.course_only, a.balloon_only, a.coin_only, a.course_id, a.award_source)

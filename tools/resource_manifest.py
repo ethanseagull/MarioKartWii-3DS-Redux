@@ -268,6 +268,11 @@ overlay={};effect_tables=[]
 if (vfx/'race-effects.bin').is_file():
  overlay['textures/race-effects.bin']=vfx/'race-effects.bin'
  effect_tables.append((vfx/'race-effects.bin').read_bytes())
+# The ceremony driving bank (cook_race_effects.py --award-source); without it
+# src/award_drive.cpp loads Luigi Circuit's identical bank.
+if (vfx/'award-driving-effects.bin').is_file():
+ overlay['textures/award-driving-effects.bin']=vfx/'award-driving-effects.bin'
+ effect_tables.append((vfx/'award-driving-effects.bin').read_bytes())
 profiles=json.loads((vfx/'course-effects.json').read_text())
 mode_vfx=[ROOT/'build'/f'battle-{mode}-effects/textures' for mode in ('balloon','coin')]
 for mode,stage in zip(('balloon','coin'),mode_vfx):

@@ -2129,12 +2129,17 @@ int main() {
                 return K::System::Trick::Up;
             };
             // R off a ramp (Mario Kart 7): a press shortly before or on a trick
-            // ramp's lip (Kinoko's Trickable window) tricks instead of hopping.
+            // ramp's lip tricks instead of hopping. Kinoko takes a trick from a
+            // Trickable surface or jump pad, a boost ramp (boostRampType,
+            // KartJump::calcInput) and a half-pipe (KartHalfPipe::calcTrick).
             // Y tricks/wheelies anywhere; hold X or ZL for rear view. ZR equals D-pad Up. QA owns X/Y.
             static unsigned rampTrickFrames=0;
             if(down&KEY_R)rampTrickFrames=8;else if(rampTrickFrames)--rampTrickFrames;
-            const bool rampTrick=fullRace&&rampTrickFrames&&(held&KEY_R)&&
-                K::Kart::KartObjectManager::Instance()->object(0)->status().onBit(K::Kart::eStatus::Trickable);
+            const bool rampTrick=fullRace&&rampTrickFrames&&(held&KEY_R)&&[]{
+                auto* kart=K::Kart::KartObjectManager::Instance()->object(0);
+                return kart->status().onBit(K::Kart::eStatus::Trickable,K::Kart::eStatus::HalfPipeRamp,K::Kart::eStatus::OverZipper)||
+                    kart->state()->boostRampType()>=0;
+            }();
             if(trick==K::System::Trick::None){
                 if(rampTrick){trick=padTrick();buttons=(buttons&~10u)|(held&KEY_B?2u:0u);}
                 else if(!qaMode&&(held&KEY_Y))trick=padTrick();
