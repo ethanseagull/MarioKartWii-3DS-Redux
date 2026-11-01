@@ -45,7 +45,7 @@ with your package manager and use `python3` instead of `py -3`.
 4. Open the devkitPro MSYS2 shell from the Start menu and run `pacman -S gcc`.
    The build compiles a few small helper programs for your PC with it. On
    Linux or macOS any recent `g++` or `clang++` works.
-5. Get the code. Use `git clone`; a ZIP download won't build.
+5. Get the code with `git clone`.
 
    ```sh
    git clone https://github.com/ethanseagull/MarioKartWii-3DS-Redux.git
