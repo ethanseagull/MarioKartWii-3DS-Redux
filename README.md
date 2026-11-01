@@ -36,15 +36,61 @@ headers, saves and compiled packages are not supplied.
 
 ## Building
 
-Building is **manual**. There is no build-all script, dependency downloader,
-Makefile, CI build or automatic CIA generator. Banner-only tools are the
-explicit exception; their current status is documented in [HOME-BANNER.md](docs/HOME-BANNER.md). The steps below describe the
-order; the linked references provide the conversion stages, source list and
-compiler settings. They are intended for developers comfortable with the
-3DS toolchain, not as a one-command build recipe.
+One command turns your disc into the standard CIA and the SD folder.
 
-The current manual procedure has not received a complete fresh-disc build
-verification after the automated drivers were removed.
+### Prerequisites
+
+- [devkitPro](https://devkitpro.org/wiki/Getting_Started) with the 3DS
+  packages (devkitARM, libctru, 3ds-tools: picasso, tex3ds, 3dsxtool).
+- A host C++ compiler. On Windows, open devkitPro's MSYS2 shell once and run
+  `pacman -S gcc`; elsewhere any C++23 `g++` or `clang++` works (or set `CXX`).
+- Python 3.11 or newer (on Windows from python.org; start it with `py -3`).
+- Git.
+- Node.js, ffmpeg, makerom and bannertool are taken from `PATH`. If they
+  aren't there, the builder downloads the versions pinned in
+  [tools/release/toolchain.lock.json](tools/release/toolchain.lock.json) and
+  checks their SHA-256. Node and ffmpeg downloads are Windows-only; elsewhere
+  install them with your package manager.
+- Your **Mario Kart Wii USA (RMCE01)** ISO or WBFS.
+- Your 3DS's **CFL_Res.dat**, the console's Mii rendering resource. Copy it off the console with GodMode9:
+  1. Open `[1:] SYSNAND CTRNAND` → `title` → `0004009b` → `00010202` → `content`.
+  2. Press A on the `.app` file, choose *NCCH image options...* → *Mount image
+     to drive*, and answer yes to open it.
+  3. Open `romfs`, press A on `CFL_Res.dat` and choose *Copy to 0:/gm9/out*.
+  4. On your PC the file is at `gm9/out/CFL_Res.dat` on the SD card; pass that
+     path (or a copy of the file) to `--cfl`.
+- About 40 GB free disk space and internet access for the first run.
+
+### Steps
+
+```sh
+git clone <this repository>
+cd MarioKartWii-3DS-Redux
+py -3 tools/build.py --disc "D:/Games/RMCE01.wbfs" --cfl "D:/CFL_Res.dat"
+```
+
+Use `python3` instead of `py -3` outside Windows. The first run takes an hour
+or more: it converts every course, kart, menu, movie and sound on the disc. It
+creates `.venv`, fetches the pinned converters from
+[dependencies.json](dependencies.json), extracts the disc, runs every
+conversion stage, compiles Citro3D, CFL and the game, and builds the HOME
+banner. Results land in `build/standard/output/`:
+
+- `MarioKartWii-3DS-Redux-v<version>.cia`: install it with FBI or another title installer;
+- `sd/3ds/mkw-3ds/`: copy the `sd/3ds` folder to the root of your SD card;
+- `mkw-3ds.3dsx`: the same game for the Homebrew Launcher.
+
+A stopped or failed run continues where it stopped when you run the same
+command again. After a code change only compiling and packaging run again.
+`--work DIR` puts everything somewhere else, `--jobs N` sets parallel
+converters, `--from STAGE` redoes a stage and all later ones
+(`--list-stages` shows them). Logs are in `build/standard/logs/`.
+
+## Building by hand
+
+The steps below are what `tools/build.py` automates, for developers who want
+to run a stage themselves. The linked references provide the conversion
+stages, source list and compiler settings.
 
 ### 1. Prepare the tools
 
@@ -131,8 +177,9 @@ After linking the ELF, create the homebrew executable:
 ### 5. Package a CIA, if needed
 
 Follow [HOME banner preparation](docs/HOME-BANNER.md) for the included artwork
-and the explicit extraction, scene and CGFX conversion stages. The approved
-banner audio is included; see that document for current verification limits. Prepare the SMDH and banner with bannertool. Copy
+and the explicit extraction, scene and CGFX conversion stages. Prepare the
+SMDH and banner with bannertool; `tools/build.py` then replaces the banner's
+sound with the game's Starting Grid jingle (`sound/strm/o_Start2_32_fan.brstm`). Copy
 [the RSF template](tools/release/mkw-3ds.rsf) to your working directory and
 remove its RomFs block for an external-SD build. Then invoke makerom with
 your compiled ELF and prepared HOME assets:

@@ -1,9 +1,10 @@
 # Manual build operations
 
-Version 0.8.14 / HW137. No operation below runs the next section. There is no
-build script, Makefile, CI job, download/bootstrap helper or resume driver.
-Examples are individual commands. Replace paths yourself and inspect output
-before proceeding. Keep inputs and outputs outside the publication tree.
+Version 0.8.14 / HW137. `tools/build.py` runs all of this in one command (see
+README.md, "Building"); this page describes the same stages for running them
+one at a time. No operation below runs the next section. Examples are
+individual commands. Replace paths yourself and inspect output before
+proceeding. Keep inputs and outputs outside the publication tree.
 
 ## 1. Obtain and install prerequisites yourself
 
