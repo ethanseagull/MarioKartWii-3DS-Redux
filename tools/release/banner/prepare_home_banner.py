@@ -91,7 +91,11 @@ def mesh(ni,folder,modelName,animated=False,translate=(0,0,0)):
    assert mat['texSrts'][1]['srtMtx']==mat['texSrts'][2]['srtMtx']
    p=local['p'][cursor:cursor+n]/100;normal=local['n'][cursor:cursor+n];js=local['j'][cursor:cursor+n]
   else:p=vs[:,:3]/100+translate;normal=vs[:,3:6];js=np.zeros(n,dtype=np.uint8)
-  rows=np.column_stack((p,normal,vs[:,6:8],env,ras,js)).astype('<f4');unique,indices=np.unique(rows,axis=0,return_inverse=True);idx=indices.reshape(-1,3)[:,[0,2,1]].ravel()
+  # The export's first UV pair follows the material's primary map (the kart's
+  # chrome environment map); the second is texture coordinate 0 with its SRT,
+  # which the base sampler uses (Mario's eye SRT doubles S so MIRROR draws both eyes).
+  assert all(s['texCoordId']==0 for s in mat['gxMaterial']['tevStages'] if s['texMap']==0)
+  rows=np.column_stack((p,normal,vs[:,8:10],env,ras,js)).astype('<f4');unique,indices=np.unique(rows,axis=0,return_inverse=True);idx=indices.reshape(-1,3)[:,[0,2,1]].ravel()
   uv0=unique[:,6:8].copy();uv0[:,1]=1-uv0[:,1]
   attrs=dict(POSITION=acc(unique[:,:3],'VEC3'),NORMAL=acc(unique[:,3:6],'VEC3'),TEXCOORD_0=acc(uv0,'VEC2'),TEXCOORD_1=acc(unique[:,8:10],'VEC2'),COLOR_0=acc(unique[:,10:14],'VEC4',5121))
   if animated:
