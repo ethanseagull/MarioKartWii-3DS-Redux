@@ -5,6 +5,10 @@ This source snapshot continues dudewhat's original Mario Kart Wii 3DS port
 and MiniBandit's continuation, with Redux development by epicreds. It does
 not carry the original repositories' commit history.
 
+This repository, github.com/ethanseagull/MarioKartWii-3DS-Redux, is
+ethanseagull's fork of the Redux snapshot (Epic0522/MarioKartWii-3DS-Redux,
+0.8.14). Its own changes are listed at the top of CHANGELOG.md.
+
 The inherited LICENSE grants MIT terms for MiniBandit's contributions.
 The inherited upstream notice states that dudewhat's original release did
 not include an explicit license; this snapshot does not expand that grant.
@@ -20,18 +24,21 @@ ogws and mkw decompilation references: CC0; see licenses/.
 CFL Mii rendering source: jamesrhg/cfl-mii, revision and local hashes in
 vendor/sources.lock.json; no explicit license was found in the bundled
 source or upstream repository root during the 2026-10-25 review.
-CFL-tool: separately acquired input, pinned in dependencies.json; its license
-terms also require clarification. No tool checkout or IconBody.iqm is shipped.
-pycgfx: separately acquired banner converter, pinned in dependencies.json;
-no explicit license file was found in the locally inspected pinned checkout.
-makerom, bannertool and the SDK are acquired separately under their own terms;
-this repository does not automatically download them.
+CFL-tool: pinned in dependencies.json and fetched from its upstream by
+tools/build.py at build time; its license terms also require clarification.
+No tool checkout or IconBody.iqm is shipped.
+pycgfx: banner converter, pinned in dependencies.json and fetched the same
+way; no explicit license file was found in the pinned checkout.
+makerom, bannertool, Node.js and ffmpeg are used under their own terms.
+tools/build.py downloads the versions pinned in
+tools/release/toolchain.lock.json from their publishers when they are not
+installed; none of them is shipped here. devkitPro is installed separately.
 
 Included artwork and excluded inputs
 ------------------------------------
 Mario Kart Wii and its artwork are copyright Nintendo. The repository
 contains eight inherited MK7 marker PNGs and the separately supplied HOME
-icon, logo and approved banner audio in tools/release/artwork/. These media
+icon, logo and earlier banner audio in tools/release/artwork/. These media
 assets are not covered by the MIT license. Inclusion here is not a grant of rights to Nintendo artwork.
 Game archives, banner CGFX models, native CFL_Res.dat, saves and compiled
 packages are not supplied. Builders must supply the game and system inputs.

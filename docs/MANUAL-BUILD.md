@@ -1,246 +1,174 @@
-# Manual build operations
+# Building by hand
 
-Version 0.8.14 / HW137. `tools/build.py` runs all of this in one command (see
-README.md, "Building"); this page describes the same stages for running them
-one at a time. No operation below runs the next section. Examples are
-individual commands. Replace paths yourself and inspect output before
-proceeding. Keep inputs and outputs outside the publication tree.
+`tools/build.py` runs every stage below, in this order (`--list-stages` prints
+it). This page is for understanding a stage or running one yourself.
 
-## 1. Obtain and install prerequisites yourself
+The converters write next to themselves, into `data/`, `assets/`, `build/`,
+`sd-card/` and `include/mkw/`. Run them on a copy of the tree, not your
+checkout: `tools/build.py` keeps that copy in `build/standard/source/`, and
+every command below runs from there. `{disc}` is your RMCE01 image, `{jobs}`
+the number of parallel jobs.
 
-Install devkitARM, libctru, picasso, 3dsxtool, tex3ds, Python, Node, ffmpeg and
-any converters you need. Install makerom/bannertool separately for CIA work.
-dependencies.json, vendor/sources.lock.json and
-tools/release/toolchain.lock.json pin the versions; tools/build.py downloads
-from them, nothing else here does.
-Patched Kinoko/Citro3D/CFL sources are bundled; preserve those patches.
-Acquire noclip, gclib and cfl-tool manually at the listed revisions, and apply
-the relevant patch files yourself. Then install the packages listed in
-package.json and requirements.txt using npm/pip yourself.
+## 1. Tools and converters
 
-## 2. Extract and convert resources one stage at a time
-
-Inspect tools/extract_disc.py for its file/target options and run it yourself
-for the desired source. Run tools/unpack_szs.py for each selected archive.
-tools/build.py holds the all-course and full-roster loops. import_courses.py now
-only contains KMP parsing helpers; cook_roster.py contains roster constants
-and table helpers, and cook_garage.py contains per-choice conversion helpers.
-The former batch main functions have been removed.
-
-Prepare each required offline exporter separately. For example:
+devkitARM, libctru, picasso, tex3ds, 3dsxtool, Python 3.11+, Node.js, Git,
+ffmpeg (with soxr), makerom, bannertool and a host C++23 compiler. The pinned
+versions are in `dependencies.json` (converters) and
+`tools/release/toolchain.lock.json` (host tools).
 
 ```sh
-node tools/bundle_cooker.mjs tools/export_brres.ts
+git clone https://github.com/magcius/noclip.website vendor/noclip      # then check out each pinned commit
+git clone https://github.com/LagoLunatic/gclib vendor/gclib
+git clone https://github.com/jamesrhg/cfl-tool vendor/cfl-tool
+git clone https://github.com/skyfloogle/pycgfx.git vendor/pycgfx
+git -C vendor/noclip apply --ignore-whitespace ../../patches/noclip-brres.patch
+python -m venv .venv && .venv/Scripts/python -m pip install -r requirements.txt
+npm ci --no-audit --no-fund
+node tools/bundle_cooker.mjs tools/export_brres.ts   # and every other tools/export_*.ts
 ```
 
-This bundles only the named helper; it does not import a course or compile
-the game. The BRRES material/parser adaptations in this helper are required.
-Choose export_driver.ts, export_joints.ts, export_star.ts and other exporters
-in separate invocations when you need them. No-argument bundling fails.
+Install the Python requirements after `vendor/gclib` exists; it is an editable
+dependency.
 
-Call the BRRES exporter with one archive/output/model, then run the model
-converter explicitly:
+## 2. Extract the disc
 
 ```sh
-node build/export_brres.mjs /external/source.brres /external/exported ModelName
-python3 tools/cook_model.py /external/exported /external/cooked --prefix model_name
+python tools/extract_disc.py {disc} data/extracted --prefix Race/ --prefix Scene/ --prefix thp/ --prefix sound/ --prefix Boot/ --prefix rel/ --prefix Mii/
 ```
 
-The latter is one format-conversion step and may invoke tex3ds for its model
-textures. It does not advance to another game-resource stage. Consult its
-CLI for options needed by the specific material. Existing archive/conversion
-helpers still use the historical data/assets/build/sd-card conventions; adapt
-paths deliberately rather than expecting a global orchestration layer.
+Then `tools/build.py` (`Builder.extract`):
 
-Call course-object/overlay converters with explicit --ids. Prepare each
-roster choice separately using the retained cook_garage.cook_choice helper,
-then explicitly write its roster/garage metadata. No tool schedules the full
-character/vehicle matrix. Mii outfits and team variants are separate work.
+- writes `build/original/main.dol` from the disc's data partition and copies
+  `rel/StaticR.rel` to `build/itembox-retail.rel`;
+- unpacks every `Scene/UI` and `Scene/Model` archive to `assets/menu-ui/` and
+  `assets/menu-models/`, `Race/Common.szs` to `assets/common/`, each course in
+  `tools/course_catalog.py` to `assets/courses/<key>/`, and `Race`, `Race_U`
+  and `Font` to `assets/race-ui/`;
+- moves course archives the catalog doesn't use to `data/extra-courses/`.
 
-Use MANUAL-RESOURCE-STAGES.md as a dependency/output reference for independent
-resource families. In particular:
+## 3. Convert the resources
 
-- Compile tools/menu_sprite_scales.cpp and its listed menu source dependencies
-  manually, then run that host utility explicitly to create
-  build/host-tools/sprite-scales.json before optimize_menu_textures.py. The
-  texture fitter no longer compiles or runs the measurement tool for you.
-- Run menu footer, cup-record icons, styles and animations separately after
-  the core menu UI conversion. cook_menu_ui.py no longer invokes them.
-- For default Mii portraits, extract RFLRes01.arc, unpack it, run cook_mii_bank,
-  compile the export_mii_head C++ utility yourself, and invoke the portrait
-  converter yourself. Copy the authored course assignments and matching
-  default portrait metadata to their required input paths manually.
-- After prepare_award_assets, separately run export_award_scene, then
-  cook_award_cameras, then cook_gp_rank.cook for the rank table.
-- generate_native_icon.py requires an already acquired pinned cfl-tool checkout.
-- Castle checkpoint boundaries and the approved triangle-mask table are
-  already bundled in include/mkw/castle_regions.hpp. Reuse them; normal
-  builds need no browser or visibility rebake. The existing runtime geometry
-  hashes keep the full mesh if a converted model does not match the policy.
-  Only developers intentionally changing the geometry/policy need the optional
-  browser bake; generate_castle_regions.py requires --output outside the
-  repository and cannot overwrite the approved header. That candidate must
-  be reviewed separately.
+The order matters where one stage reads another's output. The finish-line
+policy comes before the courses, the default Mii portraits before the course
+objects, all 42 courses before the course phase, road and lighting tables,
+all 288 driver/vehicle choices before the vehicle stages, and everything
+before the menu texture fit.
 
-tools/build.py ran this whole process from a fresh disc on 2026-11-01.
+| Stage | Command |
+| --- | --- |
+| startline | `generate_startline_policy.py` |
+| portraits | extract `contents/RFLRes01.arc`, `cook_mii_bank.py`, compile `tools/export_mii_head.cpp` with `src/mii_head.cpp` and `src/mii_part_bank.cpp`, then `cook_default_mii_portraits.py build/original/main.dol ... --statue-courses ...` |
+| courses | for each course: `node build/export_brres.mjs` on `course_model.brres` and `vrcorn_model.brres` (with `MKW_FREEZE_NONLINEAR_UV=1 MKW_COURSE_MATERIALS=1 MKW_RETAIL_LIGHTING=1`, plus `MKW_RETAIL_SKY=1` for the sky), `cook_model.cook`, a receipt in `models/courses/NN.json`; then `course-catalog.json` and `generate_runtime_tables.py catalog` |
+| garage | for each driver and vehicle: unpack `Race/Kart/<vehicle>-<driver>.szs`, `cook_garage.cook_choice`; then `garage.json`, `roster.json` and the native roster and garage headers |
+| objects | `cook_course_objects.py --ids 0..41 --jobs {jobs} --mii-heads assets/mii/course-portraits/assignments.json` |
+| course tables | `cook_course_lighting.py`, `cook_course_bloom.py`, `generate_course_phases.py`, `generate_road_policy.py` |
+| tables | `generate_runtime_tables.py math`, `generate_runtime_tables.py billboards`, `cook_gp_rank.py`, `cook_driver_look.py` |
+| menus, part 1 | `cook_menu_lighting.py`, `cook_menu_animations.py` |
+| battle | `cook_battle_menu_text.py`, `cook_battle_hud.py`, `cook_battle_hud_motion.py`, `cook_battle_bottom_scores.py`, `cook_battle_results.py`, `cook_battle_screens.py` |
+| race | `cook_race_intro.py`, `cook_mii_voice.py build/itembox-retail.rel`, `cook_audio.py`, `cook_race_items.py sd-card/3ds/mkw-3ds --disc {disc}`, `cook_race_flow.py`, `cook_race_balloon.py`, `cook_menu_mii_bodies.py`, `generate_native_icon.py` |
+| effects and objects | `cook_race_effects.py --course-only --output build/vfx/textures`, `cook_lakitu.py`, `cook_hanachan_joints.py`, `cook_pokey_joints.py`, `cook_object_sounds.py`, `cook_battle_balloons.py`, `cook_battle_coins.py`, `cook_battle_objects.py`, `cook_race_effects.py --balloon-only --output build/battle-balloon-effects/textures`, `cook_race_effects.py --coin-only --output build/battle-coin-effects/textures`, `cook_coin_hud_stack.py`, `cook_blast.py`, `cook_blooper.py`, `cook_luma.py`, `cook_coconut_objects.py`, `prepare_firebar_stream.py` |
+| native Mii resource | `stage_native_mii_resource.py <CFL_Res.dat>` |
+| star colors | `node build/export_star.mjs assets/common/driver.brres include/mkw/star_colors.hpp` |
+| awards | `prepare_award_assets.py {disc}`, `node build/export_award_scene.mjs build/award-source`, `cook_award_cameras.py`, `cook_award_drive.py`, `cook_award_lighting.py`, `cook_award_models.py --jobs {jobs}`, `cook_race_effects.py --award-source build/award-source --output build/vfx/textures` |
+| credits | `cook_staff_camera.py`, `generate_staff_crowd.py`, `cook_staff_ui.py --retail-rel build/itembox-retail.rel --output build/staff` |
+| maps | `cook_race_map.py --jobs {jobs}`, `cook_map_objects.py` |
+| menus, part 2 | `cook_menu_models.py --machines --jobs {jobs}`, `generate_runtime_tables.py audio`, `cook_menu_ui.py`, `cook_menu_footer.py`, `cook_menu_styles.py`, `cook_menu_record_text.py`, `cook_cup_record_icons.py`, `cook_menu_movies.py --jobs {jobs}`, `cook_menu_movie_chapters.py`, `cook_menu_audio.py`, `cook_staff_movies.py --output build/staff` |
+| Mii racers | `cook_mii_racers.py {disc} build/mii-racers --jobs {jobs}`, `finish_mii_racers.py {disc} build/mii-racers --jobs {jobs}`, `cook_mii_awards.py build/mii-racers` |
+| vehicles | `cook_vehicle_rest.py`, `cook_item_shadows.py`, `cook_driver_effects.py --jobs {jobs}`, `cook_vehicle_shadows.py --jobs {jobs}`, `cook_team_vehicles.py {disc} --jobs {jobs}`, `cook_racer_lod.py --output build/racer-lod --work build/racer-lod-cook`, `cook_vehicle_lod.py --disc {disc} --output build/racer-lod --work build/vehicle-lod-cook` |
+| textures | `cook_water_mipmaps.py`, `cook_world_mipmaps.py --jobs {jobs}`, `cook_battle_course_feedback.py` |
+| drift | `cook_effects.py assets/common/Effect/RKRace.breft sd-card/3ds/mkw-3ds/textures`, and again with `--bike` |
+| menu fit | compile `tools/menu_sprite_scales.cpp` with `src/menu_{ui,state,transition,focus,index,text_motion}.cpp`, run it to write `build/host-tools/sprite-scales.json`, then `optimize_menu_textures.py` |
 
-## 3. Organize existing runtime files and create archives explicitly
+Each command is `python tools/<script>` unless it starts with `node`.
+[MANUAL-RESOURCE-STAGES.md](MANUAL-RESOURCE-STAGES.md) lists each converter's
+inputs and outputs. The Bowser's Castle visibility table is already in
+`include/mkw/castle_regions.hpp`; a normal build needs no browser bake.
 
-The listing tool only reads existing resources and prints a path mapping:
+## 4. Generated headers
 
-```sh
-python3 tools/resource_manifest.py > /external/runtime-files.json
-```
+The conversions write the 66 headers listed in `config/generated-inputs.json`
+into `include/mkw/`. `tools/build.py` copies them to
+`build/standard/compile/generated/` and puts that directory on the include
+path after the tree's own `include/`, so the tree's headers always win.
 
-It does not create directories, copy resources, remove stale files, ZIP a
-package or invoke a conversion. Inspect the map and copy each selected file
-to its runtime-relative SD path manually, in the intended overlay precedence.
-Build the menu archive explicitly using pack_menu_assets.py once its inputs
-exist. Build the race archive from the explicit mapping:
+## 5. Shaders and libraries
 
-```sh
-python3 tools/pack_race_assets.py /external/runtime-files.json /external/race.pak --exclude-menu /external/menu.pak
-```
+The game's shader program is `src/mkw.v.pica`, `src/effect.v.pica` and a Mii
+variant that `mii_shader.variant` makes from `src/mkw.v.pica`, assembled in
+that order by picasso into `shader_data.hpp` (`mkw_shader`,
+`mkw_shader_size`). CFL's `vendor/cfl-mii/source/vshader.v.pica` becomes
+`vshader_shbin.h` (`vshader_shbin`, `vshader_shbin_size`).
 
-Apply pack_racer_lod.py and pack_mii_racers.py separately with explicit base,
-overlay and output paths. Race packing never auto-merges them. Keep .list
-files and other fopen-read metadata loose at their required runtime paths.
-Do not substitute archive presence for a resource-completeness check.
+`libcitro3d.a` is every `.c` under `vendor/citro3d/source`, this tree's
+patched copy (pipelined frames, texture unit 2 on coordinate 1). `libCFL.a`
+is `vendor/cfl-mii/source/cfl_mii.c`. Their flags are in
+[MANUAL-LIBRARY-FLAGS.json](MANUAL-LIBRARY-FLAGS.json).
 
-Once both archives are final, take the loose `models/` copies of packed
-entries out of the SD package. The game reads `.gmdl`, `.dskm` and `.dobj`
-from the archives first, and every extra file in `models/` slows each
-remaining loose open there on the console (it scans the folder entry by
-entry):
+## 6. The game
 
-```sh
-python3 tools/slim_sd_models.py /external/sd/3ds/mkw-3ds --move-to /external/models-duplicates
-```
-
-Without `--move-to` it only reports what it would move.
-
-Opponents can load compact driver animation banks (`.dsku`, 40% smaller;
-only the normal matrices they never read are dropped). Add them to the final
-race archive:
-
-```sh
-python3 tools/pack_unlit_banks.py /external/race.pak /external/race-unlit.pak
-```
-
-Every original entry is copied unchanged; `--check` only verifies the round
-trip. The player and the award ceremony keep using the full `.dskm` banks.
-
-## 4. Prepare external compile inputs and shaders
-
-The castle policy is already included source configuration. Produce the
-remaining 66 headers declared by config/generated-inputs.json through their
-individual resource converters. Move/copy them outside the repository yourself
-(or explicitly invoke collect_generated.py as a file-collection operation).
-Select that include path yourself; there is no .local/build.json or environment
-path-selection helper. Never compile against an accidental mixture of outputs.
-
-Generate the Mii shader variant with the retained mii_shader.variant function;
-shader_outputs.check validates a shader without compiling it. The effect shader
-is already authored as src/effect.v.pica.
-The production program combines src/mkw.v.pica, src/effect.v.pica and the Mii
-variant in that order using picasso. Manually invoke picasso, then explicitly
-turn the resulting bytes into shader_data.hpp's mkw_shader array. CFL likewise
-needs its source/vshader.v.pica compiled and vshader_shbin.h prepared with
-vshader_shbin and vshader_shbin_size. These small binary-to-C conversions are
-manual steps; they are not triggered by game compilation.
-
-## 5. Compile libraries, then compile each program source yourself
-
-Use these architecture/code-generation flags consistently:
+Compile every file in [MANUAL-PROGRAM-SOURCES.txt](MANUAL-PROGRAM-SOURCES.txt)
+with `arm-none-eabi-g++` and:
 
 ```text
 -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft -O2 -g
 -mword-relocations -ffunction-sections -fdata-sections -ffp-contract=off
-```
-
-For the app add:
-
-```text
 -std=gnu++23 -D__3DS__ -DREVOLUTION -DMKW_RELEASE -DKINOKO_QUIET
 -fno-exceptions -fno-rtti -fcheck-new -fno-strict-aliasing
+-ffile-prefix-map=<source root>/=
 ```
 
-Supply explicit -I paths for vendor/kinoko/include, vendor/kinoko/source,
-include, your external generated header root, vendor/cfl-mii/include,
-vendor/citro3d/include, libctru/include and your shader header output directory.
-Use -ffile-prefix-map=<absolute-source-root>/= for release path removal.
-Do not define MKW_FRAME_CAPTURE in the normal release.
+Include paths, in order: the shader header directory, `vendor/kinoko/include`,
+`vendor/kinoko/source`, `include`, `vendor/cfl-mii/include`,
+`vendor/citro3d/include`, `libctru/include`, the generated headers. Kinoko's
+`.cc` files also get `-flto=auto`. Don't use fast-math or `MKW_FRAME_CAPTURE`.
 
-Compile every Citro3D source individually with the appropriate __3DS__ and
-include settings, then invoke arm-none-eabi-ar to create libcitro3d.a.
-Compile cfl_mii.c with its generated shader header, then archive libCFL.a.
-The exact reference library flags are in MANUAL-LIBRARY-FLAGS.json; replace
-placeholder include paths manually. It is a reference, not an executable recipe.
+Link with the same architecture flags, `-flto=auto -specs=3dsx.specs
+-Wl,--gc-sections`, the objects, `libCFL.a`, `libcitro3d.a` and
+`-L<libctru/lib> -lctru -lm`, wrapping `linearAlloc`, `linearMemAlign`,
+`linearRealloc`, `linearGetSize`, `linearFree`, `linearSpaceFree` and `fopen`
+with `-Wl,--wrap=<name>`. Then
+`3dsxtool mkw-3ds.elf mkw-3ds.3dsx --smdh=icon.icn`.
 
-MANUAL-PROGRAM-SOURCES.txt lists the 279 translation units. Manually
-compile one source at a time with arm-none-eabi-g++; retain its relative object
-path. Kinoko .cc files additionally use -flto=auto; application .cpp files do
-not. Do not use fast-math. Example shape (fill the flags/include paths above):
+## 7. Packs and the SD folder
 
 ```sh
-arm-none-eabi-g++ <flags> <include-paths> -c src/animation.cpp -o /external/objects/animation.o
+python tools/pack_menu_assets.py
+python tools/resource_manifest.py > runtime-files.json
+python tools/pack_race_assets.py runtime-files.json race-base.pak --exclude-menu sd-card/3ds/mkw-3ds/menu.pak
+python tools/pack_racer_lod.py --base race-base.pak --overlay build/racer-lod --output race-lod.pak
+python tools/pack_mii_racers.py --base race-lod.pak --overlay build/mii-racers --output race-mii.pak
+python tools/pack_unlit_banks.py race-mii.pak race.pak
 ```
 
-Construct the object list yourself and link with the same architecture flags,
--flto=auto, -specs=3dsx.specs, -Wl,--gc-sections, the explicit objects,
-libCFL.a, libcitro3d.a, -L<libctru/lib> -lctru -lm. Add these wrapper options:
+`resource_manifest.py` lists every runtime file with its source; it expects
+`build/mkw-3ds.3dsx` to exist. `pack_unlit_banks.py` adds compact `.dsku`
+opponent animation banks (about 40% smaller). Every other entry is copied
+unchanged, and the player and the award ceremony keep the full `.dskm`.
 
-```text
--Wl,--wrap=linearAlloc -Wl,--wrap=linearMemAlign -Wl,--wrap=linearRealloc
--Wl,--wrap=linearGetSize -Wl,--wrap=linearFree -Wl,--wrap=linearSpaceFree
--Wl,--wrap=fopen
-```
+The SD folder is `menu.pak`, `race.pak` and every file in the map that
+neither pack holds. Keep packed models out of `models/`: the game reads them
+from the packs, and every extra file in that folder slows the remaining
+loose opens on the console. `slim_sd_models.py <sd folder>` reports any that
+are left, and `--move-to DIR` moves them off an existing card.
 
-Run arm-none-eabi-size yourself, then separately convert the ELF:
+## 8. HOME banner and CIA
+
+[HOME-BANNER.md](HOME-BANNER.md) covers the banner model, icon and sound.
+
+For the CIA, remove the `RomFs` block from a copy of
+`tools/release/mkw-3ds.rsf` (an empty embedded RomFS would hide the SD data),
+then:
 
 ```sh
-3dsxtool /external/mkw-3ds.elf /external/mkw-3ds.3dsx
+makerom -f cia -target t -exefslogo -elf mkw-3ds.elf -rsf external-sd.rsf -icon icon.icn -banner banner-startgrid.bnr -ver 142 -DAPP_REMASTER=0 -o MarioKartWii-3DS-Redux-v0.8.14.cia
 ```
 
-tools/build.py compiles and links exactly this list with these flags.
+The title version is `major << 10 | minor << 4 | micro`, so 0.8.14 is 142.
+Some makerom builds write 14 instead because of an internal macro clash;
+`tools/build.py` corrects the Ticket and TMD version fields, then checks
+every TMD and content hash (`check_cia`).
 
-## 6. Create HOME assets and CIA manually
+## Probes
 
-The icon, logo PNGs and banner sound are supplied in tools/release/artwork/.
-Generate the main banner model from your own disc.
-Banner-only tools are allowed; see HOME-BANNER.md for the explicit extraction,
-scene and CGFX stages, audio packaging and verification status. Invoke
-bannertool individually to create the SMDH, banner and required audio formats;
-use the installed bannertool's own help for the corresponding operation.
-
-Copy tools/release/mkw-3ds.rsf to an external working directory. Set its fields
-and version deliberately. For an external-SD title remove the RomFs block
-from that working copy. Preserve the hardware/access flags needed by this port.
-Then call your installed makerom yourself with the ELF, edited RSF, icon,
-banner, title version and output path. The template's APP_REMASTER (and
-APP_ROMFS if retained) must be provided explicitly. No prebuilt CGFX is
-supplied. tools/build.py does all of this section (title version from VERSION,
-Ticket/TMD check included).
-
-An external-SD HW137 example, after preparing all inputs yourself:
-
-```sh
-makerom -f cia -target t -exefslogo -elf /external/mkw-3ds.elf -rsf /external/external-sd.rsf -icon /external/icon.icn -banner /external/banner.bnr -ver 142 -DAPP_REMASTER=0 -o /external/MKW-3DS-v0.8.14.cia
-```
-
-The title version is major << 10 | minor << 4 | micro: 0.8.14 packs as 142.
-This external-SD RSF must have its RomFs block removed; mounting
-an empty embedded RomFS would hide the game's SD resource path.
-
-Some makerom builds use an internal version macro that conflicts with the
-requested title version. Inspect the final CIA's actual Ticket/TMD version
-and content; for 0.8.14 the title version must be 142. A successful makerom exit does not
-establish correct versioning or gameplay. Copy resources to SD and preserve
-your own saves.
-
-## Explicit diagnostic probes
-
-C++ probe sources remain under tools/ and tools/tests/. Python probe helpers
-may emit their fixture source, but require a separately compiled executable;
-they never invoke a host compiler. Compile each probe manually before asking
-its helper to execute it. These are optional checks, not a game-build stage.
+C++ probe sources are in `tools/` and `tools/tests/`. Compile one before
+running its Python helper. They are optional checks, not part of the build.

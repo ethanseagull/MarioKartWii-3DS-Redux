@@ -1,5 +1,39 @@
 # Changelog
 
+## This fork, after 0.8.14
+
+Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.8.14.
+
+# Performance (New 3DS)
+
+- Pipelined race frames: the CPU builds the next frame while the GPU draws the last one.
+- Merged the bloom composite into one pass and moved texture unit 2 to coordinate 1.
+- Skipped the bottom-screen background fill where the map covers it.
+- Limited shadow-volume shading to each shadow's screen rectangle.
+- Moved the player's racer textures to VRAM ahead of the course's.
+- Added the Wii's per-object draw distance for course objects.
+- Drew course triangles in spatial order so culling blocks are compact.
+- Drew the sky after the track's opaque surfaces instead of first.
+- Loaded the position, item frame and lap HUD textures at half size.
+- Kept Lakitu's joints, the pack indexes, course part lists and the last license cached instead of reloading them every race.
+- Opponents load compact animation banks (`.dsku`), about 40% smaller.
+- Sped up menu text animation by caching its results.
+
+# Fixes
+
+- Award ceremonies no longer fail at the driving scene: its effect bank is now cooked.
+- The select and controller sounds no longer play a semitone flat.
+- R tricks off boost ramps, half-pipes and zippers, not only trick surfaces.
+- HOME banner: Mario has both eyes and the kart's textures are on the right parts.
+
+# Building
+
+- `tools/build.py` builds the CIA and SD folder from your disc in one command, downloading the pinned converters and tools it needs.
+- The HOME banner plays the game's Starting Grid jingle.
+- The SD folder no longer holds loose copies of models that are already packed.
+- Windows path, menu movie and menu texture fixes in the packaging tools.
+- A diagnostic build with per-race profiling and an unattended 32-course benchmark (`tools/diag`).
+
 ## Cumulative changes through 0.8.14 / HW137
 
 This list covers the changes retained on top of the existing port, consolidates repeated revisions, excludes withdrawn experiments, packaging-only iterations and unfinished investigations, and does not claim complete parity with the Wii original.
