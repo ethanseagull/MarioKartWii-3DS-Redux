@@ -105,6 +105,29 @@ overlay and output paths. Race packing never auto-merges them. Keep .list
 files and other fopen-read metadata loose at their required runtime paths.
 Do not substitute archive presence for a resource-completeness check.
 
+Once both archives are final, take the loose `models/` copies of packed
+entries out of the SD package. The game reads `.gmdl`, `.dskm` and `.dobj`
+from the archives first, and every extra file in `models/` slows each
+remaining loose open there on the console (it scans the folder entry by
+entry):
+
+```sh
+python3 tools/slim_sd_models.py /external/sd/3ds/mkw-3ds --move-to /external/models-duplicates
+```
+
+Without `--move-to` it only reports what it would move.
+
+Opponents can load compact driver animation banks (`.dsku`, 40% smaller;
+only the normal matrices they never read are dropped). Add them to the final
+race archive:
+
+```sh
+python3 tools/pack_unlit_banks.py /external/race.pak /external/race-unlit.pak
+```
+
+Every original entry is copied unchanged; `--check` only verifies the round
+trip. The player and the award ceremony keep using the full `.dskm` banks.
+
 ## 4. Prepare external compile inputs and shaders
 
 The castle policy is already included source configuration. Produce the
