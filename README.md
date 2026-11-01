@@ -54,7 +54,8 @@ with your package manager and use `python3` instead of `py -3`.
 Node.js, ffmpeg, makerom and bannertool are used from `PATH` if you have
 them. Otherwise the build downloads the versions pinned in
 [tools/release/toolchain.lock.json](tools/release/toolchain.lock.json) and
-checks their SHA-256. Node and ffmpeg are only downloaded on Windows.
+checks their SHA-256. Node and ffmpeg are only downloaded on Windows. ffmpeg
+needs the soxr resampler, which most builds have.
 
 ### Copy CFL_Res.dat from your 3DS
 

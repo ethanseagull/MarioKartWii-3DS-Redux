@@ -20,7 +20,7 @@ A stopped or failed build resumes at the first unfinished stage. --from STAGE
 runs that stage and every later one again (--list-stages shows the order).
 The disc and CFL_Res.dat are only read.
 """
-import argparse, hashlib, json, os, platform, shutil, struct, subprocess, sys, tarfile, time, urllib.request, zipfile
+import argparse, hashlib, json, os, platform, shutil, struct, subprocess, sys, time, urllib.request, zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -151,8 +151,10 @@ def download(url, sha256, cache):
     return target
 
 
-def unpack_archive(archive, folder):
-    """Unpack a downloaded tool archive, refusing paths that leave the folder."""
+def unpack_archive(archive, folder, member=None):
+    """Unpack a downloaded tool archive, refusing paths that leave the folder.
+    A .7z (only the Windows ffmpeg) goes through Windows' own tar, which
+    reads 7-Zip; just its one member is extracted."""
     folder = folder.resolve()
     stamp = folder / '.archive-sha256'
     if stamp.is_file() and stamp.read_text() == digest(archive):
@@ -168,10 +170,19 @@ def unpack_archive(archive, folder):
                     raise BuildError(f'Unsafe path in {archive.name}: {item.filename}')
             z.extractall(folder)
     else:
-        with tarfile.open(archive) as t:
-            t.extractall(folder, filter='data')
+        tar = Path(os.environ.get('SystemRoot', 'C:/Windows')) / 'System32/tar.exe'
+        done = subprocess.run([str(tar), '-xf', str(archive), '-C', str(folder), member], capture_output=True, text=True)
+        if done.returncode or not (folder / member).is_file():
+            raise BuildError(f'Could not unpack {archive.name} ({done.stderr.strip()}). '
+                             'Install ffmpeg yourself (winget install Gyan.FFmpeg) and run the build again.')
     stamp.write_text(digest(archive))
     return folder
+
+
+def has_soxr(ffmpeg):
+    """The banner sound is resampled with soxr, which minimal ffmpeg builds leave out."""
+    conf = subprocess.run([ffmpeg, '-hide_banner', '-buildconf'], capture_output=True, text=True)
+    return 'libsoxr' in conf.stdout + conf.stderr
 
 
 def provision(work, sdk):
@@ -187,7 +198,7 @@ def provision(work, sdk):
     def pinned(name, entry, member):
         if not entry:
             raise BuildError(f'{name} is not on PATH and has no pinned download for {key}; install it.')
-        folder = unpack_archive(download(entry['url'], entry['sha256'], cache), tools / name)
+        folder = unpack_archive(download(entry['url'], entry['sha256'], cache), tools / name, member)
         path = folder / member
         if os.name != 'nt':
             path.chmod(0o755)
@@ -195,6 +206,11 @@ def provision(work, sdk):
 
     for name in ('makerom', 'bannertool', 'ffmpeg', 'node'):
         exe = os.environ.get(name.upper()) or shutil.which(name)
+        if exe and name == 'ffmpeg' and not has_soxr(exe):
+            if key != 'windows-x86_64':
+                raise BuildError(f'{exe} was built without libsoxr; install an ffmpeg with soxr (most distribution and Homebrew builds have it).')
+            log(f'{exe} has no soxr resampler; using the pinned ffmpeg instead')
+            exe = None
         if exe:
             found[name] = exe
         elif name == 'bannertool':
