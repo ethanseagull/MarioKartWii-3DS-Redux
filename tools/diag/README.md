@@ -5,34 +5,34 @@ profiling (`MKW_AUTO_PROFILE`, no `MKW_RELEASE`). It is packaged as its own
 title, `000400000F4B5D00` "MKW3DSDIAG", so it installs beside the release CIA
 and shares its SD data (`sd:/3ds/mkw-3ds/`).
 
+For developers measuring performance. To play the game, build the standard
+version with `tools/build.py` (see the main README).
+
 ## Inputs
 
-The manual build (`docs/MANUAL-BUILD.md`) produces the generated headers and
-libraries from your own disc. None of them are in this repository.
+Run `tools/build.py` once first. These scripts reuse its work directory
+(`MKW_WORK`, default `build/standard`): the libraries, shaders and generated
+headers in `compile/`, the HOME banner in `home-banner/production/` and the
+makerom it found or downloaded. Nothing else outside this repository is read.
 
 | Variable | Contents |
 | --- | --- |
-| `MKW_GENERATED` | generated headers, `libCFL.a` and the unpatched `libcitro3d.a` |
-| `MKW_GENERATED_INCLUDE` | directory holding the generated `mkw/*.hpp` tables (default `MKW_GENERATED`) |
+| `MKW_WORK` | the standard build's work directory (default `build/standard`) |
 | `DEVKITPRO` | devkitPro root (falls back to `C:/devkitPro`, `/opt/devkitpro`) |
-| `MKW_BANNER_WORK` | banner work directory (`docs/HOME-BANNER.md`) |
-| `MKW_EXTRACTED` | extracted disc files (default `data/extracted`) |
-| `MAKEROM`, `BANNERTOOL` | tool paths when they are not on `PATH`; `ffmpeg` must be on `PATH` |
+| `MKW_BANNER` | another banner instead of the standard build's |
+| `MAKEROM` | makerom, when it is neither on `PATH` nor in the standard build |
 
 ## Build
 
 ```sh
 python tools/diag/compile.py       # build/diag/mkw-3ds-diag.elf
-python tools/diag/make_banner.py   # build/banner/banner-startgrid.bnr
 python tools/diag/package_cia.py   # build/diag/...-DIAG.cia
 ```
 
-`compile.py` recompiles only changed translation units. It rebuilds
-`libcitro3d.a` from the manual build's archive with this tree's patched
-members (`framebuffer.c`, `renderqueue.c`, `texunit.c`: pipelined frames and
-texture unit 2 on coordinate 1). `package_cia.py` forces title version 142,
-verifies every TMD hash, and writes `build-info.json` with the commit and
-hashes.
+`compile.py` recompiles only changed translation units and links against the
+standard build's `libcitro3d.a` and `libCFL.a`. `package_cia.py` forces title
+version 142, verifies every TMD hash, and writes `build-info.json` with the
+commit and hashes.
 
 ## Unattended benchmark (32 courses)
 

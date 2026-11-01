@@ -6,8 +6,9 @@ build/diag/mkw-3ds-diag.elf -> build/diag/MarioKartWii-3DS-Redux-v<VERSION>-DIAG
 title 000400000F4B5D00 "MKW3DSDIAG". It installs beside the release title and
 shares its SD data.
 
-The banner is build/banner/banner-startgrid.bnr (tools/diag/make_banner.py)
-unless MKW_BANNER names another. makerom comes from MAKEROM or PATH.
+The banner is the standard build's (tools/build.py; MKW_WORK, default
+build/standard) home-banner/production/banner-startgrid.bnr unless
+MKW_BANNER names another. makerom comes from MAKEROM, PATH or the standard build.
 Same makerom invocation and Ticket/TMD checks as the release package: the
 title version is forced to 142 and every content hash is verified.
 """
@@ -19,8 +20,11 @@ HERE = Path(__file__).resolve().parent
 OUT = ROOT / 'build/diag'
 ELF = OUT / 'mkw-3ds-diag.elf'
 TITLE = '000400000F4B5D00'
-BANNER = Path(os.environ.get('MKW_BANNER', ROOT / 'build/banner/banner-startgrid.bnr'))
-MAKEROM = os.environ.get('MAKEROM') or shutil.which('makerom') or 'makerom'
+WORK = Path(os.environ.get('MKW_WORK', ROOT / 'build/standard'))
+BANNER = Path(os.environ.get('MKW_BANNER', WORK / 'home-banner/production/banner-startgrid.bnr'))
+# tools/build.py records the makerom it found or downloaded.
+MAKEROM = (os.environ.get('MAKEROM') or shutil.which('makerom')
+           or ((WORK / 'tools.json').is_file() and json.loads((WORK / 'tools.json').read_text()).get('makerom')) or 'makerom')
 VERSION = (ROOT / 'VERSION').read_text().strip()
 TITLE_VERSION = 142
 
@@ -37,7 +41,7 @@ def main():
     if not ELF.is_file():
         raise SystemExit(f'{ELF} missing: run tools/diag/compile.py first.')
     if not BANNER.is_file():
-        raise SystemExit(f'{BANNER} missing: run tools/diag/make_banner.py or set MKW_BANNER.')
+        raise SystemExit(f'{BANNER} missing: run tools/build.py first or set MKW_BANNER.')
     cia = OUT / f'MarioKartWii-3DS-Redux-v{VERSION}-DIAG.cia'
     subprocess.run([MAKEROM, '-f', 'cia', '-target', 't', '-exefslogo', '-elf', str(ELF),
                     '-rsf', str(HERE / 'package/diag-external-sd.rsf'), '-icon', str(HERE / 'package/icon-diag.icn'),
