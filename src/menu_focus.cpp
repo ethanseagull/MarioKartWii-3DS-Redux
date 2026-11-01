@@ -1,4 +1,5 @@
 #include <mkw/menu_focus.hpp>
+#include <mkw/diag.hpp>
 #include <mkw/menu_ui.hpp>
 #include <mkw/menu_transition.hpp>
 #include <mkw/menu_animations.hpp>
@@ -153,7 +154,7 @@ void uiFocusMainConfirm(MenuState& state,unsigned slot){
  if(state.focus.page!=unsigned(state.page)||state.focus.cursor!=state.cursor)uiFocusReset(state);
  state.focus.mainConfirmSlot=slot;state.focus.mainConfirmFrame=0;
 }
-UiFocusView uiFocusAnimation(const MenuState& state,unsigned slot){
+UiFocusView uiFocusAnimation(const MenuState& state,unsigned slot){diag::ComposeTimer diagTimer_(21);
  UiFocusView view;view.control=uiFocusControlName(state,slot);if(slot>=UiFocusControlCount)return view;
  view.selected=selected(state,state.cursor,slot);
  if(state.focus.page==unsigned(state.page)&&state.focus.cursor==state.cursor){

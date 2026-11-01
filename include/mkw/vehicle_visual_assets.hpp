@@ -18,6 +18,8 @@ struct VehicleVisualAssets {
  std::array<std::unique_ptr<DriverAnimation>,9> extraAnimation;
  // Worker-safe transaction: missing required parts leave the current set intact.
  // Replacing an already rendered set requires a GPU drain by the caller.
- bool load(unsigned character,unsigned vehicle,RaceTeam team,std::string* failure=nullptr);
+ // unlitBanks (opponents, DIAG): the driver bank comes from its compact .dsku
+ // when race.pak has one (tools/pack_unlit_banks.py), else the .dskm.
+ bool load(unsigned character,unsigned vehicle,RaceTeam team,std::string* failure=nullptr,bool unlitBanks=false);
 };
 }

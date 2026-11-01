@@ -4,7 +4,9 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <atomic>
 
+namespace mkw {extern std::atomic<unsigned long long> packReadBytes,packReadTicks;}
 namespace mkw::pack {
 namespace {
 struct Entry {std::uint32_t name,offset,size;};
@@ -56,13 +58,17 @@ long size(const char* path){auto& all=archives();LightLock_Lock(&all.lock);const
 bool readInto(const char* path,void* destination,size_t bytes){
  auto& all=archives();LightLock_Lock(&all.lock);
  const Entry* e=nullptr;Archive* a=lookup(all,path,&e);
+ const auto start=svcGetSystemTick();
  const bool ok=a&&e->size==bytes&&std::fseek(a->file,long(e->offset),SEEK_SET)==0&&std::fread(destination,1,bytes,a->file)==bytes;
+ if(a){packReadBytes.fetch_add(bytes,std::memory_order_relaxed);packReadTicks.fetch_add(svcGetSystemTick()-start,std::memory_order_relaxed);}
  LightLock_Unlock(&all.lock);return ok;
 }
 bool readRange(const char* path,size_t offset,void* destination,size_t bytes){
  auto& all=archives();LightLock_Lock(&all.lock);
  const Entry* e=nullptr;Archive* a=lookup(all,path,&e);
+ const auto start=svcGetSystemTick();
  const bool ok=a&&offset<=e->size&&bytes<=e->size-offset&&std::fseek(a->file,long(e->offset+offset),SEEK_SET)==0&&std::fread(destination,1,bytes,a->file)==bytes;
+ if(a){packReadBytes.fetch_add(bytes,std::memory_order_relaxed);packReadTicks.fetch_add(svcGetSystemTick()-start,std::memory_order_relaxed);}
  LightLock_Unlock(&all.lock);return ok;
 }
 bool read(const char* path,std::vector<uint8_t>& out){

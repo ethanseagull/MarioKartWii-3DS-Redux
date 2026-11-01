@@ -58,10 +58,13 @@ void Renderer::setRetailLighting(const CourseLighting* course,bool fixedLightTex
     // Light textures and the fog ramp belong to the drawing side.
     drain();
     retail_=course;fixedLightTextures_=fixedLightTextures;retailTexturesValid_=false;lightTextureAppliedTick_=~0u;
+    for(unsigned which=0;which<2;++which)retailTextureCurrent_[which]=retailTextureAltCurrent_[which]=false;
     retailFog_[7]=-1.f;
     if(!course)return;
     for(unsigned which=0;which<2;++which)retailTextureDynamic_[which]=retailLightTextureDynamic(*course,which);
-    for(auto* pair:{retailTexture_,fixedRetailTexture_})for(unsigned index=0;index<2;++index){auto& t=pair[index];
+    // Pipelined frames alternate two copies of the sampled light textures.
+    C3D_Tex* none=nullptr;
+    for(auto* pair:{retailTexture_,fixedRetailTexture_,pipelineFrames?retailTextureAlt_:none})if(pair)for(unsigned index=0;index<2;++index){auto& t=pair[index];
         if(t.data)continue;
         if(!C3D_TexInit(&t,LightTextureSize,LightTextureSize,GPU_RGBA8)){retail_=nullptr;return;}
         // CapTexture: bilinear, clamped (LightTexture::configure).
@@ -82,7 +85,7 @@ void Renderer::retailFogNow(const RetailFog& fog){
 }
 
 void Renderer::retailShutdown(){
-    for(auto* pair:{retailTexture_,fixedRetailTexture_})for(unsigned i=0;i<2;++i){auto& t=pair[i];if(t.data)C3D_TexDelete(&t);t={};}
+    for(auto* pair:{retailTexture_,fixedRetailTexture_,retailTextureAlt_})for(unsigned i=0;i<2;++i){auto& t=pair[i];if(t.data)C3D_TexDelete(&t);t={};}
     if(retailFogRamp_.data)C3D_TexDelete(&retailFogRamp_);
     retailFogRamp_={};retail_=nullptr;retailTexturesValid_=false;
 }
@@ -121,6 +124,8 @@ void Renderer::retailBeginFrame(){
         directions=textureDirections;
     }
     if(!retailTexturesValid_){
+        // One copy of the fixed maps: the previous frame finishes first.
+        C3D_FrameWaitPrevious();
         Vec3 fixed[16];const float identity[3][3]={{1,0,0},{0,1,0},{0,0,1}};
         for(unsigned i=0;i<16;++i)fixed[i]=retailLightViewDirection(retail_->lights[i],identity);
         for(unsigned which=0;which<2;++which){uint8_t rgba[32*32*4];retailLightTexture(*retail_,which,fixed,rgba);
@@ -154,14 +159,23 @@ void Renderer::retailBeginFrame(){
         auto* out=static_cast<uint8_t*>(retailTexture_[which].data);
         blendLightTexture32(out,lightTextureFrom_[which],lightTextureTo_[which],blendTick);
         C3D_TexFlush(&retailTexture_[which]);
+        retailTextureCurrent_[which]=true;retailTextureAltCurrent_[which]=false;
     }
     lightTextureAppliedTick_=execFrame_;
+    }
+    // Pipelined frames: this frame's copy takes the latest contents when the
+    // last write went to the other copy.
+    for(unsigned which=0;which<2;++which)if(!retailTextureCurrent_[which]&&retailTextureAltCurrent_[which]){
+        std::memcpy(retailTexture_[which].data,retailTextureAlt_[which].data,retailTexture_[which].size);
+        C3D_TexFlush(&retailTexture_[which]);retailTextureCurrent_[which]=true;
     }
     retailTexturesValid_=true;
     // GX fog: ramp of the fog function over eye depth normalized to
     // [start,end] (texel x holds f(x/127); u = (127*ze + 0.5)/128).
     const unsigned type=unsigned(retailFog_[0])&7;
     if(retailFog_[7]!=float(type)){
+        // One fog ramp: the previous frame finishes first.
+        C3D_FrameWaitPrevious();
         auto* out=static_cast<uint8_t*>(retailFogRamp_.data);
         for(unsigned y=0;y<FogRampHeight;++y)for(unsigned x=0;x<FogRampWidth;++x)
             out[tiled(x,y,FogRampWidth)]=uint8_t(std::lround(std::clamp(retailFogFactor(type,float(x)/float(FogRampWidth-1)),0.f,1.f)*255.f));

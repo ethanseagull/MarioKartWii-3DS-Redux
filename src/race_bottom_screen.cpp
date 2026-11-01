@@ -511,9 +511,14 @@ void RaceBottomScreen::draw(Renderer& renderer,const BottomView& view){
     const unsigned scoreCount=m.count-scoreFirst,fadeFirst=m.count;
     if(view.fade>0)m.add(RaceMapWhite,0,0,ScreenW,ScreenH,uint32_t(std::lround(view.fade*255.f)));
     // NW4R default material: lerp(C0 = transparent black, C1 = white, texture) x vertex colour.
-    if(atlas&&fills)renderer.drawScreenMaterialQuadsInPlace(&m.atlas,m.base,fills,0x00000000u,0xffffffffu);
-    if(!atlas)renderer.drawScreenMaterialQuadsInPlace(nullptr,m.base,fills,0,0xffffffffu);
-    if(mapCount)renderer.drawScreenMaterialQuadsInPlace(mapTexture,m.base+mapFirst,mapCount,0x00000000u,0xffffffffu);
+    // The full-screen map hides the fill and the clear, and needs no blend:
+    // race maps and overviews are ETC1 (no alpha), drawn in white. Battle
+    // maps are RGBA4 and keep all three.
+    const bool covered=skipCoveredFill&&mapCount&&m.course<32;
+    if(atlas&&fills&&!covered)renderer.drawScreenMaterialQuadsInPlace(&m.atlas,m.base,fills,0x00000000u,0xffffffffu);
+    if(!atlas&&!covered)renderer.drawScreenMaterialQuadsInPlace(nullptr,m.base,fills,0,0xffffffffu);
+    if(mapCount)renderer.drawScreenMaterialQuadsInPlace(mapTexture,m.base+mapFirst,mapCount,0x00000000u,0xffffffffu,covered);
+    if(covered)renderer.bottomCovered();
     if(objectCount)renderer.drawScreenMaterialQuadsInPlace(&m.objects,m.base+objectFirst,objectCount,0x00000000u,0xffffffffu);
     if(overlayCount)renderer.drawScreenMaterialQuadsInPlace(&m.atlas,m.base+overlayFirst,overlayCount,0x00000000u,0xffffffffu);
     if(m.miiMap)renderer.drawScreenMaterialQuadsInPlace(&m.mii,&m.miiQuads[view.tick&1][0],1,0,0xffffffffu);

@@ -2,9 +2,10 @@
 #include <mkw/mii_garage.hpp>
 #include <cstdio>
 #include <cstring>
+#include <mkw/asset_pack.hpp>
 
 namespace mkw {
-bool VehicleVisualAssets::load(unsigned character,unsigned vehicle,RaceTeam team,std::string* failure){
+bool VehicleVisualAssets::load(unsigned character,unsigned vehicle,RaceTeam team,std::string* failure,bool unlitBanks){
  VehicleVisualAssets next;
  if(failure)*failure="vehicle selection";
  for(const auto& entry:GarageChoices)
@@ -23,7 +24,10 @@ bool VehicleVisualAssets::load(unsigned character,unsigned vehicle,RaceTeam team
  };
  auto bank=[&](const char* part,Model& mesh,std::unique_ptr<DriverAnimation>& destination){
   const auto name=path(part,"dskm");if(failure)*failure=name;
-  auto asset=std::make_unique<DriverAnimation>();if(!asset->load(name.c_str(),mesh))return false;
+  auto asset=std::make_unique<DriverAnimation>();
+  const auto compact=path(part,"dsku");
+  const bool loaded=(unlitBanks&&!std::strcmp(part,"driver")&&pack::contains(compact.c_str())&&asset->load(compact.c_str(),mesh))||asset->load(name.c_str(),mesh);
+  if(!loaded)return false;
   asset->prepareLitSkinning(mesh);destination=std::move(asset);return true;
  };
  if(!model("body",next.body)||!model("driver",next.driver)||!model("shadow",next.shadow)||

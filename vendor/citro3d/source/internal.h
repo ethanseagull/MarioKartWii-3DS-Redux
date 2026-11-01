@@ -160,5 +160,7 @@ void C3Di_RenderQueueInit(void);
 void C3Di_RenderQueueExit(void);
 void C3Di_RenderQueueWaitDone(void);
 void C3Di_EnsureCommandSpace(void);
+// GX_MemoryFill, held back until FrameEnd in a pipelined frame (c3d/pipeline.h).
+void C3Di_MemoryFill(u32* buf0a, u32 buf0v, u32* buf0e, u16 control0, u32* buf1a, u32 buf1v, u32* buf1e, u16 control1);
 void C3Di_RenderQueueEnableVBlank(void);
 void C3Di_RenderQueueDisableVBlank(void);

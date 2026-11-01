@@ -1,4 +1,6 @@
 #include <mkw/menu_ui.hpp>
+#include <iterator>
+#include <mkw/diag.hpp>
 #include <mkw/display_layout.hpp>
 #include <mkw/menu_assets.hpp>
 #include <mkw/menu_unlock_texts.hpp>
@@ -40,7 +42,7 @@ struct Name {
  operator const char*()const{return text;}
  const char* c_str()const{return text;}
 };
-Pose control(const char* name,const char* variant,unsigned focusSlot=~0u){
+Pose control(const char* name,const char* variant,unsigned focusSlot=~0u){diag::ComposeTimer diagTimer_(0);
  Pose value;value.source=name;value.focusSlot=focusSlot;
  if(const auto* p=uiFindControlPose(name,variant)){value.x=p->x;value.y=p->y;value.sx=p->sx;value.sy=p->sy;value.alpha=p->alpha;}
  if(const auto* motion=uiFindControlMotion(name,variant)){value.delay=motion->delay;value.moving=motion->enabled;}
@@ -84,7 +86,7 @@ public:
  const MenuState& state;std::vector<UiQuad>& out;const UiTransitionView* transition;
  UiMenuLayout layout{};
  Composer(const MenuState& s,std::vector<UiQuad>& q,const UiTransitionView* t):state(s),out(q),transition(t){layout.page=s.page;}
- void group(UiMenuRole role,unsigned index=0,Pose p={},const char* panel=nullptr){
+ void group(UiMenuRole role,unsigned index=0,Pose p={},const char* panel=nullptr){diag::ComposeTimer diagTimer_(1);
   layout={state.page,role,index,0,0,400,240,false};
   const unsigned selectedGroup=state.page==UiPage::MainMenu?(state.cursor==0?0:state.cursor<4?1:state.cursor<6?2:3):state.cursor;
   layout.selected=index==selectedGroup;
@@ -108,7 +110,7 @@ public:
    }
   }
  }
- void groupPane(UiMenuRole role,Pose p,const char* panel,const char* name){
+ void groupPane(UiMenuRole role,Pose p,const char* panel,const char* name){diag::ComposeTimer diagTimer_(2);
   group(role);if(const auto* box=uiFindPane(panel,name)){
    layout.x=200+(p.x+box->x*p.sx)*XScale;layout.y=120+(-p.y+box->y*p.sy)*YScale;
    layout.w=box->w*p.sx*XScale;layout.h=box->h*p.sy*YScale;
@@ -137,7 +139,7 @@ public:
   if(!root)root=pane(family,"null_all");
   return root?focusMotion(*root,p):UiTextMotion{};
  }
- void quad(unsigned i,float x,float y,float w,float h,float alpha=1,uint32_t tint=0xffffffff,Pose p={},bool dynamic=false){
+ void quad(unsigned i,float x,float y,float w,float h,float alpha=1,uint32_t tint=0xffffffff,Pose p={},bool dynamic=false){diag::ComposeTimer diagTimer_(3);
   if((i>=std::size(UiSprites)&&!dynamic)||w<=0||h<=0)return;
   float controlAlpha=p.alpha,screenSlide=0;
   if(transition&&transition->preload)controlAlpha=1;
@@ -173,13 +175,13 @@ public:
   out.back().menu=layout;out.back().screenSlide=screenSlide;
  }
  void sprite(const char* key,float x,float y,float w,float h,float a=1,uint32_t tint=0xffffffff,Pose p={}){quad(uiFindSpriteKey(key),x,y,w,h,a,tint,p);}
- void region(const char* key,float x,float y,float w,float h,float u0,float v0,float u1,float v1,Pose p,float alpha,const char* focusKey=nullptr){
+ void region(const char* key,float x,float y,float w,float h,float u0,float v0,float u1,float v1,Pose p,float alpha,const char* focusKey=nullptr){diag::ComposeTimer diagTimer_(4);
   x=p.x+x*p.sx;y=-p.y+y*p.sy;w*=p.sx;h*=p.sy;
   applyMotion(x,y,w,h,alpha,p,panelFocus(focusKey?focusKey:key,p));
   const auto first=out.size();sprite(key,x,y,w,h,alpha,0xffffffff,p);
   if(out.size()>first){auto& q=out.back();q.u0=u0+(u1-u0)*q.u0;q.u1=u0+(u1-u0)*q.u1;q.v0=v0+(v1-v0)*q.v0;q.v1=v0+(v1-v0)*q.v1;}
  }
- void focusLayers(const char* key,Pose p,float opacity){
+ void focusLayers(const char* key,Pose p,float opacity){diag::ComposeTimer diagTimer_(5);
   Name family(key);unsigned part=0;
   if(char* suffix=std::strstr(family.text,"_underlay")){*suffix=0;part=1;}
   else if(char* suffix=std::strstr(family.text,"_overlay")){*suffix=0;part=2;}
@@ -231,7 +233,7 @@ public:
    }
   }
  }
- void panel(const char* key,Pose p={},float alpha=1){
+ void panel(const char* key,Pose p={},float alpha=1){diag::ComposeTimer diagTimer_(6);
   const auto* found=uiFindPanel(key);if(!found)return;const auto& r=*found;
   if(const auto* border=uiFindBorderLoop(key)){const auto& loop=*border;
    region(key,loop.x,loop.y,loop.w,loop.h,(loop.x-r.x)/r.w,(loop.y-r.y)/r.h,(loop.x+loop.w-r.x)/r.w,(loop.y+loop.h-r.y)/r.h,p,alpha);
@@ -262,7 +264,7 @@ public:
  Name buttonState(const char* base,unsigned slot)const{return Name(base,state.cursor==slot?"_select":"_free");}
  void movieOverlay(const char* base,Pose p){panel(Name(base,"_overlay"),p);}
  void movieButton(const char* base,Pose p){panel(Name(base,"_underlay"),p);}
- void inPane(const char* key,const char* base,const char* name,Pose p={},float a=1,bool movieImage=false){
+ void inPane(const char* key,const char* base,const char* name,Pose p={},float a=1,bool movieImage=false){diag::ComposeTimer diagTimer_(7);
   if(auto* r=pane(base,name);r&&r->visible){
    const auto before=out.size();
    float x=p.x+r->x*p.sx,y=-p.y+r->y*p.sy,w=r->w*p.sx,h=r->h*p.sy,alpha=a*r->alpha;
@@ -292,7 +294,7 @@ public:
   float x=align<0?cx:align>0?cx-w:cx-w/2;
   quad(i,x,y,w,h,1,tint);
  }
- void textSprite(unsigned index,const UiPaneInfo& pane,Pose p,uint32_t color=0xffffffff){
+ void textSprite(unsigned index,const UiPaneInfo& pane,Pose p,uint32_t color=0xffffffff){diag::ComposeTimer diagTimer_(8);
   if(index>=std::size(UiSprites)||!pane.visible)return;
   if(layout.role==UiMenuRole::Description){
    const char* caption=UiSprites[index].text;
@@ -457,7 +459,7 @@ public:
   for(unsigned i=0;i<count;++i){auto cell=original;cell.x=x;cell.w=widths[i]*fit;cell.fontW*=fit;cell.fontH*=fit;cell.textAlign=0;
    textSprite(indices[i],cell,p);x+=cell.w;}
  }
- void text(const char* text,const char* base,Pose p={},uint32_t tint=0xffffffff,const char* name="text"){
+ void text(const char* text,const char* base,Pose p={},uint32_t tint=0xffffffff,const char* name="text"){diag::ComposeTimer diagTimer_(9);
   const auto* r=pane(base,name);if(!r)return;
   if(layout.page==UiPage::LicenseSettings&&layout.role==UiMenuRole::Choice){optionText(text,*r,p);return;}
   const auto* shadow=pane(base,"text_shadow");
@@ -467,7 +469,7 @@ public:
   if(!std::strcmp(name,"text"))selectionGlow(base,p,text);
  }
  // Main-menu ink stays fixed. Confirmation deforms a separate light copy.
- void mainText(const char* value,const char* base,Pose p,const char* name="text"){
+ void mainText(const char* value,const char* base,Pose p,const char* name="text"){diag::ComposeTimer diagTimer_(10);
   const auto* r=pane(base,name);if(!r)return;
   const auto first=out.size();
   Pose stable=p;stable.source=nullptr;
@@ -501,7 +503,7 @@ public:
    out.push_back(q);
   }
  }
- void licensePortrait(const char* base,Pose p,unsigned slot){
+ void licensePortrait(const char* base,Pose p,unsigned slot){diag::ComposeTimer diagTimer_(11);
   if(slot>=state.licenseOccupied.size()||!state.licenseOccupied[slot])return;
   const auto* original=pane(base,"mii");if(!original)return;
   // The authored head-only pane extends above the blue frame. Our complete
@@ -515,7 +517,7 @@ public:
   const auto first=out.size();quad(~0u,x,y,w,h,alpha,0xffffffff,p,true);
   if(out.size()>first)out.back().licensePortrait=slot;
  }
- void licenseName(const char* base,Pose p,unsigned slot){
+ void licenseName(const char* base,Pose p,unsigned slot){diag::ComposeTimer diagTimer_(12);
   licensePortrait(base,p,slot);
   if(slot>=state.licenseNames.size())return;
   const auto& name=state.licenseNames[slot];
@@ -540,8 +542,8 @@ public:
    textSprite(indices[i],cell,p);x+=cell.w;
   }
  }
- void icon(const char* prefix,unsigned i,const char* base,const char* name,Pose p={},float a=1,uint32_t tint=0xffffffff){char key[64];std::snprintf(key,sizeof key,"%s%u",prefix,i);const auto first=out.size();inPane(key,base,name,p,a);for(auto at=first;at<out.size();++at){out[at].menu.preserveAspect=true;out[at].tint=tint;}}
- void licenseTrophies(const char* base,Pose p,unsigned slot){
+ void icon(const char* prefix,unsigned i,const char* base,const char* name,Pose p={},float a=1,uint32_t tint=0xffffffff){diag::ComposeTimer diagTimer_(13);char key[64];std::snprintf(key,sizeof key,"%s%u",prefix,i);const auto first=out.size();inPane(key,base,name,p,a);for(auto at=first;at<out.size();++at){out[at].menu.preserveAspect=true;out[at].tint=tint;}}
+ void licenseTrophies(const char* base,Pose p,unsigned slot){diag::ComposeTimer diagTimer_(14);
   const auto& flags=state.licenseUnlocks[slot];
   const char* cupNames[]={"n_0_kinoko","n_1_flower","n_2_star","n_3_special","r_0_koura","r_1_banana","r_2_konoha","r_3_thunder"};
   const char* questions[]={nullptr,nullptr,"n_2_hatena","n_3_hatena",nullptr,nullptr,"r_2_hatena","r_3_hatena"};
@@ -564,7 +566,7 @@ public:
   }
   if(transition&&transition->preload)for(unsigned rank=1;rank<=3;++rank){char key[32];std::snprintf(key,sizeof key,"license_trophy_%u",rank);inPane(key,base,"cc50_00",p);}
  }
- void movie(const char* prefix,unsigned i,const char* base,const char* name,Pose p={},float a=1,float u0=0,float v0=0,float u1=1,float v1=1){
+ void movie(const char* prefix,unsigned i,const char* base,const char* name,Pose p={},float a=1,float u0=0,float v0=0,float u1=1,float v1=1){diag::ComposeTimer diagTimer_(15);
   char key[80];std::snprintf(key,sizeof key,"%s%u",prefix,i);
   unsigned frame=0;if(const auto* movie=uiFindMovie(key))frame=unsigned(double(state.age)*movie->fps*UiMovieFrameCount/(60.0*movie->frames))%UiMovieFrameCount;
   char sampled[96];std::snprintf(sampled,sizeof sampled,"%s_%u",key,frame);
@@ -574,7 +576,7 @@ public:
    if(const unsigned n=uiFindMovieRegion(key);n<std::size(UiMovieRegions))q.movie=n;
   }
  }
- void glowGroup(const char* family,Pose p,const char* caption,unsigned icon,bool pulse=false,bool textOnly=false){
+ void glowGroup(const char* family,Pose p,const char* caption,unsigned icon,bool pulse=false,bool textOnly=false){diag::ComposeTimer diagTimer_(16);
   if(!p.source)return;
   const bool preload=transition&&transition->preload;
   const bool clicked=transition&&!transition->entering&&!transition->back&&
@@ -638,7 +640,7 @@ public:
   }
  }
  void glow(const char* family,Pose p,const char* caption=nullptr,unsigned icon=~0u){glowGroup(family,p,caption,icon);}
- void selectionGlow(const char* key,Pose p,const char* caption=nullptr){
+ void selectionGlow(const char* key,Pose p,const char* caption=nullptr){diag::ComposeTimer diagTimer_(17);
   // Every button owns this pulse, including a just-deselected button.
   // Underlays wait for their overlay; glows themselves must not recurse.
   if(std::strstr(key,"_ok")||std::strstr(key,"_selectin")||std::strstr(key,"_underlay")||std::strstr(key,"focus_")||std::strstr(key,"panel_tail_"))return;
@@ -657,7 +659,7 @@ public:
   auto key=buttonState(base,slot);panel(key.c_str(),p);
   if(caption){text(caption,key.c_str(),p);if(state.cursor==slot)glow(base,p,caption);}
  }
- void chrome(const char* title,const char* description=""){
+ void chrome(const char* title,const char* description=""){diag::ComposeTimer diagTimer_(18);
   group(UiMenuRole::Header);panel("header",motionOnly("MenuObiTop","MenuObiTop"));
   group(UiMenuRole::Footer);panel("footer",control("MenuObiBottom","MenuObiBottom"));
   const auto titlePose=control("MenuObiTitleText","MenuObiTitleText");groupPane(UiMenuRole::Title,titlePose,"header_text","text");text(title,"header_text",titlePose);
@@ -742,7 +744,7 @@ public:
 };
 }
 std::vector<UiQuad> composeMenu(const MenuState& state,const UiRaceView& race){std::vector<UiQuad> out;composeMenu(state,race,out);return out;}
-static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vector<UiQuad>& q,const UiTransitionView* transition){
+static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vector<UiQuad>& q,const UiTransitionView* transition){diag::ComposeTimer diagTimer_(19);
  // The race and its end-of-race menu draw themselves (RaceFlowUi draws the
  // retail result boards and buttons over the running race).
  q.clear();q.reserve(256);if(s.page==UiPage::Race||s.page==UiPage::Results)return;

@@ -1,4 +1,5 @@
 #include <malloc.h>
+#include <mkw/diag.hpp>
 #include <mkw/course_mii_billboards.hpp>
 #include <mkw/joint_billboard.hpp>
 #include <mkw/course_mii_statue.hpp>
@@ -240,6 +241,25 @@ bool ObjectAssets::load(int course){
 }
 void ObjectAssets::beginFrame(){explosionUsed=0;for(auto& m:models)m->skinUsed=0;}
 
+// Retail's draw distance for a course object, squared; 0 for none. Objects
+// whose ObjFlow clip mode (+0x64) is 1, 2, 8, 9, 10 or 11 register with the
+// clip manager with ObjFlow +0x68 x 10 as their distance (USA 0x8080d548..,
+// 0x80783674). Each frame it hides an object when its position's squared
+// distance from the camera, times (min(fovy, 55) / 55)^2, exceeds that
+// distance squared (USA 0x807834a4..0x807834f8, factor from 0x80782cf4).
+float drawDistance2(const K::Field::SObjectCollisionSet* set){
+    if(!set)return 0;
+    auto field=[set](unsigned offset){return int16_t((set->_62[offset-0x62]<<8)|set->_62[offset-0x62+1]);};
+    switch(field(0x64)){case 1:case 2:case 8:case 9:case 10:case 11:break;default:return 0;}
+    const float distance=float(field(0x68))*10;
+    return distance*distance;
+}
+float drawDistance2(K::Field::ObjectId id){
+    const auto* objects=K::Field::ObjectDirector::Instance();
+    if(!objects)return 0;
+    const auto& flow=objects->flowTable();
+    return drawDistance2(flow.set(flow.slot(id)));
+}
 struct CourseObjects::Impl {
     size_t allocationReserve=SkinReserve;
     std::unique_ptr<Model> palm;
@@ -252,6 +272,14 @@ struct CourseObjects::Impl {
     int course=-1;
     ObjectAssets assets;
     std::vector<Visual> visuals,suspendedVisuals;
+    // Per visual (same order), retail's draw distance squared (drawDistance2).
+    std::vector<float> drawDistances;
+    float palmDistance=0,escalatorDistance=0;
+    // Retail's FOV factor (min(fovy, 55) / 55) squared; 0: draw at any distance.
+    float distanceScale=0;
+    bool beyond(Vec3 position,float limit) const {
+        return distanceScale>0&&limit>0&&dot(position-camera,position-camera)*distanceScale>limit;
+    }
     bool graphicsSuspended=false;
     bool linked=false;
     const void* director=nullptr;
@@ -364,7 +392,9 @@ bool CourseObjects::loadCourse(int courseId){
 }
 void CourseObjects::Impl::link(){
     stadiumBoundsReady=false;stadiumScreens.clear();
-    visuals.clear();linked=true;
+    visuals.clear();drawDistances.clear();linked=true;
+    palmDistance=drawDistance2(K::Field::ObjectId::PalmTree);
+    escalatorDistance=drawDistance2(K::Field::ObjectId::Escalator);
     const auto* map=K::System::CourseMap::Instance();
     const auto* objects=K::Field::ObjectDirector::Instance();
     director=objects;
@@ -394,13 +424,15 @@ void CourseObjects::Impl::link(){
         std::strncpy(v.resource,v.resources,sizeof v.resource-1);
         if(char* semicolon=std::strchr(v.resource,';'))*semicolon=0;
         v.placement=placementMatrix(*geo);
-        if(classifyObject(v,assets,course))visuals.push_back(v);
+        if(classifyObject(v,assets,course)){visuals.push_back(v);drawDistances.push_back(drawDistance2(set));}
     }
 
 }
 void CourseObjects::Impl::begin(const Renderer& renderer,unsigned frameTick,Vec3 frameCamera){
     // Linking reads and rebuilds visuals: always on this thread, before recording.
     view=renderer.viewFrustum();tick=frameTick;camera=frameCamera;linkedReady=ready();recorded=true;
+    const float fov=std::min(renderer.cameraFov(),55.f)/55.f;
+    distanceScale=renderer.drawDistance?fov*fov:0;
 }
 // The sky pass precedes the object pass, which restarts the per-model
 // CPU-skin copies, exactly as drawSky then draw ran them.
@@ -412,7 +444,9 @@ void CourseObjects::Impl::recordSky(){
 }
 void CourseObjects::Impl::recordObjects(){
     objects.clear();water.clear();
-    if(palm)for(const auto& matrix:palms)if(!renderQuality().tooSmall({palm->minimum,palm->maximum},matrix,camera))objects.records.push_back({ObjectDrawRecord::Plain,false,0,palm.get(),nullptr,0,0,0,0,0,matrix});
+    if(palm)for(const auto& matrix:palms)
+        if(beyond({matrix.r[0].w,matrix.r[1].w,matrix.r[2].w},palmDistance))diag::tallyHidden("PalmTree");
+        else if(!renderQuality().tooSmall({palm->minimum,palm->maximum},matrix,camera))objects.records.push_back({ObjectDrawRecord::Plain,false,0,palm.get(),nullptr,0,0,0,0,0,matrix});
     // Includes the children of paired escalators. Kinoko updates these transforms
     // after its 60 Hz step, including stops/reversals and the looping tread offset.
     // Query each frame so restart/map changes cannot leave stale scene pointers.
@@ -422,6 +456,7 @@ void CourseObjects::Impl::recordObjects(){
             if(obj->id()!=K::Field::ObjectId::Escalator)continue;
             if(index>=escalators.size())break;
             const unsigned slot=index;auto& mesh=*escalators[index++];
+            if(beyond({obj->pos().x,obj->pos().y,obj->pos().z},escalatorDistance)){diag::tallyHidden("escalator");continue;}
             const EscalatorWrite write{&mesh,escalatorBase.data(),static_cast<const K::Field::ObjectEscalator*>(obj)->stepFactor()};
             // Reduced quality: each tread mesh re-poses on alternate frames
             // (half of them each frame); its transform still moves every frame.
@@ -439,7 +474,17 @@ void CourseObjects::Impl::recordObjects(){
     assets.beginFrame();
     ObjectDraw context{view,assets,tick,camera,course,scratch,shadows,objects,false,allocationReserve};
     ObjectDraw waterContext{view,assets,tick,camera,course,scratch,shadows,water,false,allocationReserve};
-    for(auto& v:visuals)if(!skyObject(v))drawObject(waterObject(v)?waterContext:context,v);
+    for(std::size_t i=0;i<visuals.size();++i){
+        auto& v=visuals[i];if(skyObject(v))continue;
+        auto& draw=waterObject(v)?waterContext:context;
+        // Retail clips at the object's own position: Kinoko's for objects it
+        // moves, else where the presenter last drew it, else its placement.
+        const auto* p=v.object&&(v.kinetic||!v.drawnValid)?&v.object->pos():nullptr;
+        const C3D_Mtx& m=v.drawnValid?v.drawn:v.placement;
+        draw.hidden=beyond(p?Vec3{p->x,p->y,p->z}:Vec3{m.r[0].w,m.r[1].w,m.r[2].w},drawDistances[i]);
+        if(draw.hidden)diag::tallyHidden(v.resource);
+        drawObject(draw,v);draw.hidden=false;
+    }
     // Retail owns one pochaYogan model per player and restarts all three
     // non-looping tracks together. Keep the authored terminal pose rather
     // than inventing a timer that could truncate CLR/SRT or the mesh motion.
@@ -636,7 +681,7 @@ void CourseObjects::drawSky(Renderer& renderer,unsigned tick,Vec3 camera){
     d.replay(renderer,d.sky);
 }
 void ObjectDraw::shadow(ObjModel* m,const C3D_Mtx& transform,const Anim& anim){
-    if(!renderQuality().shadowVolumes)return;
+    if(hidden||!renderQuality().shadowVolumes)return;
     if(!m||!m->model||!view.model(transform).intersects(m->bounds))return;
     if(anim.clip>=0&&m->bank&&m->cpuSkin){
         // Reuse the deferred per-instance skin path, then move its posed
@@ -652,7 +697,7 @@ void ObjectDraw::shadow(ObjModel* m,const C3D_Mtx& transform,const Anim& anim){
     shadows_.push_back({m->model.get(),transform});
 }
 void ObjectDraw::explosion(const C3D_Mtx& transform,float frame){
-    if(!assets.explosion||!assets.explosionBank)return;
+    if(hidden||!assets.explosion||!assets.explosionBank)return;
     // Every simultaneous blast needs its own vertex destination: deferred
     // pose writes execute before draws, so a shared destination kept only the
     // last blast's age. Reuse these copies between frames like object skins.
@@ -667,6 +712,7 @@ void ObjectDraw::explosion(const C3D_Mtx& transform,float frame){
     list.records.push_back(r);
 }
 void ObjectDraw::plain(const Model& model,const C3D_Mtx& transform){
+    if(hidden)return;
     ObjectDrawRecord r;r.kind=ObjectDrawRecord::Plain;r.target=&model;r.transform=transform;
     list.records.push_back(r);
 }
@@ -680,7 +726,7 @@ void writeFireTexture(void* data){
 }
 }
 void ObjectDraw::submit(ObjModel* m,const C3D_Mtx& transform,const Anim& source){
-    if(!m||!m->model)return;
+    if(hidden||!m||!m->model)return;
     // Reduced quality: crowds step their clip (one frame per tick) every
     // animationStep frames, so a skinned pose repeats instead of being skinned again.
     Anim anim=source;const unsigned budget=animationStep();
@@ -717,10 +763,11 @@ void ObjectDraw::submit(ObjModel* m,const C3D_Mtx& transform,const Anim& source)
         }
     }
     ObjectDrawRecord r;r.backdrop=backdrop;r.transform=transform;
+    const float cameraDistance=length(Vec3{transform.r[0].w,transform.r[1].w,transform.r[2].w}-camera);
     const Model* target=m->model.get();
     auto keepPalette=[&](){r.palette=unsigned(list.palettes.size());list.palettes.insert(list.palettes.end(),palette,palette+size_t(bank->matrixCount())*12);};
     if(posed&&m->rigid){r.pose=1;r.parts=&bank->rigidParts();r.bones=bank->matrixCount();keepPalette();}
-    else if(posed&&m->gpuSkin){r.pose=2;r.bones=bank->matrixCount();keepPalette();renderMetrics.skinnedVertices+=m->model->vertexCount;}
+    else if(posed&&m->gpuSkin){r.pose=2;r.bones=bank->matrixCount();keepPalette();renderMetrics.skinnedVertices+=m->model->vertexCount;diag::tallySkin(m->resource,m->model->vertexCount,true,cameraDistance);}
     else if(posed&&m->cpuSkin&&(anim.clip>=0||anim.palette)){
         int copy=-1;
         // A clip pose is a function of (clip, frame); procedural palettes are unique.
@@ -746,7 +793,7 @@ void ObjectDraw::submit(ObjModel* m,const C3D_Mtx& transform,const Anim& source)
                     *w={bank,m->skins[copy].get(),m->litNormals,anim.clip,anim.frame};std::memcpy(w+1,palette,bytes);
                     deferred->queue(writeSkin,w);
                 }else bank->skin(palette,*m->skins[copy],m->litNormals,anim.clip,anim.frame);
-                renderMetrics.skinnedVertices+=m->skins[copy]->vertexCount;
+                renderMetrics.skinnedVertices+=m->skins[copy]->vertexCount;diag::tallySkin(m->resource,m->skins[copy]->vertexCount,false,cameraDistance);
             }else if(m->skinUsed)copy=int(m->skinUsed-1);
             else return;
         }
@@ -756,6 +803,7 @@ void ObjectDraw::submit(ObjModel* m,const C3D_Mtx& transform,const Anim& source)
             m->skins[copy]->maximum=anim.bounds->maximum;
         }
     }
+    diag::nameModel(target,m->resource);
     bool material=false;
     if(bank&&!m->overrides.empty()&&(anim.pat>=0||anim.srt>=0||anim.clr>=0||anim.opacity!=1||anim.mirrorU)){
         material=bank->material(anim.pat,anim.patFrame,anim.srt,anim.srtFrame,anim.clr,anim.clrFrame,m->overrides.data(),unsigned(m->overrides.size()));

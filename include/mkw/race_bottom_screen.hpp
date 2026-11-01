@@ -64,6 +64,11 @@ struct BottomView {
 void fillBottomView(BottomView& view,const RaceGrid& grid,const RaceItems& items,bool introActive,uint32_t tick,float leaveFade);
 class RaceBottomScreen {
 public:
+    // On race courses the map is an opaque (ETC1) quad over the whole screen:
+    // the background fill under it is never seen and is not drawn, the
+    // target's per-frame clear is skipped, and the map draws without blending.
+    // A/B: no-bottom-cover.txt.
+    static inline bool skipCoveredFill=true;
     // Worst case by construction: fill 1, map 1, start line 24, 24 items as
     // blast rings (4 each) 96, racers 12 x 3 + searchlight 1, column 2,
     // standings 12 x 6 (up to three score digits in battle), timer 10,

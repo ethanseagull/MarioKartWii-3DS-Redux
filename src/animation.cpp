@@ -93,6 +93,38 @@ bool DriverAnimation::load(const char* path,const Model& model){
         ok=std::fread(data_,1,size,f)==size;std::fclose(f);
     }
     auto u32=[](const uint8_t* p){uint32_t v;std::memcpy(&v,p,4);return v;};
+    // DIAG: a .dsku (tools/pack_unlit_banks.py) is a DSKM whose keyframes keep
+    // only their 3x4 position matrices, plus one set of normal matrices: the
+    // first clip's first frame, the only one an opponent reads (freezeLighting).
+    // Rebuild the DSKM layout with those normals in every frame.
+    if(ok&&size>=32&&!std::memcmp(data_,"DSKU",4)){
+        uint8_t* compact=data_;const bool compactLinear=dataLinear_;const size_t compactSize=size;data_=nullptr;
+        auto release=[&]{if(compactLinear)linearFree(compact);else std::free(compact);};
+        const uint32_t version=u32(compact+4),vertexCount=u32(compact+8),matrixCount=u32(compact+12),clipCount=u32(compact+16),shapeCount=u32(compact+20);
+        const size_t head=(version>=5?32:28)+size_t(vertexCount)*28+size_t(shapeCount)*8;
+        bool valid=version>=2&&version<=8&&matrixCount&&matrixCount<=128&&clipCount&&clipCount<=64&&shapeCount<=64&&vertexCount<=65536&&
+                   head+size_t(matrixCount)*36<=compactSize;
+        size_t at=head+size_t(matrixCount)*36,extra=0;
+        for(unsigned c=0;valid&&c<clipCount;++c){
+            if(at+44>compactSize){valid=false;break;}
+            const uint32_t frames=u32(compact+at+40);if(!frames||frames>2000){valid=false;break;}
+            at+=44+size_t(frames)*(matrixCount*48+shapeCount*4);extra+=size_t(frames)*matrixCount*36;
+            if(at>compactSize)valid=false;
+        }
+        const size_t full=valid?compactSize-size_t(matrixCount)*36+extra:0;
+        if(!valid||full>12*1024*1024||!allocateBank(full)){release();data_=nullptr;reset();return false;}
+        uint8_t* out=data_;const uint8_t* in=compact+head;const uint8_t* normals=in;in+=size_t(matrixCount)*36;
+        std::memcpy(out,"DSKM",4);std::memcpy(out+4,compact+4,head-4);out+=head;
+        for(unsigned c=0;c<clipCount;++c){
+            const uint32_t frames=u32(in+40);std::memcpy(out,in,44);out+=44;in+=44;
+            for(uint32_t f=0;f<frames;++f){
+                for(unsigned b=0;b<matrixCount;++b){std::memcpy(out,in+b*48,48);std::memcpy(out+48,normals+b*36,36);out+=84;}
+                in+=size_t(matrixCount)*48;std::memcpy(out,in,shapeCount*4);out+=shapeCount*4;in+=shapeCount*4;
+            }
+        }
+        std::memcpy(out,in,size_t(compact+compactSize-in));
+        size=full;release();
+    }
     if(!ok||std::memcmp(data_,"DSKM",4)||u32(data_+4)<2||u32(data_+4)>8){reset();return false;}
     vertices_=u32(data_+8);matrices_=u32(data_+12);count_=u32(data_+16);shapes_=u32(data_+20);faceCount_=u32(data_+24);
     if(vertices_!=model.vertexCount||!matrices_||matrices_>128||!count_||count_>64||shapes_>64||faceCount_>64||model.submeshes.size()>64){reset();return false;}

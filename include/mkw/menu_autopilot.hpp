@@ -15,13 +15,22 @@ namespace mkw {
 //   race:N           wait for a race, drive (A held) for N simulation frames
 //   auto:N           as race:N, but player 0 follows the CPU route and uses items
 //                    (race:N and auto:N also end when the player finishes)
+//                    Diagnostic overlay: an auto:N race that runs out of frames,
+//                    or whose best race completion hasn't risen for StallFrames,
+//                    is stuck. The autopilot asks for a forced finish
+//                    (takeForceFinish) so the results and the VS set carry on.
+//   skip             wait for a race; press A on its first course-intro frame, as
+//                    a player skipping the preview (no intro: nothing to press)
 //   in a race:  A    press A once (skips a result board once it stops counting)
 //               wN   wait N presented frames
 //               next / quit  wait for the end-of-race menu, choose that option
+//                            (after a set's final race, skip on to the last end)
 //   end              finish successfully
 // A file containing tokens replaces the default VS script.
 class MenuAutopilot {
 public:
+ static constexpr unsigned StallFrames=3600;   // 60 s of simulation with no new best completion
+ static constexpr float StallProgress=0.002f;  // in laps
  static constexpr const char* DefaultScript=
   "w30 A w20 A w20 A w20 A w20 A w20 D D A w20 A "      // strap,intro,title,license,main,mode(VS),solo
   "w20 R R L L D U A "                                   // characters: browse, then Mario
@@ -51,6 +60,12 @@ public:
  bool passed()const{return done_&&!failed_;}
  unsigned racesStarted()const{return races_;}
  const char* failure()const{return failure_;}
+ // Races (1-based autopilot count) that were forced to finish, comma separated.
+ const char* stuckRaces()const{return stuck_.c_str();}
+ // Why the last forced finish was asked for: "stalled" or "out of time".
+ const char* stuckReason()const{return stuckReason_;}
+ // The main loop finishes player 0 when this returns true (once per stuck race).
+ bool takeForceFinish(){const bool r=forceRequest_;forceRequest_=false;return r;}
  // Menu context: one UiInput per presented frame. idle=no transition active.
  UiInput menu(const MenuState& state,bool idle){
   UiInput key{};if(!active_||done_)return key;
@@ -58,7 +73,7 @@ public:
   if(menuFrames_>36000){fail("menu script timed out");return key;}
   const std::string* token=current();if(!token)return key;
   if((*token)[0]=='w'){if(++wait_>=unsigned(std::atoi(token->c_str()+1))){wait_=0;++cursor_;}return key;}
-  if(!token->compare(0,5,"race:")||!token->compare(0,5,"auto:")){if(++raceWait_>1800)fail("race did not start");return key;}
+  if(!token->compare(0,5,"race:")||!token->compare(0,5,"auto:")||*token=="skip"){if(++raceWait_>1800)fail("race did not start");return key;}
   if(*token=="end"){done_=true;return key;}
   if(!idle||state.page==UiPage::Race)return key;
   if(++gap_<8)return key;gap_=0;
@@ -70,23 +85,44 @@ public:
   }
   ++cursor_;return key;
  }
+ // Race context, course intro: true once for a "skip" token (press A to skip it).
+ bool introSkip(){
+  if(!active_||done_)return false;
+  const std::string* token=current();if(!token||*token!="skip")return false;
+  raceWait_=0;++cursor_;return true;
+ }
  // Race context: returns held/down key masks for one presented frame.
  // finished: the player has crossed the line; endMenu: the end-of-race menu
- // accepts input, with endCursor its selection.
- void race(u32& held,u32& down,unsigned simulationFrames,bool finished=false,bool endMenu=false,unsigned endCursor=0){
+ // accepts input, with endCursor its selection. progress: player 0's race
+ // completion in laps; finalRace: the set's last race.
+ void race(u32& held,u32& down,unsigned simulationFrames,bool finished=false,bool endMenu=false,unsigned endCursor=0,
+           float progress=0.f,bool finalRace=false){
   if(!active_||done_)return;
   held=KEY_A;down=0;
   const std::string* token=current();if(!token)return;
   // Once an end-of-race option is chosen the race is being left: the
   // following tokens belong to the menus, until the next race begins.
-  if(leaving_){if(token->compare(0,5,"race:")&&token->compare(0,5,"auto:")){held=0;return;}leaving_=false;}
+  // Diagnostic overlay: "next" starts the following race while the old one's
+  // results still fade out (finished stays true); its race:/auto: token must
+  // not begin, and end at once, before that race is gone.
+  if(leaving_){if(finished||(token->compare(0,5,"race:")&&token->compare(0,5,"auto:"))){held=0;return;}leaving_=false;}
   if(!token->compare(0,5,"race:")||!token->compare(0,5,"auto:")){
-   if(!racing_){racing_=true;raceStart_=simulationFrames;++races_;raceWait_=0;}
+   if(!racing_){racing_=true;raceStart_=simulationFrames;++races_;raceWait_=0;best_=progress;bestAt_=simulationFrames;forced_=false;}
    route_=!token->compare(0,5,"auto:");
-   if(finished||simulationFrames-raceStart_>=unsigned(std::atoi(token->c_str()+5))){racing_=false;route_=false;++cursor_;}
+   const bool expired=simulationFrames-raceStart_>=unsigned(std::atoi(token->c_str()+5));
+   if(finished||(expired&&!route_)){racing_=false;route_=false;++cursor_;return;}
+   if(!route_)return;
+   if(progress>best_+StallProgress){best_=progress;bestAt_=simulationFrames;}
+   const bool stalled=simulationFrames-bestAt_>=StallFrames;
+   if(!forced_&&(expired||stalled)){
+    forced_=true;forceRequest_=true;forcedAt_=simulationFrames;stuckReason_=stalled?"stalled":"out of time";
+    if(!stuck_.empty())stuck_+=',';stuck_+=std::to_string(races_);
+   }
+   if(forced_&&simulationFrames-forcedAt_>1800)fail("forced finish did not end the race");
    return;
   }
   if(*token=="end"){done_=true;return;}
+  if(*token=="skip"){++cursor_;return;}
   if(*token=="S"){down=KEY_START;++cursor_;return;}
   if(*token=="A"){if(++gap_>=8){gap_=0;down=KEY_A;++cursor_;}return;}
   if((*token)[0]=='w'){if(++wait_>=unsigned(std::atoi(token->c_str()+1))){wait_=0;++cursor_;}return;}
@@ -95,15 +131,21 @@ public:
    raceWait_=0;if(++gap_<8)return;gap_=0;
    const unsigned wanted=*token=="quit"?1:0;
    if(endCursor!=wanted){down=KEY_DDOWN;return;}
-   down=KEY_A;++cursor_;leaving_=true;return;
+   down=KEY_A;++cursor_;leaving_=true;
+   // A resumed benchmark's set is shorter than the script: after its final
+   // race only the closing end token is left to run.
+   if(finalRace)for(size_t i=tokens_.size();i-->cursor_;)if(tokens_[i]=="end"){cursor_=i;break;}
+   return;
   }
  }
 private:
  const std::string* current(){if(cursor_>=tokens_.size()){done_=true;return nullptr;}return &tokens_[cursor_];}
  void fail(const char* reason){failed_=true;done_=true;failure_=reason;}
  std::vector<std::string> tokens_;
- size_t cursor_=0;unsigned wait_=0,gap_=0,menuFrames_=0,raceWait_=0,raceStart_=0,races_=0;
- bool active_=false,done_=false,failed_=false,racing_=false,route_=false,leaving_=false;
- const char* failure_="";
+ size_t cursor_=0;unsigned wait_=0,gap_=0,menuFrames_=0,raceWait_=0,raceStart_=0,races_=0,bestAt_=0,forcedAt_=0;
+ float best_=0.f;
+ bool active_=false,done_=false,failed_=false,racing_=false,route_=false,leaving_=false,forced_=false,forceRequest_=false;
+ const char* failure_="";const char* stuckReason_="";
+ std::string stuck_;
 };
 }

@@ -3,6 +3,7 @@
 #include <mkw/lakitu_goal.hpp>
 #include <mkw/renderer.hpp>
 #include <mkw/animation.hpp>
+#include <mkw/diag.hpp>
 #include <game/field/jugem/JugemMove.hh>
 #include <game/field/CollisionDirector.hh>
 #include <game/kart/KartObject.hh>
@@ -27,6 +28,16 @@ struct Joints {
     struct Clip{char name[32];unsigned duration=0,loop=0;size_t offset=0;};
     std::vector<float> data;std::vector<Clip> clips;unsigned joints=0;
     bool load(const char* path){
+        // Kept for the session (110 KB): these two loose files sit in the SD
+        // card's models/ folder, whose 6,000+ entries make every open slow on
+        // the console (0.5-0.8 s each, every race). A/B: no-load-cache.txt.
+        static Joints body,rod;Joints* cache=!std::strcmp(path,LakituBodyJoints)?&body:!std::strcmp(path,LakituRodJoints)?&rod:nullptr;
+        if(cache&&diag::loadCache&&!cache->data.empty()){*this=*cache;return true;}
+        if(!loadFile(path))return false;
+        if(cache&&diag::loadCache)*cache=*this;
+        return true;
+    }
+    bool loadFile(const char* path){
         data.clear();clips.clear();
         FILE* f=std::fopen(path,"rb");if(!f)return false;
         uint32_t h[4];bool ok=std::fread(h,4,4,f)==4&&!std::memcmp(h,"DJNT",4)&&h[1]==1&&h[2]&&h[2]<=8&&h[3]&&h[3]<=16;

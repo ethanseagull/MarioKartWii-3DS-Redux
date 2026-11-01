@@ -1,4 +1,5 @@
 #include <mkw/racer_visuals.hpp>
+#include <mkw/diag.hpp>
 #include <mkw/racer_lod.hpp>
 #include <mkw/vehicle_lod_layout.hpp>
 #include <mkw/race_items.hpp>
@@ -70,7 +71,7 @@ bool RacerVisuals::load(){
     for(unsigned i=1;i<config.playerCount&&i<=11;++i){
         auto r=std::make_unique<Impl::Racer>();const auto& player=config.players[i];
         std::string failure;
-        if(!r->load(unsigned(player.character),unsigned(player.vehicle),config.teams?RaceTeam(player.team):RaceTeam::None,&failure)){
+        if(!r->load(unsigned(player.character),unsigned(player.vehicle),config.teams?RaceTeam(player.team):RaceTeam::None,&failure,diag::unlitBanks)){
             if(auto* log=std::fopen("sdmc:/3ds/mkw-3ds/opponent-load-error.txt","w")){
                 std::fprintf(log,"slot=%u character=%u vehicle=%u team=%u\nasset=%s\nlinear=%lu\n",i,unsigned(player.character),unsigned(player.vehicle),unsigned(player.team),failure.c_str(),static_cast<unsigned long>(linearSpaceFree()));
                 std::fclose(log);

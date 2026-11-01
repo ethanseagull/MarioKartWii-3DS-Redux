@@ -18,6 +18,7 @@
 #include "mkw/display_layout.hpp"
 #include "mkw/stereo.hpp"
 #include "mkw/water_indirect.hpp"
+#include <c3d/pipeline.h>
 
 namespace mkw {
 struct UiQuad;
@@ -84,7 +85,13 @@ public:
     // preview on the same native presentation path as the 3DS renderer.
     bool initMovieEtc1(std::uint16_t width, std::uint16_t height);
     bool initRgba8(unsigned width,unsigned height,const std::uint8_t* pixels,std::size_t bytes);
+    // Halves an RGBA8 texture `levels` times (alpha-weighted 2x2 mean) for
+    // sprites always drawn well under their texel size; UVs are unchanged.
+    bool shrinkRgba8(unsigned levels);
 };
+// HUD sprites drawn 2-5x under their texel size sample a halved copy
+// (RaceHud::load). A/B: no-hud-shrink.txt.
+inline bool shrinkHudTextures=false;
 class Model {
 public:
     bool roadSamplerPolicy=false; // executable-only static-road sampler ranges
@@ -111,7 +118,9 @@ public:
     // Immutable checkpoint-selected terrain index copies, original kept whole.
     std::array<uint16_t*,2> regionIndices{};
     std::array<std::vector<SubmeshVisibility>,2> regionVisibility;
-    bool enableCastleRegions();
+    // spatial: order-safe submeshes' region copies are Morton-sorted too
+    // (Renderer::spatialCourse), so their culling blocks are compact.
+    bool enableCastleRegions(bool spatial=false);
     std::vector<std::vector<SkinVisibilityBlock>> skinVisibility;
     void enableSkinCulling(unsigned bones);
     bool fixedLighting=false,staticLightingBaked=false;
@@ -377,6 +386,9 @@ public:
     // CourseBloom is a generated static resource; it outlives deferred frames.
     void requestBloom(const CourseBloom& settings);
     void applyBloom();
+    // Diagnostic overlay (mkw/diag.hpp): the draws recorded after this belong
+    // to GPU pass `pass` until the next marker. Recorded frames only.
+    void diagPass(unsigned pass);
     // Live sparks and effect particles are copied when recorded; their quads
     // are built where the frame is drawn. Specs and textures must outlive it.
     void drawSparks(const DriftEffects& effects,const Texture* textures);
@@ -412,7 +424,11 @@ public:
     // The same without copying the quads: a deferred frame reads them when it
     // is drawn, so they must not change until then (alternate storage on
     // recordingFrame()'s parity). Keeps per-frame storage fixed and preallocated.
-    void drawScreenMaterialQuadsInPlace(const Texture* texture,const MaterialQuad* quads,unsigned count,uint32_t color0,uint32_t color1);
+    // opaque: the quads replace every pixel they cover (blending off).
+    void drawScreenMaterialQuadsInPlace(const Texture* texture,const MaterialQuad* quads,unsigned count,uint32_t color0,uint32_t color1,bool opaque=false);
+    // This frame's bottom screen is covered opaquely (the race map): its
+    // per-frame clear is skipped. Recorded frames only.
+    void bottomCovered();
     // Small native HUD font; geometry is batched and remains alive for the frame.
     void drawScreenText(const char* text,float x,float y,float scale,uint32_t rgba=0xffffffff);
     // Call after end(). Waits for the finished frame and copies the top-screen
@@ -441,6 +457,28 @@ public:
     // Menus/QA synchronize here. Racing waits for VBlank before polling input.
     bool loadingFrame=false; // first race renders complete under the loading cover
     bool frameSync=true;
+    // Pipelined deferred frames (c3d/pipeline.h): the render thread builds
+    // frame k while the GPU draws frame k-1. Set before init(); init() clears
+    // it when the second set of per-frame buffers does not fit.
+    bool pipelineFrames=false;
+    // Bloom's scene copy and composite as one full-screen pass, with no LCD
+    // colour clear under it (applyBloomNow). Set before the race.
+    bool bloomMerge=false;
+    // Shadow volumes shade only the screen rectangle their bounds project to,
+    // not the whole screen (shadowVolumesNow). A/B: no-shadow-rect.txt.
+    bool shadowRects=false;
+    // Course objects past retail's draw distance (ObjFlow) are not drawn
+    // (CourseObjects). A/B: no-draw-distance.txt.
+    bool drawDistance=false;
+    // Opaque course submeshes draw from the spatially sorted shadow copy of
+    // their indices (contactIndices), so 128-triangle culling blocks are
+    // compact. A/B: no-spatial-course.txt.
+    bool spatialCourse=false;
+    // The sky is drawn after the track's opaque layer, only where nothing
+    // has been drawn (depth still clear), instead of first under everything.
+    // A/B: no-sky-last.txt. setSkyBehind brackets those backdrop draws.
+    bool skyLast=false;
+    void setSkyBehind(bool on){skyBehind_=on;}
     uint32_t animationFrame=0;
     // RRGGBB00 added after the model's material colour, preserving texture alpha.
     // Zero outside Star racer draws; no model/texture mutation is involved.
@@ -449,7 +487,8 @@ public:
 private:
     // Recording (src/render_thread.cpp).
     struct FrameList;
-    struct Stats {uint32_t triangles=0,drawCalls=0,culledTriangles=0,culledSubmeshes=0;float previousGpuMs=0,beginWaitMs=0,commandUsage=0,renderMs=0;RenderMetrics metrics{};};
+    // pixels (DIAG): screen area of 2D quads (sprites, text, fades), clipped to the screen.
+    struct Stats {uint32_t triangles=0,drawCalls=0,culledTriangles=0,culledSubmeshes=0;uint64_t pixels=0;float previousGpuMs=0,beginWaitMs=0,commandUsage=0,renderMs=0;RenderMetrics metrics{};};
     bool recording() const;
     // The 3D slider's position (0..1), or its QA override.
     float slider() const;
@@ -468,6 +507,17 @@ private:
     void submit();
     void execute(FrameList& list);
     void runWrites(FrameList& list);
+    // Pipelined frames: the list being drawn, its previous frame's completion
+    // (C3D_FramePipelineHook) and the per-frame buffers the GPU may still read.
+    FrameList* pipelineList_=nullptr;
+    bool execPipelined_=false,previousFrameDone_=false,endingFrame_=false;
+    uint64_t frameEndTick_=0;
+    static void pipelineHook(void* self);
+    void previousFrameDone();
+    void notePresented();
+    void swapFrameBuffers();
+    bool allocateFrameBuffers();
+    void freeFrameBuffers();
     static void threadEntry(void* self);
     static void aptEvent(APT_HookType type,void* self);
     aptHookCookie aptCookie_{};
@@ -511,7 +561,9 @@ private:
     stereo::Frame execStereo_{};
     unsigned eye_=0;
     bool stereoShown_=false;
-    bool execDualScreenIntro_=false,bottomWorldPass_=false;
+    bool execDualScreenIntro_=false,bottomWorldPass_=false,execBottomCovered_=false;
+    // Diagnostic vertex probe: drawNow uploads a projection that sends every vertex to one point.
+    bool diagCollapse_=false;
     // The top-screen framebuffers the last stereo frame was transferred to.
     const uint8_t* presented_[2]={nullptr,nullptr};
     const uint8_t* presentedBottom_=nullptr;
@@ -571,20 +623,23 @@ private:
     void cinemaBarsNow(float topHeight,float bottomHeight,float opacity);
     bool shadowUnion_=false;
     void shadowUnionNow(bool active);
-    void screenFadeNow(float opacity,bool white,bool depthOnly=false,int shadowMode=0);
+    // rect: x0,y0,x1,y1 in screen pixels (the whole screen when null).
+    void screenFadeNow(float opacity,bool white,bool depthOnly=false,int shadowMode=0,const float* rect=nullptr);
     void spriteNow(const Texture& texture,float x,float y,float width,float height,float u0,float v0,float u1,float v1,float alpha,uint32_t rgba,const uint32_t* corners,bool additive,float angle);
     void fontSpriteNow(const Texture& texture,float x,float y,float width,float height,float u1,float v1,float alpha,uint32_t gradientTop,uint32_t gradientBottom,uint32_t color0,uint32_t color1);
-    void materialQuadsNow(const Texture* texture,const MaterialQuad* quads,unsigned count,uint32_t color0,uint32_t color1,int wrapS,int wrapT,bool additive=false);
+    void materialQuadsNow(const Texture* texture,const MaterialQuad* quads,unsigned count,uint32_t color0,uint32_t color1,int wrapS,int wrapT,bool additive=false,bool opaque=false);
     void textNow(const char* text,float x,float y,float size,uint32_t rgba);
     Vertex* reserveOverlay(int count);
     unsigned recordSceneRegion_=3,execSceneRegion_=3;
     Stats stats_{};
+    bool skyBehind_=false,execBehind_=false;
     uint32_t execFrame_=0,execAdditive_=0;
     C3D_RenderTarget* target_=nullptr;
     // Right eye (VRAM, New 3DS with a 3D screen only; linked to GFX_RIGHT).
     C3D_RenderTarget* targetRight_=nullptr;
     C3D_RenderTarget* bottomTarget_=nullptr;
     float screenWidth_=400.f;
+    void countPixels(float x0,float y0,float x1,float y1);
     DVLB_s* shader_=nullptr;
     shaderProgram_s program_{};
     shaderProgram_s miiProgram_{};bool miiProgramReady_=false;
@@ -609,6 +664,10 @@ private:
     bool retailLightViewReady_[16]{};
     Vec3 retailLightView_[16]{};
     C3D_Tex retailTexture_[2]{},fixedRetailTexture_[2]{},retailFogRamp_{};
+    // Pipelined frames: the other frame's light textures, and whether each
+    // copy holds the latest contents (swapped with them every frame).
+    C3D_Tex retailTextureAlt_[2]{};
+    bool retailTextureCurrent_[2]{},retailTextureAltCurrent_[2]{};
     bool drawSampledLighting_=false;
     uint8_t lightTextureFrom_[2][32*32*4]{},lightTextureTo_[2][32*32*4]{};
     unsigned lightTextureTick_=0,lightTextureAppliedTick_=~0u;
@@ -667,6 +726,10 @@ private:
     // the left-only stadium capture/composite (no extra render targets).
     static constexpr unsigned kBloomVertices=6*52;
     Vertex* overlay_=nullptr;
+    // Pipelined frames: the other frame's sprite, text, overlay, spark and
+    // effect buffers. swapFrameBuffers() exchanges them at each FrameBegin.
+    Vertex *overlayAlt_=nullptr,*spritesAlt_=nullptr,*textAlt_=nullptr,*particlesAlt_=nullptr;
+    void* effectVerticesAlt_=nullptr;C3D_Tex effectLookupAlt_{};
     int overlayCount_=0;
     // Authored Wii HUD panes include layered frames, glyphs and animation quads.
     static constexpr int kSpriteCapacity=512;

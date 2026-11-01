@@ -159,6 +159,9 @@ struct ObjectDraw {
     // Sky pass: no depth test, write or culling (Renderer::draw backdrop).
     bool backdrop=false;
     std::size_t allocationReserve=2u*1024u*1024u;
+    // The object is past retail's draw distance: its presenter still runs
+    // (movers, state timing), but submit/shadow/explosion/plain draw nothing.
+    bool hidden=false;
     void submit(ObjModel* model,const C3D_Mtx& transform,const Anim& anim);
     // -shadow meshes are stencil shadow volumes, resolved after all objects.
     void shadow(ObjModel* model,const C3D_Mtx& transform,const Anim& anim={});

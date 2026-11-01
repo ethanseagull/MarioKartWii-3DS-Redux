@@ -1,4 +1,5 @@
-#include "RaceManager.hh"
+// Diagnostic overlay: the patched header lives in overlay/game/system.
+#include "game/system/RaceManager.hh"
 #include <mkw/battle_spawn.hpp>
 
 #include "game/system/CourseMap.hh"
@@ -88,6 +89,12 @@ bool RaceManager::endBattle(const std::array<u8,12>& order) {
     const Timer finishTime=m_timerManager.currentTimer();
     for(size_t i=0;i<m_playerCount;++i)m_players[order[i]].endRace(finishTime);
     m_timerManager.setStarted(false);
+    return true;
+}
+
+bool RaceManager::qaForceFinish(u32 idx) {
+    if (idx >= m_playerCount || m_players[idx].finished() || !isStageReached(Stage::Race)) return false;
+    m_players[idx].endRace(m_timerManager.currentTimer());
     return true;
 }
 

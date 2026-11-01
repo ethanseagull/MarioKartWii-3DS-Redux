@@ -93,6 +93,7 @@
 #include <mkw/race_sound.hpp>
 #include <mkw/sound_system.hpp>
 #include <mkw/runtime_profile.hpp>
+#include <mkw/diag.hpp>
 #include <mkw/presentation_cadence.hpp>
 #include <mkw/menu_autopilot.hpp>
 #include <mkw/menu_profile.hpp>
@@ -137,7 +138,7 @@ extern "C" u32 __ctru_linear_heap_size=32u<<20;
 // libctru carves the main thread's stack from the start of that heap (initSystem), 32 KiB
 // by default. main's frame alone is about 26 KiB, so the menu loop's callbacks overran it
 // into unmapped memory below 0x08000000; 64 KiB costs 32 KiB of ordinary heap.
-extern "C" u32 __stacksize__=64u<<10;
+extern "C" u32 __stacksize__=128u<<10; // Diagnostic build: QA locals grow main()'s frame by ~9 KB.
 
 namespace K = Kinoko;
 static constexpr const char* DATA = "sdmc:/3ds/mkw-3ds";
@@ -203,7 +204,17 @@ private:
 };
 static void loadBestTimes(){bestTimes=licenseSaves[activeLicense].times;}
 static bool saveBestTimes(){licenseSaves[activeLicense].times=bestTimes;return persistLicense(activeLicense,licenseSaves[activeLicense]);}
-static bool courseAvailable(unsigned i){return Courses[i].supported&&exists("Race/Common.szs")&&exists(Courses[i].archive)&&exists(Courses[i].models)&&(!*Courses[i].sky||exists(Courses[i].sky));}
+// DIAG (no-load-cache.txt): a course list whose first part is packed counts
+// as present without opening it (loadList reads such lists from the pack;
+// an open in the SD card's models/ is slow on the console).
+static bool listAvailable(const char* list){
+    if(mkw::diag::loadCache&&!std::strncmp(list,"models/",7)){
+        char path[128];snprintf(path,sizeof path,"%.*s_000.gmdl",int(std::strlen(list)-(std::strrchr(list,'.')?std::strlen(std::strrchr(list,'.')):0)),list);
+        if(mkw::pack::contains(path))return true;
+    }
+    return exists(list);
+}
+static bool courseAvailable(unsigned i){return Courses[i].supported&&exists("Race/Common.szs")&&exists(Courses[i].archive)&&listAvailable(Courses[i].models)&&(!*Courses[i].sky||listAvailable(Courses[i].sky));}
 static void showControls(bool ready){
     consoleClear();printf("MKW/ MARIO KART RECOMPILED 3DS\n%s / manual drift\n",Courses[courseChoice].name);
     printf("3DS CONTROLS\nCircle Pad: steer  A: accelerate\nB: brake  R: hop/drift  L: use item\nD-pad: trick / bike wheelie\nSTART: maps/pause  SELECT: restart\nX/Y: character  B+X/Y: vehicle\n");
@@ -385,25 +396,64 @@ int main() {
     if(autoplay)if(kQa)if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/race-capture.txt","r")){unsigned n=0,leave=0;const int got=fscanf(f,"%u %u",&n,&leave);raceCaptureEvery=got>=1&&n>1?n:20;raceCaptureLeave=got==2&&leave;fclose(f);}
     const bool raceCapture=raceCaptureEvery>0;
     auto menuProfile=std::make_unique<mkw::MenuProfile>();
-    if(autoplay||(kQa&&exists("sdmc:/3ds/mkw-3ds/menu-performance.txt")))menuProfile->enable();
+    // Diagnostic overlay: menu timing is always recorded (bounded, mkw/menu_profile.hpp).
+    if(kQa)menuProfile->enable();
+    // Per-object sound traces stay opt-in (menu-performance.txt): they cost audio time.
+    const bool menuTrace=kQa&&exists("sdmc:/3ds/mkw-3ds/menu-performance.txt");
+    // benchmark.txt + menu-autoplay.txt: VS rules forced to 32 races in order, no intro screenshots.
+    const bool benchmark=autoplay&&exists("sdmc:/3ds/mkw-3ds/benchmark.txt");
+    // Diagnostic overlay: benchmark-progress.txt holds the in-order deck index of
+    // the next course. It's rewritten after every benchmark race and removed after
+    // the set's last one, so a run that stops resumes at the course it was on.
+    unsigned benchmarkStart=0;bool benchmarkSeeded=false;
+    if(benchmark)if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/benchmark-progress.txt","r")){unsigned n=0;if(fscanf(f,"%u",&n)==1&&n<32)benchmarkStart=n;fclose(f);}
+    if(benchmark){char text[64];snprintf(text,sizeof text,"benchmark start course %u",benchmarkStart);report(text);}
+    // GPU pass leave-out (mkw/diag.hpp): unattended runs, or gpu-passes.txt.
+    mkw::diag::passState.enabled=kQa&&(autoplay||exists("sdmc:/3ds/mkw-3ds/gpu-passes.txt"));
     using MenuStage=mkw::MenuProfile::Stage;
     uint64_t raceLoadStart=0;
     // QA: race load stage timing with file-open counts.
-    uint64_t stageTick=0;unsigned stageOpens=0;unsigned long long stageOpenTicks=0;
+    uint64_t stageTick=0;unsigned stageOpens=0;unsigned long long stageOpenTicks=0,stageReadBytes=0,stageReadTicks=0;
     auto stage=[&](const char* name){
         const auto now=svcGetSystemTick();const unsigned opens=mkw::fileOpens.load();const auto openTicks=mkw::fileOpenTicks.load();
-        if(stageTick&&menuProfile->enabled()){char text[160];snprintf(text,sizeof text,"load %s %.1f ms, %u opens (%.1f ms opening)",name,double(now-stageTick)*1000.0/SYSCLOCK_ARM11,opens-stageOpens,double(openTicks-stageOpenTicks)*1000.0/SYSCLOCK_ARM11);menuProfile->event(text);report(text);}
-        stageTick=now;stageOpens=opens;stageOpenTicks=openTicks;
+        const auto readBytes=mkw::packReadBytes.load(),readTicks=mkw::packReadTicks.load();
+        if(stageTick&&menuProfile->enabled()){char text[200];snprintf(text,sizeof text,"load %s %.1f ms, %u opens (%.1f ms opening), %llu KB from packs (%.1f ms reading)",name,double(now-stageTick)*1000.0/SYSCLOCK_ARM11,opens-stageOpens,double(openTicks-stageOpenTicks)*1000.0/SYSCLOCK_ARM11,(readBytes-stageReadBytes)/1024,double(readTicks-stageReadTicks)*1000.0/SYSCLOCK_ARM11);menuProfile->event(text);report(text);}
+        // Each open in the stage, slow SD directory lookups included.
+        mkw::openTrace.take([&](const mkw::OpenTrace::Open& o){
+            if(!stageTick||!menuProfile->enabled()||!std::strncmp(o.path,"sdmc:/3ds/mkw-3ds/",18))return;
+            char text[160];snprintf(text,sizeof text,"  open %s %.1f ms%s",o.path,double(o.ticks)*1000.0/SYSCLOCK_ARM11,o.found?"":" (missing)");report(text);
+        });
+        stageTick=now;stageOpens=opens;stageOpenTicks=openTicks;stageReadBytes=readBytes;stageReadTicks=readTicks;
     };
     auto finishAutoplay=[&](){
         if(!menuProfile->enabled())return;
         menuProfile->write("sdmc:/3ds/mkw-3ds/menu-performance.csv");
-        if(autoplay)if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/menu-autoplay-result.json","w")){fprintf(f,"{\"pass\":%s,\"races\":%u,\"failure\":\"%s\"}\n",autopilot->passed()?"true":"false",autopilot->racesStarted(),autopilot->failure());fclose(f);}
+        if(autoplay)if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/menu-autoplay-result.json","w")){fprintf(f,"{\"pass\":%s,\"races\":%u,\"start\":%u,\"stuck\":[%s],\"failure\":\"%s\"}\n",autopilot->passed()?"true":"false",autopilot->racesStarted(),benchmarkStart,autopilot->stuckRaces(),autopilot->failure());fclose(f);}
     };
     // Persistent renderer state must not consume the ARM11 main stack.
     auto rendererStorage=std::make_unique<mkw::Renderer>();
     auto& renderer=*rendererStorage;
+    // Pipelined race frames (A/B: no-pipeline.txt turns them off).
+    renderer.pipelineFrames=!exists("sdmc:/3ds/mkw-3ds/no-pipeline.txt");
+    // Bottom screen: no background fill under the opaque map (A/B: no-bottom-cover.txt).
+    mkw::RaceBottomScreen::skipCoveredFill=!exists("sdmc:/3ds/mkw-3ds/no-bottom-cover.txt");
+    // Shadow volumes shade only their projected rectangle (A/B: no-shadow-rect.txt).
+    renderer.shadowRects=!exists("sdmc:/3ds/mkw-3ds/no-shadow-rect.txt");
+    // The local racer's textures take VRAM before the course's (A/B: no-player-vram.txt).
+    const bool playerTexturesVram=!exists("sdmc:/3ds/mkw-3ds/no-player-vram.txt");
+    // Course objects past retail's draw distance are not drawn (A/B: no-draw-distance.txt).
+    renderer.drawDistance=!exists("sdmc:/3ds/mkw-3ds/no-draw-distance.txt");
+    renderer.spatialCourse=!exists("sdmc:/3ds/mkw-3ds/no-spatial-course.txt");
+    mkw::shrinkHudTextures=!exists("sdmc:/3ds/mkw-3ds/no-hud-shrink.txt");
+    renderer.skyLast=!exists("sdmc:/3ds/mkw-3ds/no-sky-last.txt");
+    mkw::diag::modelPixels=exists("sdmc:/3ds/mkw-3ds/model-pixels.txt");
+    mkw::diag::menuFast=!exists("sdmc:/3ds/mkw-3ds/no-menu-fast.txt");mkw::diag::menuCheck=exists("sdmc:/3ds/mkw-3ds/menu-check.txt");mkw::diag::unlitBanks=!exists("sdmc:/3ds/mkw-3ds/no-unlit-banks.txt");
+    mkw::diag::loadCache=!exists("sdmc:/3ds/mkw-3ds/no-load-cache.txt");report(mkw::diag::loadCache?"load cache on":"load cache off");
     if(!renderer.init()){report("FAIL Citro3D initialization");return startupFailure("Citro3D initialization failed.");}
+    report(renderer.pipelineFrames?"pipelined race frames on":"pipelined race frames off");
+    // Merged bloom composite (A/B: no-bloom-merge.txt turns it off).
+    renderer.bloomMerge=!exists("sdmc:/3ds/mkw-3ds/no-bloom-merge.txt");
+    report(renderer.bloomMerge?"merged bloom composite on":"merged bloom composite off");
     // The startup save read also needs an RGB8 lower LCD (the debug console
     // otherwise leaves RGB565 active until the first menu).
     if(!renderer.enableBottom()){renderer.shutdown();return startupFailure("Lower LCD initialization failed.");}
@@ -424,6 +474,8 @@ int main() {
     mkw::MenuState menu;
     menu.titleRandom=std::uint32_t(svcGetSystemTick())|1u;
     menu.cpuRandom.state=std::uint32_t(svcGetSystemTick());
+    // QA captures compare builds frame for frame: the same CPU lineup every run.
+    if(raceCapture){menu.titleRandom=1u;menu.cpuRandom.state=0x4d4b5733u;}
     mkw::LicenseLoad loaded;
     {mkw::LoadingScope loading;loaded=mkw::loadLicenseSaves(LicenseDirectory,licenseSaves);
     for(unsigned slot=0;slot<4;++slot){
@@ -437,8 +489,11 @@ int main() {
         menu.licenseBestTimes[slot]=save.times;menu.licenseOccupied[slot]=save.occupied;menu.licenseCups[slot]=save.cups;menu.licenseNames[slot]=save.name;menu.licenseUnlocks[slot]=save.unlockFlags;menu.saveFailed|=damagedLicenses[slot];
     }
     }
+    // DIAG: the slot last-license.txt holds; accepting the same slot again
+    // skips rewriting it (a synchronous SD create and rename).
+    unsigned lastLicenseSaved=~0u;
     {unsigned last=0;FILE* f=std::fopen("sdmc:/3ds/mkw-3ds/last-license.txt","r");
-     if(f){if(std::fscanf(f,"%u",&last)!=1)last=0;std::fclose(f);}
+     if(f){if(std::fscanf(f,"%u",&last)!=1)last=0;else lastLicenseSaved=last;std::fclose(f);}
      if(last>=4||!menu.licenseOccupied[last]){last=0;for(unsigned i=0;i<4;++i)if(menu.licenseOccupied[i]){last=i;break;}}
      // Load the selected profile before any strap/title input can reach
      // the shared menu autosave path. Rules must never be replaced by UiSelection defaults.
@@ -638,7 +693,7 @@ int main() {
         gyroTrick.reset();
         for(unsigned slot=0;slot<4;++slot)menu.licenseUnlocks[slot]=licenseSaves[slot].unlockFlags;
         if(menu.page==mkw::UiPage::MainMenu)nextUnlock();
-        if(menu.page==mkw::UiPage::Pause){mkw::animationStride.store(1);recordPauseStage("menu-enter",true);profiler->finish();}
+        if(menu.page==mkw::UiPage::Pause){mkw::animationStride.store(1);recordPauseStage("menu-enter",true);profiler->finish();mkw::diag::deferSdLogs(false);}
         renderer.setDualScreenIntro(false);
         renderer.frameSync=true;
         renderer.setDeferred(false);
@@ -722,6 +777,11 @@ int main() {
             // the race section for an unrelated menu or a different race.
             if(raceResident&&!menu.retainsRaceAssets()&&!transition.visual(menu).retainsRaceAssets())releaseRace();
             if(!renderer.bottomEnabled()&&!renderer.enableBottom()){report("FAIL lower menu target");return leave(mkw::UiAction::Exit);}
+            if(benchmark){menu.selection.mode=mkw::UiMode::VS;menu.selection.teams=false;menu.selection.vsCourses=2;menu.selection.vsRaces=32;
+                // A resumed run starts the in-order deck at the saved course
+                // (prepareVsCourses has just put the set's first course on Confirm).
+                if(!benchmarkSeeded&&menu.page==mkw::UiPage::Confirm&&menu.vsCourseIndex==0){
+                    benchmarkSeeded=true;menu.vsCourseIndex=benchmarkStart;menu.selection.course=menu.vsCourseDeck[benchmarkStart];}}
             menuProfile->begin(unsigned(menu.page),transition.active());
             hidScanInput();unsigned down=hidKeysDown();
             unsigned navigation=down|hidKeysDownRepeat();
@@ -735,7 +795,9 @@ int main() {
                 }
                 input={};
             }
-            if(autoplay){input=autopilot->menu(menu,revealed&&!transition.active());if(autopilot->finished())return leave(mkw::UiAction::Exit);}
+            // Diagnostic overlay: a pending license save discards input (below), so the
+            // script waits instead of spending its next token on a dropped press.
+            if(autoplay){input=autopilot->menu(menu,revealed&&!transition.active()&&!selectionSave&&!pendingRaceMiiConfirm);if(autopilot->finished())return leave(mkw::UiAction::Exit);}
             const auto beforeInput=menu;
             if(selectionSave||pendingRaceMiiConfirm)input={};
             const bool acceptedInput=!transition.active()&&!selectionSave&&!pendingRaceMiiConfirm;
@@ -753,6 +815,7 @@ int main() {
                     pendingRaceMiiConfirm=true;
                 }else{menu.selectRaceMiiRequest=-1;menu.saveFailed=result==mkw::IdentitySelection::Failed;}
             }
+            const auto acceptStart=svcGetSystemTick();
             if(acceptedInput){
                 const unsigned slot=std::min(menu.selection.license,3u);
                 auto& save=licenseSaves[slot];menu.licenseRecords=save.records;
@@ -787,10 +850,10 @@ int main() {
                         if(save.occupied&&menu.page==mkw::UiPage::MainMenu)menu.selection=save.settings;
                         menu.licenseBestTimes[slot]=save.times;menu.licenseOccupied[slot]=save.occupied;
                         menu.licenseNames[slot]=save.name;menu.licenseUnlocks[slot]=save.unlockFlags;
-                        if(save.occupied&&menu.page==mkw::UiPage::MainMenu&&!menu.saveFailed){
+                        if(save.occupied&&menu.page==mkw::UiPage::MainMenu&&!menu.saveFailed&&(!mkw::diag::loadCache||slot!=lastLicenseSaved)){
                          FILE* f=std::fopen("sdmc:/3ds/mkw-3ds/last-license.txt.tmp","w");
                          if(f){const bool wrote=std::fprintf(f,"%u\n",slot)>0;const bool closed=std::fclose(f)==0;
-                          if(wrote&&closed)std::rename("sdmc:/3ds/mkw-3ds/last-license.txt.tmp","sdmc:/3ds/mkw-3ds/last-license.txt");}
+                          if(wrote&&closed&&std::rename("sdmc:/3ds/mkw-3ds/last-license.txt.tmp","sdmc:/3ds/mkw-3ds/last-license.txt")==0)lastLicenseSaved=slot;}
                         }
                     }
                 }
@@ -833,6 +896,10 @@ int main() {
                         if(!menu.saveFailed)save=updated;
                     }
                 }
+            }
+            if(acceptedInput&&menuProfile->enabled()&&svcGetSystemTick()-acceptStart>u64(SYSCLOCK_ARM11/200)){
+                snprintf(line,sizeof line,"license/save handling %.1f ms (page %u to %u)",double(svcGetSystemTick()-acceptStart)*1000.0/SYSCLOCK_ARM11,unsigned(beforeInput.page),unsigned(menu.page));
+                menuProfile->event(line);
             }
             if(acceptedInput&&(menu.unlockNextRequested||
                 (beforeInput.page==mkw::UiPage::License&&menu.page==mkw::UiPage::MainMenu&&!menu.saveFailed))){
@@ -910,6 +977,31 @@ int main() {
             menuProfile->mark(MenuStage::Input);
             const auto& visual=transition.visual(menu);const auto motion=transition.view();
             mkw::composeMenu(visual,uiRace,quads,motion);
+            // DIAG (menu-check.txt): compose again without the fast paths and compare.
+            if(mkw::diag::menuCheck&&mkw::diag::menuFast){
+                static std::vector<mkw::UiQuad> slow;static unsigned checked=0,differing=0;
+                mkw::diag::menuFast=false;mkw::composeMenu(visual,uiRace,slow,motion);mkw::diag::menuFast=true;
+                auto same=[](const mkw::UiQuad& a,const mkw::UiQuad& b){
+                    return a.sprite==b.sprite&&a.x==b.x&&a.y==b.y&&a.w==b.w&&a.h==b.h&&a.alpha==b.alpha&&a.tint==b.tint&&a.bottom==b.bottom&&
+                        a.u0==b.u0&&a.v0==b.v0&&a.u1==b.u1&&a.v1==b.v1&&a.movie==b.movie&&a.corners==b.corners&&a.additive==b.additive&&
+                        a.vehicleIcon==b.vehicleIcon&&a.fontRemap==b.fontRemap&&a.fontColor0==b.fontColor0&&a.fontColor1==b.fontColor1&&
+                        a.affine==b.affine&&a.positions==b.positions&&a.screenSlide==b.screenSlide&&a.titleTransfer==b.titleTransfer&&
+                        a.previewFullAlpha==b.previewFullAlpha&&a.licensePortrait==b.licensePortrait;};
+                bool equal=slow.size()==quads.size();for(size_t k=0;equal&&k<quads.size();++k)equal=same(quads[k],slow[k]);
+                ++checked;if(!equal){++differing;char text[120];snprintf(text,sizeof text,"menu check: page %u frame %u differs (%u of %u)",unsigned(menu.page),checked,differing,checked);report(text);}
+                if(checked%600==0){char text[120];snprintf(text,sizeof text,"menu check: %u frames compared, %u differ",checked,differing);report(text);}
+            }
+            // DIAG: composeMenu's time per operation, logged every 60 frames on a page.
+            {namespace D=mkw::diag;static unsigned composePage=~0u,composeFrames=0;
+             const unsigned page=unsigned(menu.page);
+             if(page!=composePage||transition.active()){composePage=transition.active()?~0u:page;composeFrames=0;for(auto& t:D::composeTicks)t=0;for(auto& c:D::composeCalls)c=0;}
+             else if(++composeFrames==60){
+                 double total=0;for(auto t:D::composeTicks)total+=double(t);
+                 char text[512];int used=snprintf(text,sizeof text,"compose page=%u %.2f ms/frame:",page,total*1000.0/SYSCLOCK_ARM11/60);
+                 for(size_t k=0;k<std::size(D::ComposeNames)&&used<int(sizeof text)-40;++k)if(D::composeTicks[k]*1000.0/SYSCLOCK_ARM11/60>=.02)
+                     used+=snprintf(text+used,sizeof text-used," %s %.2f (%u)",D::ComposeNames[k],D::composeTicks[k]*1000.0/SYSCLOCK_ARM11/60,D::composeCalls[k]/60);
+                 report(text);composeFrames=0;for(auto& t:D::composeTicks)t=0;for(auto& c:D::composeCalls)c=0;
+             }}
             menuProfile->mark(MenuStage::Compose);
             const auto key=residencyKey(visual,motion.underlay);
             if(!visualKeyed||!(key==visualKey)){
@@ -1119,7 +1211,7 @@ int main() {
         selectedMirror=cc==3;selectedEngineClass=std::min(cc,2u);
         selectedCpu=battleMode?menu.selection.battleCpu:vs?menu.selection.vsCpu:(selectedRaceMode==0?std::min(selectedEngineClass,2u):1u);selectedCpuVehicles=battleMode?menu.selection.battleVehicles:vs?menu.selection.vsVehicles:0;selectedItems=battleMode?menu.selection.battleItems:vs?menu.selection.vsItems:0;
     };
-    if(fullRace){if(runMenu()!=mkw::UiAction::StartRace){finishAutoplay();renderer.waitForGpu();menuModels.reset(renderer);menuIcons.reset(renderer);menuRenderer.release();mkw::SoundSystem::instance().stop();mkw::MenuMovieAudio::shutdown();mkw::shutdownLoadingScreen();renderer.shutdown();gfxExit();return 0;}applySelection();menu.raceStarted();raceLoadStart=svcGetSystemTick();}
+    if(fullRace){if(runMenu()!=mkw::UiAction::StartRace){finishAutoplay();renderer.waitForGpu();menuModels.reset(renderer);menuIcons.reset(renderer);menuRenderer.release();mkw::SoundSystem::instance().stop();mkw::MenuMovieAudio::shutdown();mkw::shutdownLoadingScreen();renderer.shutdown();gfxExit();return 0;}applySelection();menu.raceStarted();menuProfile->write("sdmc:/3ds/mkw-3ds/menu-performance.csv");raceLoadStart=svcGetSystemTick();}
     bool dataReady=exists("Race/Common.szs")&&courseAvailable(courseChoice);
     if(dataReady&&(kQa&&exists("sdmc:/3ds/mkw-3ds/trace-test.txt"))) {
         // Invoke upstream's complete per-frame KRKG comparison, not just final position.
@@ -1193,7 +1285,9 @@ int main() {
     };
 
     mkw::GpTelemetry gpTelemetry;
-    auto raceCount=[&](){return menu.selection.mode==mkw::UiMode::VS?menu.selection.vsRaces:4u;};
+    // Diagnostic overlay: a resumed benchmark's set is the courses left. The saved
+    // rule stays 32: licenses only accept the menu's race counts (UiVsRaceCounts).
+    auto raceCount=[&](){return menu.selection.mode==mkw::UiMode::VS?(benchmark?32u-benchmarkStart:menu.selection.vsRaces):4u;};
     struct VsSet {unsigned race=0,driver=~0u;std::array<uint8_t,12> finishPositions{};std::array<uint16_t,12> points{},roundStartPoints{};std::array<mkw::GpRacePerformance,4> performance{};std::array<bool,4> performanceCaptured{};std::array<unsigned,4> performanceCourses{};bool next=false;};
     auto vsSetStorage=std::make_unique<VsSet>();auto& vsSet=*vsSetStorage;bool nextRaceQueued=false;
     mkw::BattleSession battleSession;battleSession.reset(menu.selection.battleWins);bool sessionCoin=coinRunnersMode;
@@ -1324,7 +1418,19 @@ int main() {
         K::System::RaceManager::Instance()->setIntroHeld(intro.active());
         startCamera();
     };
-    auto endIntro=[&](){intro.stop();introClearance.clear();renderer.waitForGpu();flowUi.unloadIntro();K::System::RaceManager::Instance()->setIntroHeld(false);};
+    // DIAG: the intro's end no longer drains the pipelined GPU frame; its
+    // textures are retired instead (no-intro-retire.txt restores the drain).
+    // reportIterations: the loop iteration that ends the intro and the next three.
+    bool introRetire=!exists("sdmc:/3ds/mkw-3ds/no-intro-retire.txt");
+    unsigned reportIterations=0;const char* reportLabel="";
+    auto endIntro=[&](){
+        const auto start=svcGetSystemTick();
+        intro.stop();introClearance.clear();
+        if(introRetire)flowUi.retireIntro(renderer);else{renderer.waitForGpu();flowUi.unloadIntro();}
+        K::System::RaceManager::Instance()->setIntroHeld(false);
+        reportIterations=4;
+        static char label[64];snprintf(label,sizeof label,"intro end (%s, %.2f ms in endIntro)",introRetire?"retire":"drain",double(svcGetSystemTick()-start)*1000.0/SYSCLOCK_ARM11);reportLabel=label;
+    };
     // Race audio (docs/AUDIO_SOURCE.md "Race"): after the race's graphics, so its
     // residency fits the LINEAR they left.
     auto beginRaceSound=[&](){
@@ -1601,6 +1707,8 @@ int main() {
             if(!balloonRuntime.reset(raceGrid.count(),teams)){trackLoadFailed=true;report("FAIL original balloon models");}
         }
         if(timeTrial){raceItems->reset({},raceGrid.count());raceItems->give(0,mkw::ItemKind::TripleMushroom);}
+        // DIAG: the grid, items and AI apart from the opponents' graphics (logged as "grid and opponents").
+        if(reload)stage("grid, items and AI");
         if(reload){if(!opponents.load()){trackLoadFailed=true;report("FAIL opponent graphics load");}}
         else opponents.resetAnimation();
         LOGF("race_grid count=%u opponents=%u route=%d item_boxes=%u",raceGrid.count(),opponents.count(),raceGrid.routeReady(),unsigned(raceItems->boxes().size()));
@@ -1622,10 +1730,20 @@ int main() {
     auto moveCourseTexturesToVram=[&](){
         if(!mkw::renderQuality().vramCourseTextures)return;
         renderer.waitForGpu();
-        const auto reserve=mkw::RenderQuality::vramReserve;unsigned moved=0;
+        const auto reserve=mkw::RenderQuality::vramReserve;unsigned moved=0,playerMoved=0;
+        // The local racer first: large on screen in every frame, up to three
+        // texture fetches per pixel (albedo and two light textures).
+        const auto vramBefore=vramSpaceFree();
+        if(playerTexturesVram){
+            auto racer=[&](const mkw::Model* model){if(model)for(auto& t:model->textures)if(t)playerMoved+=renderer.moveToVram(*t,reserve);};
+            racer(vehicle.get());racer(driver.get());
+            for(const auto& w:wheels)racer(w.get());
+            for(const auto& a:accessories)racer(a.get());
+        }
+        const auto playerBytes=vramBefore-vramSpaceFree();
         for(auto* parts:{&track,&sky})for(auto& model:*parts)for(auto& t:model->textures)if(t)moved+=renderer.moveToVram(*t,reserve);
         moved+=courseObjects.moveTexturesToVram(renderer,reserve);
-        LOGF("course textures in VRAM moved=%u linear_free=%lu vram_free=%lu",moved,(unsigned long)linearSpaceFree(),(unsigned long)vramSpaceFree());
+        LOGF("course textures in VRAM moved=%u player_moved=%u player_bytes=%lu linear_free=%lu vram_free=%lu",moved,playerMoved,(unsigned long)playerBytes,(unsigned long)linearSpaceFree(),(unsigned long)vramSpaceFree());
     };
     // Course meshes and their spatial indices are loaded for a race and kept
     // across pause. Only race teardown/course changes release this scenery.
@@ -1635,6 +1753,22 @@ int main() {
         track.clear();sky.clear();
         auto loadList=[&](const char* list,auto& parts){
             if(!*list)return;
+            // DIAG (no-load-cache.txt): a course list in models/ names its
+            // parts <list>_000, _001, ... in order (all 125 race lists whose
+            // parts are packed). Read that sequence from the pack index and
+            // skip opening the list, a slow lookup in the SD card's models/.
+            if(mkw::diag::loadCache&&!std::strncmp(list,"models/",7)){
+                char stem[64];snprintf(stem,sizeof stem,"%s",list);
+                if(char* dot=std::strrchr(stem,'.'))*dot=0;
+                char path[128];
+                for(unsigned i=0;i<1000;++i){
+                    snprintf(path,sizeof path,"%s_%03u.gmdl",stem,i);
+                    if(!mkw::pack::contains(path))break;
+                    auto model=std::make_unique<mkw::Model>();
+                    if(model->load(path))parts.push_back(std::move(model));else {failed=true;report(path);report("FAIL course part load");}
+                }
+                if(!parts.empty()||failed)return;
+            }
             FILE* f=fopen(list,"r");
             if(!f){failed=true;report("FAIL course model list");return;}
             char name[64];while(fscanf(f,"%63s",name)==1){
@@ -1651,7 +1785,7 @@ int main() {
         // a white sheet over the actual road.
         for(auto& model:track){
             model->enableStaticCulling(true);
-            if(int(Courses[courseChoice].id)==12)model->enableCastleRegions();
+            if(int(Courses[courseChoice].id)==12)model->enableCastleRegions(renderer.spatialCourse);
         }
         return !failed&&!track.empty();
     };
@@ -1766,7 +1900,8 @@ int main() {
                     sound.loadScene(groups,1);
                 }else sound.stop();
             }
-            renderer.clearUnusedTextureCache();mkw::pack::close();mkw::pack::open();
+            // DIAG: the packs' 1.9 MB index is no longer re-read every race.
+            renderer.clearUnusedTextureCache();if(!mkw::diag::loadCache){mkw::pack::close();mkw::pack::open();}
         };
         auto attempt=[&](){
             trackLoadFailed=false;
@@ -1958,11 +2093,18 @@ int main() {
     const bool deferredRace=!animationTest;
     renderer.setDeferred(deferredRace);
     while(aptMainLoop()){
+        // DIAG: report the iteration that ended the intro or reached GO, then three more.
+        {const auto now=mkw::diag::iterationBegin();
+         static int lastStage=-1;const auto* raceManager=K::System::RaceManager::Instance();
+         const int stage=raceManager&&menu.page==mkw::UiPage::Race?int(raceManager->stage()):-1;
+         if(stage!=lastStage&&stage==int(K::System::RaceManager::Stage::Race)&&lastStage==int(K::System::RaceManager::Stage::Countdown)){reportIterations=4;reportLabel="race start (GO)";}
+         lastStage=stage;
+         if(reportIterations){char text[400];mkw::diag::describeIteration(text,sizeof text,reportLabel,now);report(text);--reportIterations;reportLabel="  next";}}
         // Poll controls and advance source state once per top-screen refresh.
         // Submit once per presentation slot. FrameBegin below retires
         // the prior GPU queue without inserting a second VBlank wait.
         // No presentation job may run while anything below can step the race.
-        mkw::jobWorker().finishAll();
+        mkw::jobWorker().finishAll();mkw::diag::iterationMark("jobs");
         if(awardPending){
             const auto awardTransitionStart=svcGetSystemTick();
             awardPending=false;
@@ -2007,7 +2149,17 @@ int main() {
         const bool endMenu=menu.page==mkw::UiPage::Results&&results.phase()==mkw::RaceFlowPhase::Menu;
         gyroTrick.read(fullRace&&!qaMode&&!autoplay&&!replay&&dataReady&&
                        menu.page==mkw::UiPage::Race&&!intro.active()&&!results.active());
-        if(autoplay){if(intro.active())held=down=0;else autopilot->race(held,down,physicsSteps,results.active(),endMenu,menu.cursor);if(autopilot->finished())break;}
+        if(autoplay){
+            auto* raceManager=K::System::RaceManager::Instance();
+            if(intro.active()){held=down=0;if(!raceWarmupFrames&&autopilot->introSkip())down=KEY_A;}
+            else autopilot->race(held,down,physicsSteps,results.active(),endMenu,menu.cursor,raceManager?raceManager->player(0).raceCompletion():0.f,results.finalRace());
+            // Diagnostic overlay: a stuck autopilot race is finished through Kinoko's
+            // own finish path, so the results, next and the VS set carry on.
+            if(autopilot->takeForceFinish()){const bool ok=raceManager&&raceManager->qaForceFinish(0);
+                LOGF("QA autoplay stuck (%s): forced finish race=%u course=%s lap=%u completion=%.3f step=%u ok=%d",autopilot->stuckReason(),autopilot->racesStarted(),
+                     Courses[courseChoice].name,raceGrid.lap(),raceManager?raceManager->player(0).raceCompletion():0.f,physicsSteps,int(ok));}
+            if(autopilot->finished())break;
+        }
 #ifdef MKW_FRAME_CAPTURE
         // Diagnostic build only: L+R+Down starts a bounded RAM capture.
         // Consume the chord so it does not use an item or hop while arming.
@@ -2082,6 +2234,16 @@ int main() {
         // should the refresh count ever stall, the clock.
         accumulator+=fullRace&&refreshes?double(std::min<u32>(refreshes,6)):std::min(delta,0.1)*60.0;
         if(raceWarmupFrames)accumulator=1; // settle initial support, never catch up loading wall time
+        // Diagnostic overlay: automatic race profiling (racing frames only).
+        {const bool profiled=fullRace&&dataReady&&!trackLoadFailed&&!raceWarmupFrames&&menu.page==mkw::UiPage::Race&&!intro.active()&&!results.active();
+        // Logs held in RAM reach the card before the profiler writes its files.
+        if(!profiled)mkw::diag::deferSdLogs(false);
+        profiler->autoFrame(profiled);
+        if(profiled){mkw::diag::deferSdLogs(true);
+            const auto* bloom=mkw::courseBloom(Courses[courseChoice].archive);const int id=int(Courses[courseChoice].id);
+            profiler->context(renderer.stereoWanted(),bloom&&bloom->enabled(),id==18||id==6||id==35,menu.selection.dynamicShadows,renderer.pipelineFrames,renderer.bloomMerge,renderer.shadowRects,playerTexturesVram,renderer.drawDistance,renderer.spatialCourse,mkw::shrinkHudTextures,renderer.skyLast);}
+        mkw::diag::passFrame(profiled);}
+        mkw::diag::iterationMark("pre-begin");
         profiler->begin(unsigned(Courses[courseChoice].id),frames,physicsSteps,float(delta*1000));
         if(dataReady){
             if(trackLoadFailed){
@@ -2377,10 +2539,18 @@ int main() {
                                 awardResults.coinRunners=coinRunnersMode;
                                 awardResults.performance=vsSet.performance;awardResults.performanceCaptured=vsSet.performanceCaptured;
                                 awardResults.calculateGrade(vsSet.performanceCourses);
-                                awardPending=mkw::hasAwardScene(awardResults);
+                                // Diagnostic overlay: the ceremony reads the buttons itself, so an unattended
+                                // benchmark skips it and goes straight back to the menus.
+                                awardPending=mkw::hasAwardScene(awardResults)&&!benchmark;
                             }
                             sectionFadeIn=true;
                             vsSet.next=results.chosen()==0&&!results.finalRace();
+                            // Diagnostic overlay: save benchmark progress (the next deck index) before
+                            // Next moves the deck on, or clear it once the set is over.
+                            if(benchmark){
+                                if(results.finalRace())remove("sdmc:/3ds/mkw-3ds/benchmark-progress.txt");
+                                else if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/benchmark-progress.txt","w")){fprintf(f,"%u\n",menu.vsCourseIndex+1);fclose(f);}
+                            }
                             if(menu.page==mkw::UiPage::Results){menu.cursor=unsigned(std::max(0,results.chosen()));nextRaceQueued=menu.input({false,false,false,false,true})==mkw::UiAction::StartRace;}
                         }
                         flowUi.step(results);
@@ -2421,7 +2591,10 @@ int main() {
                         notificationLed.step(led,*raceItems,action->startCount(),int(action->lastStarted()),action->lastAttacker());
                     }
                     // QA heartbeat: a freeze shows as the last line written.
-                    if(kQa&&physicsSteps%300==0){const auto& hi=raceItems->hud(0);LOGF("hb step=%u stage=%u lap=%u rank=%u finished=%d item=%d",physicsSteps,stage,raceGrid.lap(),raceGrid.rank(),int(raceGrid.finished()),int(hi.item));}
+                    if(kQa&&physicsSteps%300==0){const auto& hi=raceItems->hud(0);LOGF("hb step=%u stage=%u lap=%u rank=%u finished=%d item=%d split_drains=%u drain_caller=%08lx effect_rebuilds=%u recording=%u",physicsSteps,stage,raceGrid.lap(),raceGrid.rank(),int(raceGrid.finished()),int(hi.item),
+                        mkw::diag::splitStats.midFrameDrains,(unsigned long)mkw::diag::splitStats.lastDrainCaller,mkw::diag::splitStats.effectRebuilds,mkw::diag::splitStats.effectRebuildsRecording);
+                    if(kQa&&physicsSteps%300==0){const auto& sr=mkw::diag::shadowRectStats;
+                        LOGF("hb shadow_rects bounded=%u full=%u empty=%u mean_bounded_px=%.0f",sr.bounded,sr.full,sr.empty,sr.bounded?double(sr.area)/sr.bounded:0.0);}}
                     mkw::LakituInput jugem;
                     jugem.kart=kart;jugem.stage=stage;jugem.timer=race->timer();jugem.lap=raceGrid.lap();jugem.lapCount=3;
                     jugem.introHeld=intro.active();jugem.finished=raceGrid.finished();jugem.cameraForward=view.target-view.eye;
@@ -2440,7 +2613,7 @@ int main() {
                         const uint16_t coinCues=coinBattle.takeCues(),coinArrivalCues=coinBattle.takeArrivalCues();
                         if(raceSound.active()){
                             const mkw::Vec3 eye=intro.active()?intro.eye():view.eye,look=intro.active()?intro.target():view.target;
-                            actors.traceObjects=menuProfile->enabled();
+                            actors.traceObjects=menuTrace;
                             mkw::fillRaceAudioFrame(actors,{eye.x,eye.y,eye.z},{look.x,look.y,look.z});
                             actors.chaseWarning=raceHud.chaseWarningAudio(actors.chasePan,actors.chaseRate);
                             if(driverChoice>=24)actors.kart[0].miiVoice=selectedMiiVoice;
@@ -2457,7 +2630,7 @@ int main() {
                         // The audio thread only writes a bounded SPSC queue. Disk logging stays here.
                         mkw::RaceAudioLayer::ObjectTrace ot;
                         while(raceSound.layer().takeObjectTrace(ot)) {
-                            if(!menuProfile->enabled()) continue;
+                            if(!menuTrace) continue;
                             char objectLine[512];
                             snprintf(objectLine,sizeof objectLine,"object sound tick=%lu course=%u object=%x index=%u mode=%u sound=%lu initial=%u started=%u muted=%u param=%lx pos=%.1f,%.1f,%.1f listener=%.1f,%.1f,%.1f distance=%.1f ambient=%.6f pan=%.3f dropped=%lu",
                                 (unsigned long)ot.tick,ot.course,ot.object,ot.index,ot.mode,(unsigned long)ot.sound,
@@ -2887,7 +3060,7 @@ int main() {
                 }
                 // QA captures: present exactly on each capture tick (the remaining
                 // accumulator runs next iteration), so builds compare frame for frame.
-                if(autoplay&&intro.active()&&introTick%90==0)break;
+                if(autoplay&&!benchmark&&intro.active()&&introTick%90==0)break;
                 if(raceCapture&&menu.simulates()&&!intro.active()&&physicsSteps%raceCaptureEvery==0)break;
             }
             physicsMs=(svcGetSystemTick()-start)*1000.0/SYSCLOCK_ARM11;maxPhysics=std::max(maxPhysics,physicsMs);
@@ -3011,6 +3184,8 @@ int main() {
             };
             // Course objects record first: they are drawn first.
             courseObjects.prepare(renderer,physicsSteps,renderer.cameraPosition());
+            // DIAG: perf-race-NNN-grid-draws.csv tallies the countdown's draws.
+            mkw::diag::drawGrid.store(fullRace&&K::System::RaceManager::Instance()->stage()==K::System::RaceManager::Stage::Countdown,std::memory_order_relaxed);
             if(fullRace)opponents.prepare(renderer,*raceItems,vec(cameraKart->pos()),physicsSteps,intro.active()||results.active()||raceGrid.finished());
             // Snapshot the original chassis transform before the player pose
             // worker reads VehicleAnimation's lazy matrices.
@@ -3036,11 +3211,19 @@ int main() {
             if(playerJobQueued){playerJob.reset(&runJob<decltype(posePlayer)>,&posePlayer);mkw::jobWorker().submit(playerJob);}
             C3D_Mtx transform;Mtx_Identity(&transform);
             renderer.setCourseLighting(true);
-            if(castleScene!=mkw::castleRegion::Inside){
-                for(auto& model:sky)renderer.draw(*model,transform,true);
-                courseObjects.drawSky(renderer,physicsSteps,renderer.cameraPosition());
-            }
+            auto drawSky=[&](){
+                renderer.diagPass(mkw::diag::PassSky);
+                if(castleScene!=mkw::castleRegion::Inside){
+                    for(auto& model:sky)renderer.draw(*model,transform,true);
+                    courseObjects.drawSky(renderer,physicsSteps,renderer.cameraPosition());
+                }
+            };
+            if(!renderer.skyLast)drawSky();
+            renderer.diagPass(mkw::diag::PassCourse);
             for(auto& model:track)drawCourseLayer(renderer,*model,transform,int(Courses[courseChoice].id),false);
+            // Sky last: after the track's opaque surfaces, before anything that
+            // blends or skips depth writes (road decals, glass, objects).
+            if(renderer.skyLast){renderer.setSkyBehind(true);drawSky();renderer.setSkyBehind(false);renderer.diagPass(mkw::diag::PassCourse);}
             // Authored road decals belong below every racer shadow. Drawing
             // them in the late glass/light pass painted over both shadow types.
             // Coconut's coplanar glass is also the whitening layer above the
@@ -3049,13 +3232,16 @@ int main() {
             const bool glassOverObjects=Courses[courseChoice].id==K::Course::Coconut_Mall;
             if(!glassOverObjects)for(auto& model:track)drawCourseLayer(renderer,*model,transform,int(Courses[courseChoice].id),true,true);
             profiler->mark(Profile::Course);
+            renderer.diagPass(mkw::diag::PassScenery);
             courseObjects.draw(renderer,physicsSteps,renderer.cameraPosition());
+            renderer.diagPass(mkw::diag::PassCourse);
             if(glassOverObjects)for(auto& model:track)drawCourseLayer(renderer,*model,transform,int(Courses[courseChoice].id),true,true);
             profiler->mark(Profile::Scenery);
             if(coinRunnersMode)coinBattle.drawShadows(renderer,physicsSteps);
             renderer.setCourseLighting(false);
             if(playerJobQueued)mkw::jobWorker().finish(playerJob);else posePlayer();
             playerJobQueued=false;
+            renderer.diagPass(mkw::diag::PassOpponents);
             if(fullRace)opponents.draw(renderer,*raceItems,vec(cameraKart->pos()),physicsSteps,
                 playerCastsShadow&&!playerDynamicShadow?vehicleShadow.get():nullptr,&playerShadowTransform);
             if(playerCastsShadow&&!fullRace&&!playerDynamicShadow){
@@ -3063,9 +3249,11 @@ int main() {
                 renderer.drawShadowVolumes(&shadow,1,.5f);
             }
             profiler->mark(Profile::Opponents);
+            renderer.diagPass(mkw::diag::PassItems);
             if(fullRace)raceHud.drawWorld(renderer,*raceItems,vec(cameraKart->pos()),physicsSteps);
             if(fullRace)lakitu.draw(renderer);
             profiler->mark(Profile::Items);
+            renderer.diagPass(mkw::diag::PassPlayer);
             auto drawSkinned=[&](const mkw::DriverAnimation* bank,const mkw::Model& model,const C3D_Mtx& matrix){
                 if(bank&&bank->gpuSkinned())renderer.setSkinPalette(bank->palette(),bank->matrixCount(),21);
                 renderer.draw(model,matrix);
@@ -3106,11 +3294,13 @@ int main() {
             profiler->mark(Profile::Player);
             renderer.setCourseLighting(true);
             Mtx_Identity(&transform);
+            renderer.diagPass(mkw::diag::PassTranslucent);
             for(auto& model:track)drawCourseLayer(renderer,*model,transform,int(Courses[courseChoice].id),true);
             courseObjects.drawWater(renderer);
             renderer.setCourseLighting(false);
             // Resolve local projected shadows after all scene layers. Keep scene
             // depth intact so opaque actors and entered snow still occlude them.
+            renderer.diagPass(mkw::diag::PassPlayerShadow);
             const bool mergeJudgeShadow=playerDynamicShadow&&fullRace&&lakitu.shadowVisible();
             if(mergeJudgeShadow)renderer.setShadowUnion(true);
             if(playerDynamicShadow&&vehicle&&(!fullRace||!raceItems->hud(0).bullet)&&playerBattleVisible){
@@ -3169,8 +3359,10 @@ int main() {
                                   objects.data(),unsigned(objects.size()));
             }
             if(mergeJudgeShadow)renderer.setShadowUnion(false);
+            renderer.diagPass(mkw::diag::PassEffects);
             renderer.drawSparks(driftEffects,sparkTexture);
             renderer.drawEffects(raceEffects,effectTextures->data());
+            renderer.diagPass(mkw::diag::PassNone);
             renderer.markIntroWorldEnd();
             mkw::jobWorker().finishAll();
             renderer.applyBloom();
@@ -3179,6 +3371,7 @@ int main() {
             // Stereo layers (Mario Kart 7's): the HUD and result boards 4 px
             // behind the screen; the full-screen wipe and the pause menu on the
             // screen plane.
+            renderer.diagPass(mkw::diag::PassHud);
             if(fullRace&&intro.active()){renderer.setScreenDepth(renderer.stereoLayer(mkw::stereo::HudLayer));flowUi.drawIntro(renderer,introInfo(),introTick);}
             if(fullRace&&!intro.active()){auto* race=K::System::RaceManager::Instance();
 
@@ -3188,6 +3381,7 @@ int main() {
             if(fullRace)flowUi.drawResults(renderer,results,bottomScreen.miiPortrait());
             renderer.setScreenDepth(0);
             if(fullRace)flowUi.drawWipe(renderer,cameraDirector->wipeProgress());
+            renderer.diagPass(mkw::diag::PassNone);
             profiler->mark(Profile::Hud);
             if(fullRace&&menu.page!=mkw::UiPage::Race)menuRenderer.draw(renderer,raceQuads,false);
             // Leaving after the end-of-race menu: the scene fader covers everything.
@@ -3228,7 +3422,7 @@ int main() {
         if(frames==2)report("graphics second frame submitted");
         if(garageTest&&frames%fixtureFrames==0){rollingChoices+=fixtureRolling;animationPass&=fixtureRolling;}
         // QA (menu autoplay): sample the course preview for review.
-        if(autoplay&&intro.active()&&introTick/90!=introCaptured){introCaptured=introTick/90;
+        if(autoplay&&!benchmark&&intro.active()&&introTick/90!=introCaptured){introCaptured=introTick/90;
             std::vector<uint8_t> pixels(400*240*3);char path[64];snprintf(path,sizeof path,"sdmc:/3ds/mkw-3ds/intro-%02u-%04u.ppm",unsigned(Courses[courseChoice].id),introTick);
             if(renderer.captureTop(pixels.data()))if(FILE* f=fopen(path,"wb")){fprintf(f,"P6\n400 240\n255\n");fwrite(pixels.data(),1,pixels.size(),f);fclose(f);}
             saveRightEye(renderer,path);
@@ -3287,6 +3481,7 @@ int main() {
             if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/smoke-result.json","w")){fprintf(f,"{\"frames\":%u,\"data_ready\":%s,\"linear_free\":%lu,\"physics_peak_ms\":%.3f}\n",frames,dataReady?"true":"false",(unsigned long)linearSpaceFree(),maxPhysics);fclose(f);}break;
         }
     }
+    mkw::diag::deferSdLogs(false);
     finishAutoplay();
     mkw::jobWorker().stop();
     flushRaceSave();

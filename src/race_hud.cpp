@@ -316,6 +316,15 @@ bool RaceHud::load(){
     if(!battle)for(unsigned i=1;i<=12;++i)valid&=impl_->ranks[i].load(HudRanks[i].path);
     for(unsigned i=0;i<10;++i)valid&=impl_->digits[i].load(HudDigits[i].path);
     for(unsigned i=0;i<HudExtraCount;++i)valid&=impl_->extras[i].load(HudExtras[i].path);
+    // Uncompressed art always drawn 2-5x under its texel size (position
+    // 180x128 at 76x54, item frame 128x103 at 55x55, LAP 240x40 at 91x15,
+    // lap digits 64 at 27 and 13): bilinear skips texels, so each pixel is a
+    // cold texture-cache fetch. One halving brings them near 1:1.
+    if(shrinkHudTextures){
+        if(!battle)for(unsigned i=1;i<=12;++i)impl_->ranks[i].shrinkRgba8(1);
+        for(auto& digit:impl_->digits)digit.shrinkRgba8(1);
+        for(unsigned i:{HudFrame,HudLap,HudSlash})impl_->extras[i].shrinkRgba8(1);
+    }
     for(unsigned i=0;i<BalloonNames.size();++i)valid&=impl_->names[i].load(BalloonNames[i].path);
     valid&=impl_->balloonLine.load(BalloonLinePath);
     if(battle){
