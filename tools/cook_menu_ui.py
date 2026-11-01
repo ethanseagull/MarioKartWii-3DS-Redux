@@ -528,7 +528,7 @@ def main():
  for archive in ['Title_U','MenuSingle_U','Present_U']:
   for p in sorted((ROOT/'assets/menu-ui'/archive/'message').glob('*.bmg')):
    if p.name.startswith('._'):continue
-   source(p);message_sources[str(p.relative_to(ROOT))]=messages(p)
+   source(p);message_sources[p.relative_to(ROOT).as_posix()]=messages(p)
    if message_font_indices(p)!={1}:raise ValueError('This localized menu font mapping requires BMG font index 1: '+str(p))
  menu_messages=message_sources['assets/menu-ui/MenuSingle_U/message/Menu.bmg']
  help_ids={'UiHelpMain':[0x7e4,0x7e5,0x7e8,0x7ea],'UiHelpMainMulti':[0x7e5,0x7e6,0x7e7],'UiHelpWfc':[0x7e8,0x7e9],'UiHelpMode':[0xbea,0xbeb,0xbec,0xbee],'UiHelpEngineClasses':[0xbf4,0xbf5,0xbf6,0xbf7],'UiHelpDrift':[0xd16,0xd17],'UiHelpVSMode':[0xd8c,0xd8b]}

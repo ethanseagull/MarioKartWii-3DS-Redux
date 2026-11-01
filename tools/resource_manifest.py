@@ -2,6 +2,7 @@
 """List existing runtime inputs only; does not copy files or build a package."""
 import hashlib,json,struct
 from gx_material import GMDL_SUBMESH_BYTES
+from menu_asset_inputs import compiled_menu_textures,supplemental_menu_textures
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1];assets=ROOT/'sd-card/3ds/mkw-3ds'
 roster_overlay=ROOT/'build/roster'
@@ -146,17 +147,25 @@ for name,expected in menu_ui.get('sourceHashes',{}).items():
  source=ROOT/name
  if '..' in Path(name).parts or not source.is_file() or digest_file(source)!=expected:raise ValueError('Menu UI source changed: '+name)
 movie_manifest=json.loads((assets/'models/menu-movies.json').read_text())
-if movie_manifest.get('version')!=1 or not movie_manifest.get('everySourceFrame') or len(movie_manifest.get('streams',[]))<17:raise ValueError('Cook complete retail menu movies before packaging')
+if movie_manifest.get('version')!=1 or len(movie_manifest.get('streams',[]))<17:raise ValueError('Cook complete retail menu movies before packaging')
+if movie_manifest.get('everySourceFrame')!=all(m.get('sourceFrameStep',1)==1 for m in movie_manifest['streams']):raise ValueError('Inconsistent menu movie frame policy')
 files[assets/'models/menu-movies.json']=Path('models/menu-movies.json')
 for movie in movie_manifest['streams']:
  relative=Path(movie['path']);source_relative=Path(movie['source']);source=ROOT/source_relative
- if relative.parent!=Path('movies') or relative.suffix!='.gmv' or '..' in source_relative.parts or not str(source_relative).startswith('data/extracted/thp/'):raise ValueError('Invalid menu movie path')
+ if relative.parent!=Path('movies') or relative.suffix!='.gmv' or '..' in source_relative.parts or not source_relative.as_posix().startswith('data/extracted/thp/'):raise ValueError('Invalid menu movie path')
  if digest_file(source)!=movie['sourceSha256']:raise ValueError('Menu movie source changed: '+str(source_relative))
+ # Match make_spec: only the >30 Hz title movie is sampled at half rate.
+ # Verify against the source THP rather than trusting the conversion receipt.
+ with source.open('rb') as stream:thp_header=stream.read(0x18)
+ if thp_header[:4]!=b'THP\0':raise ValueError('Invalid source THP')
+ source_fps,source_frames=struct.unpack_from('>fI',thp_header,0x10)
+ step=2 if movie['name']=='title' and source_fps>30 else 1
+ if movie.get('sourceFrameStep',1)!=step or movie['frames']!=(source_frames+step-1)//step or movie['fpsDenominator']!=100000 or movie['fpsNumerator']!=round(source_fps/step*100000):raise ValueError('Invalid menu movie source cadence: '+movie['name'])
  path=assets/relative
  with path.open('rb') as stream:header=stream.read(64)
  if len(header)!=64:raise ValueError('Truncated GMV header')
  magic,version,width,height,count,numerator,denominator,frame_bytes,offset=struct.unpack('<4sIHHIIIII32x',header)
- if magic!=b'GMV1' or version!=1 or [width,height]!=movie['textureSize'] or count!=movie['frames'] or numerator!=movie['fpsNumerator'] or denominator!=movie['fpsDenominator'] or frame_bytes!=width*height//2 or offset!=64 or path.stat().st_size!=64+count*frame_bytes:raise ValueError('Invalid full-rate GMV stream: '+str(relative))
+ if magic!=b'GMV1' or version!=1 or [width,height]!=movie['textureSize'] or count!=movie['frames'] or numerator!=movie['fpsNumerator'] or denominator!=movie['fpsDenominator'] or frame_bytes!=width*height//2 or offset!=64 or path.stat().st_size!=64+count*frame_bytes:raise ValueError('Invalid GMV stream: '+str(relative))
  if digest_file(path)!=movie.get('sha256'):raise ValueError('Menu movie payload changed: '+str(relative))
  files[path]=relative
 intro_audio=movie_manifest['introAudio'];audio_relative=Path(intro_audio['path'])
@@ -500,6 +509,9 @@ import sys
 # Indexed archives (tools/pack_menu_assets.py, tools/pack_race_assets.py): the
 # runtime reads packed assets with one open handle; loose files remain as a
 # fallback for anything not packed.
+for relative,source in supplemental_menu_textures(ROOT).items():files[source]=Path(relative)
+missing_menu=compiled_menu_textures(ROOT)-{relative.as_posix() for relative in files.values()}
+if missing_menu:raise ValueError('Compiled menu textures missing from resource map: '+', '.join(sorted(missing_menu)))
 for archive in ('menu.pak','race.pak'):
  if (assets/archive).is_file():files[assets/archive]=Path(archive)
-print(json.dumps({str(rel):str(src) for src,rel in files.items()},indent=2))
+print(json.dumps({rel.as_posix():str(src) for src,rel in files.items()},indent=2))
