@@ -3,7 +3,7 @@
 //  - SD log deferral: while a race is being profiled, append-mode opens of
 //    sdmc:/3ds/mkw-3ds/ logs (runtime.log, item/effect/audio traces) go to RAM
 //    and are written when profiling stops, so log I/O never lands inside a
-//    measured frame (src/linear_lock.cpp overlay wraps fopen).
+//    measured frame (src/linear_lock.cpp wraps fopen).
 //  - GPU pass leave-out: on one presented frame in PassPeriod the render
 //    thread drops one pass's draw commands (rotating through PassCount-1
 //    passes) and compares that frame's GPU time with its two neighbours.
@@ -68,7 +68,7 @@ inline void describeIteration(char* text,size_t size,const char* label,unsigned 
  for(unsigned i=0;i<it.count&&used>0&&size_t(used)<size;++i){used+=std::snprintf(text+used,size-used," %s %.1f",it.names[i],ms(it.ticks[i]-last));last=it.ticks[i];}
  if(used>0&&size_t(used)<size)std::snprintf(text+used,size-used," tail %.1f",ms(end-last));
 }
-// Menu composition timing (overlay-src/menu_ui.cpp): exclusive time per
+// Menu composition timing (src/menu_ui.cpp): exclusive time per
 // Composer operation, summed per frame; main.cpp logs it per menu page.
 inline constexpr const char* ComposeNames[]={"control","group","groupPane","quad","region","focusLayers","panel","inPane","textSprite","text","mainText","licensePortrait","licenseName","icon","licenseTrophies","movie","glowGroup","selectionGlow","chrome","compose","textMotion","focusAnimation"};
 inline unsigned long long composeTicks[std::size(ComposeNames)]{};inline unsigned composeCalls[std::size(ComposeNames)]{};
