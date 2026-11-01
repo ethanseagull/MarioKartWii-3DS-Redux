@@ -20,71 +20,85 @@ Target 60; running in the 40–60 range.
 
 ## What you need
 
-- Your own **Mario Kart Wii USA** disc image, game ID **RMCE01**, in ISO or WBFS format; convert RVZ or NKit images to a supported format first.
-- Your own native 3DS Mii resource file, **CFL_Res.dat**, obtained separately.
-- devkitARM and libctru, plus picasso, 3dsxtool and tex3ds.
-- Python 3, Node.js, npm, Git, ffmpeg and a host C/C++ compiler for offline utilities.
-- The converter dependencies and revisions listed in [dependencies.json](dependencies.json) and [vendor/sources.lock.json](vendor/sources.lock.json).
-- makerom and bannertool for CIA work, plus a banner model generated from your disc; the icon, logo PNGs and banner sound are included.
-- A separate working directory for extracted files, converted resources and compiler outputs, with room for both the disc and its intermediates.
+- Your own **Mario Kart Wii USA** disc image (game ID **RMCE01**) as an ISO or WBFS. Convert RVZ or NKit images first.
+- Your 3DS's **CFL_Res.dat**, the console's Mii rendering resource. It isn't on the Wii disc; step 6 below shows how to copy it.
+- A Windows, Linux or macOS PC with about 40 GB free and an internet connection. The build has been tested on Windows.
 
-Patched Kinoko, Citro3D and CFL source is included. Acquire the remaining
-converter dependencies yourself and apply the relevant files in `patches/`.
-The repository includes eight MK7 marker images inherited from the original
-project and the supplied HOME icon and logo; other game assets, native Mii system resources, generated game
-headers, saves and compiled packages are not supplied.
+Patched Kinoko, Citro3D and CFL source is included. The repository includes
+eight MK7 marker images inherited from the original project and the supplied
+HOME icon and logo; other game assets, native Mii system resources, generated
+game headers, saves and compiled packages are not supplied.
 
 ## Building
 
-One command turns your disc into the standard CIA and the SD folder.
+`tools/build.py` builds the standard version from your disc in one command:
+it converts everything, compiles the game and makes the CIA and the SD card
+folder. The steps are for Windows; on Linux or macOS install the same tools
+with your package manager and use `python3` instead of `py -3`.
 
-### Prerequisites
+### Set up (once)
 
-- [devkitPro](https://devkitpro.org/wiki/Getting_Started) with the 3DS
-  packages (devkitARM, libctru, 3ds-tools: picasso, tex3ds, 3dsxtool).
-- A host C++ compiler. On Windows, open devkitPro's MSYS2 shell once and run
-  `pacman -S gcc`; elsewhere any C++23 `g++` or `clang++` works (or set `CXX`).
-- Python 3.11 or newer (on Windows from python.org; start it with `py -3`).
-- Git.
-- Node.js, ffmpeg, makerom and bannertool are taken from `PATH`. If they
-  aren't there, the builder downloads the versions pinned in
-  [tools/release/toolchain.lock.json](tools/release/toolchain.lock.json) and
-  checks their SHA-256. Node and ffmpeg downloads are Windows-only; elsewhere
-  install them with your package manager.
-- Your **Mario Kart Wii USA (RMCE01)** ISO or WBFS.
-- Your 3DS's **CFL_Res.dat**, the console's Mii rendering resource. Copy it off the console with GodMode9:
-  1. Open `[1:] SYSNAND CTRNAND` → `title` → `0004009b` → `00010202` → `content`.
-  2. Press A on the `.app` file, choose *NCCH image options...* → *Mount image
-     to drive*, and answer yes to open it.
-  3. Open `romfs`, press A on `CFL_Res.dat` and choose *Copy to 0:/gm9/out*.
-  4. On your PC the file is at `gm9/out/CFL_Res.dat` on the SD card; pass that
-     path (or a copy of the file) to `--cfl`.
-- About 40 GB free disk space and internet access for the first run.
+1. Install [Python](https://www.python.org/downloads/) 3.11 or newer.
+2. Install [Git](https://git-scm.com/download/win).
+3. Install [devkitPro](https://devkitpro.org/wiki/Getting_Started) and select
+   the 3DS packages (devkitARM, libctru and 3ds-tools).
+4. Open the devkitPro MSYS2 shell from the Start menu and run `pacman -S gcc`.
+   The build compiles a few small helper programs for your PC with it. On
+   Linux or macOS any recent `g++` or `clang++` works.
+5. Get the code. Use `git clone`; a ZIP download won't build.
 
-### Steps
+   ```sh
+   git clone https://github.com/ethanseagull/MarioKartWii-3DS-Redux.git
+   ```
 
-```sh
-git clone <this repository>
-cd MarioKartWii-3DS-Redux
-py -3 tools/build.py --disc "D:/Games/RMCE01.wbfs" --cfl "D:/CFL_Res.dat"
-```
+Node.js, ffmpeg, makerom and bannertool are used from `PATH` if you have
+them. Otherwise the build downloads the versions pinned in
+[tools/release/toolchain.lock.json](tools/release/toolchain.lock.json) and
+checks their SHA-256. Node and ffmpeg are only downloaded on Windows.
 
-Use `python3` instead of `py -3` outside Windows. The first run takes an hour
-or more: it converts every course, kart, menu, movie and sound on the disc. It
-creates `.venv`, fetches the pinned converters from
-[dependencies.json](dependencies.json), extracts the disc, runs every
-conversion stage, compiles Citro3D, CFL and the game, and builds the HOME
-banner. Results land in `build/standard/output/`:
+### Copy CFL_Res.dat from your 3DS
 
-- `MarioKartWii-3DS-Redux-v<version>.cia`: install it with FBI or another title installer;
-- `sd/3ds/mkw-3ds/`: copy the `sd/3ds` folder to the root of your SD card;
-- `mkw-3ds.3dsx`: the same game for the Homebrew Launcher.
+6. On the 3DS, in GodMode9:
+   1. Open `[1:] SYSNAND CTRNAND` → `title` → `0004009b` → `00010202` → `content`.
+   2. Press A on the `.app` file, choose *NCCH image options...* → *Mount image
+      to drive*, and answer yes to open it.
+   3. Open `romfs`, press A on `CFL_Res.dat` and choose *Copy to 0:/gm9/out*.
+   4. Put the SD card in your PC and copy `gm9/out/CFL_Res.dat` somewhere
+      handy.
 
-A stopped or failed run continues where it stopped when you run the same
-command again. After a code change only compiling and packaging run again.
-`--work DIR` puts everything somewhere else, `--jobs N` sets parallel
-converters, `--from STAGE` redoes a stage and all later ones
-(`--list-stages` shows them). Logs are in `build/standard/logs/`.
+### Build
+
+7. Open a terminal (PowerShell is fine) in the folder you cloned and run:
+
+   ```sh
+   py -3 tools/build.py --disc "C:/Games/RMCE01.wbfs" --cfl "C:/Games/CFL_Res.dat"
+   ```
+
+   The first run takes about an hour on a fast PC and needs nothing from you
+   while it runs. It sets up `.venv`, fetches the converters pinned in
+   [dependencies.json](dependencies.json), extracts the disc, converts every
+   course, kart, menu, movie and sound, compiles Citro3D, CFL and the game,
+   and builds the HOME banner. If it stops with an error, fix what it names
+   and run the same command again: it continues where it stopped. Logs are in
+   `build/standard/logs/`.
+
+The results are in `build/standard/output/`:
+
+- `MarioKartWii-3DS-Redux-v<version>.cia`, the game;
+- `sd/3ds/`, the game data for the SD card;
+- `mkw-3ds.3dsx`, the same game for the Homebrew Launcher.
+
+### Install
+
+8. Copy the `sd/3ds` folder to the root of your SD card. When updating, merge
+   it into the existing one; your saves are separate files and stay.
+9. Copy the CIA to the SD card and install it with FBI.
+
+To update later, run `git pull`, then the same build command. Only what
+changed is rebuilt, usually in a few minutes. `--work DIR` puts the build
+somewhere else, `--jobs N` sets how many converters run at once (default 4),
+and `--from STAGE` runs a stage and everything after it again
+(`--list-stages` lists them).
 
 ## Building by hand
 
@@ -121,8 +135,8 @@ python3 tools/extract_disc.py /external/RMCE01.iso /external/extracted --prefix 
 Follow the [resource-stage reference](docs/MANUAL-RESOURCE-STAGES.md) and
 [manual resource instructions](docs/MANUAL-BUILD.md#2-extract-and-convert-resources-one-stage-at-a-time)
 for courses, characters, vehicles, menus, movies, audio and effects. Each
-resource family is a separate operation; there is no full-course or
-full-roster scheduler.
+resource family is a separate operation; `tools/build.py` shows the order it
+runs them in.
 
 For example, bundle one exporter, export one BRRES model, then convert it:
 
@@ -194,8 +208,9 @@ in [the packaging notes](docs/MANUAL-BUILD.md#6-create-home-assets-and-cia-manua
 
 ## Installing and running
 
-Place the converted runtime files under `sd:/3ds/mkw-3ds/`, including
-`menu.pak`, `race.pak` and the loose files required by the resource map.
+The runtime files go in `sd:/3ds/mkw-3ds/`: `menu.pak`, `race.pak` and the loose
+files required by the resource map. A build from `tools/build.py` has them all
+in `build/standard/output/sd/3ds/mkw-3ds/`.
 
 - **Homebrew:** place `mkw-3ds.3dsx` in that directory and launch it with the Homebrew Launcher.
 - **CIA:** install the CIA with your console's title installer and retain the runtime resources on the SD card.

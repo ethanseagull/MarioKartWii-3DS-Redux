@@ -10,8 +10,9 @@ proceeding. Keep inputs and outputs outside the publication tree.
 
 Install devkitARM, libctru, picasso, 3dsxtool, tex3ds, Python, Node, ffmpeg and
 any converters you need. Install makerom/bannertool separately for CIA work.
-The reference identities in dependencies.json, vendor/sources.lock.json and
-tools/release/toolchain.lock.json are data only. They perform no downloads.
+dependencies.json, vendor/sources.lock.json and
+tools/release/toolchain.lock.json pin the versions; tools/build.py downloads
+from them, nothing else here does.
 Patched Kinoko/Citro3D/CFL sources are bundled; preserve those patches.
 Acquire noclip, gclib and cfl-tool manually at the listed revisions, and apply
 the relevant patch files yourself. Then install the packages listed in
@@ -21,7 +22,7 @@ package.json and requirements.txt using npm/pip yourself.
 
 Inspect tools/extract_disc.py for its file/target options and run it yourself
 for the desired source. Run tools/unpack_szs.py for each selected archive.
-There is no all-course importer or full-roster build. import_courses.py now
+tools/build.py holds the all-course and full-roster loops. import_courses.py now
 only contains KMP parsing helpers; cook_roster.py contains roster constants
 and table helpers, and cook_garage.py contains per-choice conversion helpers.
 The former batch main functions have been removed.
@@ -57,7 +58,7 @@ then explicitly write its roster/garage metadata. No tool schedules the full
 character/vehicle matrix. Mii outfits and team variants are separate work.
 
 Use MANUAL-RESOURCE-STAGES.md as a dependency/output reference for independent
-resource families. The old all-game entrypoint is gone. In particular:
+resource families. In particular:
 
 - Compile tools/menu_sprite_scales.cpp and its listed menu source dependencies
   manually, then run that host utility explicitly to create
@@ -81,7 +82,7 @@ resource families. The old all-game entrypoint is gone. In particular:
   repository and cannot overwrite the approved header. That candidate must
   be reviewed separately.
 
-No full from-disc validation has been repeated for this manual process.
+tools/build.py ran this whole process from a fresh disc on 2026-11-01.
 
 ## 3. Organize existing runtime files and create archives explicitly
 
@@ -201,15 +202,14 @@ Run arm-none-eabi-size yourself, then separately convert the ELF:
 3dsxtool /external/mkw-3ds.elf /external/mkw-3ds.3dsx
 ```
 
-No tool in this tree compiles, links or automatically selects all of these
-sources for you. The documented list and flags are not build drivers.
+tools/build.py compiles and links exactly this list with these flags.
 
 ## 6. Create HOME assets and CIA manually
 
 The icon, logo PNGs and banner sound are supplied in tools/release/artwork/.
 Generate the main banner model from your own disc.
 Banner-only tools are allowed; see HOME-BANNER.md for the explicit extraction,
-scene and CGFX stages, audio packaging and verification status. Tool downloaders remain removed. Invoke
+scene and CGFX stages, audio packaging and verification status. Invoke
 bannertool individually to create the SMDH, banner and required audio formats;
 use the installed bannertool's own help for the corresponding operation.
 
@@ -218,8 +218,9 @@ and version deliberately. For an external-SD title remove the RomFs block
 from that working copy. Preserve the hardware/access flags needed by this port.
 Then call your installed makerom yourself with the ELF, edited RSF, icon,
 banner, title version and output path. The template's APP_REMASTER (and
-APP_ROMFS if retained) must be provided explicitly. The project supplies no
-automatic version counter or CIA package builder; no prebuilt CGFX is supplied.
+APP_ROMFS if retained) must be provided explicitly. No prebuilt CGFX is
+supplied. tools/build.py does all of this section (title version from VERSION,
+Ticket/TMD check included).
 
 An external-SD HW137 example, after preparing all inputs yourself:
 
@@ -227,15 +228,15 @@ An external-SD HW137 example, after preparing all inputs yourself:
 makerom -f cia -target t -exefslogo -elf /external/mkw-3ds.elf -rsf /external/external-sd.rsf -icon /external/icon.icn -banner /external/banner.bnr -ver 142 -DAPP_REMASTER=0 -o /external/MKW-3DS-v0.8.14.cia
 ```
 
-The version is chosen manually: 0.8.14 packs as 142. There is no version
-incrementer. This external-SD RSF must have its RomFs block removed; mounting
+The title version is major << 10 | minor << 4 | micro: 0.8.14 packs as 142.
+This external-SD RSF must have its RomFs block removed; mounting
 an empty embedded RomFS would hide the game's SD resource path.
 
 Some makerom builds use an internal version macro that conflicts with the
 requested title version. Inspect the final CIA's actual Ticket/TMD version
 and content; for 0.8.14 the title version must be 142. A successful makerom exit does not
-establish correct versioning or gameplay. Copy resources to SD manually and
-preserve your own saves. No emulator or console is launched automatically.
+establish correct versioning or gameplay. Copy resources to SD and preserve
+your own saves.
 
 ## Explicit diagnostic probes
 

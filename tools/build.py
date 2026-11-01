@@ -218,8 +218,10 @@ def sync_source(source, state_path):
     include/mkw); running them on a copy keeps this checkout clean. Files that
     left the tree since the last copy are removed; everything else there is
     the cooks' own output and stays."""
-    listing = subprocess.run(['git', '-C', str(REPO), 'ls-files', '-z', '--cached', '--others', '--exclude-standard'],
-                             capture_output=True, check=True).stdout.decode().split('\0')
+    files = subprocess.run(['git', '-C', str(REPO), 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], capture_output=True)
+    if files.returncode:
+        raise BuildError(f'{REPO} is not a git checkout. Get the code with git clone (see README.md); a ZIP download can\'t be built.')
+    listing = files.stdout.decode().split('\0')
     names = sorted(n for n in listing if n and (REPO / n).is_file())
     previous = set(read_json(state_path, []))
     copied = 0

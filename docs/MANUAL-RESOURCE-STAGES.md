@@ -1,11 +1,10 @@
 # Manual resource stage reference
 
-Each row describes one former stage. Execute individual operations yourself;
-there is no scheduler, resume mechanism or build-all command. Prerequisites and
-output locations must be supplied manually. This is an operation reference,
-not a newly validated from-disc recipe. `{py}`, `{disc}`, `{jobs}` are placeholders.
-Rows referencing removed batch entrypoints must be split as described in
-MANUAL-BUILD.md; those entrypoints are unavailable.
+Each row describes one stage, for running it by hand. `tools/build.py` runs
+all of them in dependency order (its `--list-stages` prints that order); use
+this page when you want to redo or inspect a single stage. `{py}`, `{disc}`,
+`{jobs}` are placeholders. Rows that say a batch entrypoint was removed are
+done by `tools/build.py` or split up as described in MANUAL-BUILD.md.
 
 | Stage | Explicit operation / former inputs | Expected outputs |
 | --- | --- | --- |
