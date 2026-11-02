@@ -25,10 +25,12 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.8.14.
 - The select and controller sounds no longer play a semitone flat.
 - R tricks off boost ramps, half-pipes and zippers, not only trick surfaces.
 - HOME banner: Mario has both eyes and the kart's textures are on the right parts.
+- Races on a `tools/build.py` SD card no longer stop with "required drift definitions": the drift effects load from `race.pak`.
 
 # Building
 
 - `tools/build.py` builds the CIA and SD folder from your disc in one command, downloading the pinned converters and tools it needs.
+- After a `git pull`, `tools/build.py` cooks again each stage whose tool or input files changed, and the stages after it, instead of keeping their old output.
 - The HOME banner plays the game's Starting Grid jingle.
 - The SD folder no longer holds loose copies of models that are already packed.
 - Windows path, menu movie and menu texture fixes in the packaging tools.

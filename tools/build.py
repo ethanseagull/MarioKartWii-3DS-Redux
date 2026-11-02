@@ -16,11 +16,14 @@ Everything it writes goes under the work directory (default build/standard):
   compile/  shaders, libraries, generated headers, objects, the ELF
   output/   the CIA, the 3DSX and sd/ (copy sd/3ds to the SD card root)
 
-A stopped or failed build resumes at the first unfinished stage. --from STAGE
+A stopped or failed build resumes at the first unfinished stage. After a git
+pull, a cook stage whose script, the tools/ modules it imports or the tracked
+files it names changed runs again, with every stage after it. --from STAGE
 runs that stage and every later one again (--list-stages shows the order).
 The disc and CFL_Res.dat are only read.
 """
-import argparse, hashlib, json, os, platform, shutil, struct, subprocess, sys, time, urllib.request, zipfile
+import argparse, ast, fnmatch, hashlib, inspect, json, os, platform, posixpath, re, shutil, struct, subprocess, sys, textwrap, time
+import urllib.request, zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -323,6 +326,105 @@ def bootstrap(args):
 
 
 # ---------------------------------------------------------------------------
+# Stage fingerprints
+
+class SourceIndex:
+    """The files of this tree a stage reads, found from its code.
+
+    A cook stage depends on its script, the tools/ modules that script imports
+    (and theirs), the tracked files its string literals name (config JSON,
+    host-tool C++ sources, artwork) and the headers those C++ files include.
+    Its fingerprint hashes all of them with the stage's arguments. A name built
+    at run time (f'{name}.cpp') is not seen; --from STAGE covers that."""
+
+    CPP = ('.c', '.cc', '.cpp', '.h', '.hh', '.hpp', '.inc')
+    SCRIPT = ('.ts', '.mjs', '.js')
+
+    def __init__(self, names, read=None):
+        # The working tree by default, or `read` for another commit's files.
+        if read is None:
+            names, read = [n for n in names if (REPO / n).is_file()], lambda n: (REPO / n).read_bytes()
+        self.read = read
+        self.files = {n for n in names if not n.endswith('.md')}
+        self.by_base = {}
+        for name in self.files:
+            self.by_base.setdefault(name.rsplit('/', 1)[-1], []).append(name)
+        self.refs, self.hashes = {}, {}
+
+    def named(self, text):
+        """Tracked files a string names, as a path ('tools/x.cpp') or a bare file name."""
+        found = set()
+        for piece in re.split(r'[\s,;=]+', text.replace('\\', '/')):
+            piece = piece.strip('\'"()[]').lstrip('./')
+            found.update(n for n in self.by_base.get(piece.rsplit('/', 1)[-1], ()) if n.endswith(piece))
+        return found
+
+    def module(self, name, folder):
+        path = name.replace('.', '/')
+        for root in (folder, 'tools'):
+            for candidate in (f'{root}/{path}.py', f'{root}/{path}/__init__.py'):
+                if candidate in self.files:
+                    return {candidate}
+        return set()
+
+    def python(self, text, folder):
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            return set()
+        # Docstrings and other bare strings are prose, not file names.
+        prose = {id(n.value) for n in ast.walk(tree) if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)}
+        found = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    found |= self.module(alias.name, folder)
+            elif isinstance(node, ast.ImportFrom):
+                base = node.module or ''
+                if base:
+                    found |= self.module(base, folder)
+                for alias in node.names:
+                    found |= self.module(f'{base}.{alias.name}' if base else alias.name, folder)
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in prose:
+                found |= self.named(node.value)
+        return found
+
+    def cpp(self, text):
+        found = set()
+        for include in re.findall(r'#\s*include\s*["<]([^">]+)[">]', text):
+            found.update(n for n in self.by_base.get(include.rsplit('/', 1)[-1], ()) if n.endswith(include))
+        return found
+
+    def script(self, text, name):
+        found = set()
+        for spec in re.findall(r"""(?:from|import|require)\s*\(?\s*['"](\.{1,2}/[^'"]+)['"]""", text):
+            path = posixpath.normpath(posixpath.join(posixpath.dirname(name), spec))
+            found.update(c for c in (path, path + '.ts', path + '.mjs', path + '.js', path + '/index.ts') if c in self.files)
+        return found
+
+    def glob(self, pattern):
+        return {n for n in self.files if fnmatch.fnmatchcase(n, pattern)}
+
+    def closure(self, names):
+        seen, todo = set(), list(names)
+        while todo:
+            name = todo.pop()
+            if name in seen or name not in self.files:
+                continue
+            seen.add(name)
+            if name not in self.refs:
+                data = self.read(name)
+                # Line endings depend on the checkout, not the file.
+                self.hashes[name] = hashlib.sha256(data.replace(b'\r\n', b'\n')).hexdigest()
+                text, suffix = data.decode('utf-8', 'replace'), posixpath.splitext(name)[1]
+                self.refs[name] = (self.python(text, posixpath.dirname(name)) if suffix == '.py' else
+                                   self.cpp(text) if suffix in self.CPP else
+                                   self.script(text, name) if suffix in self.SCRIPT else set())
+            todo.extend(self.refs[name])
+        return sorted(seen)
+
+
+# ---------------------------------------------------------------------------
 # Stages (run inside .venv, with the source copy's tools on sys.path)
 
 class Builder:
@@ -448,12 +550,16 @@ class Builder:
         shutil.copytree(base, root / 'build/mii-parts/retail-defaults', dirs_exist_ok=True)
 
     def checkpointed(self, kind, key, action):
-        """Per-course and per-vehicle resume inside the two longest stages."""
+        """Per-course and per-vehicle resume inside the two longest stages. A
+        checkpoint counts only under the stage fingerprint it was cooked with."""
         marker = self.work / 'checkpoints' / kind / (key + '.json')
-        if marker.is_file():
+        stamp = marker.with_suffix('.key')
+        if marker.is_file() and (stamp.read_text() == self.stage_key if stamp.is_file() else self.adopt_checkpoints):
+            stamp.write_text(self.stage_key)
             return read_json(marker)
         result = action()
         write_json(marker, result)
+        stamp.write_text(self.stage_key)
         return result
 
     def courses(self):
@@ -527,12 +633,14 @@ class Builder:
         write_native_roster(display)
         write_native_garage(rows)
 
+    MENU_SCALE_SOURCES = ['tools/menu_sprite_scales.cpp', *['src/' + n + '.cpp' for n in (
+        'menu_ui', 'menu_state', 'menu_transition', 'menu_focus', 'menu_index', 'menu_text_motion')]]
+
     def fit_menu(self):
         host = self.root / 'build/host-tools'
         host.mkdir(parents=True, exist_ok=True)
         exe = host / ('menu_sprite_scales' + ('.exe' if os.name == 'nt' else ''))
-        self.run('menu-scales-host', [self.cxx, '-std=' + CXX_STD, '-O2', '-Iinclude', '-o', exe, 'tools/menu_sprite_scales.cpp',
-                                      *['src/' + n + '.cpp' for n in ('menu_ui', 'menu_state', 'menu_transition', 'menu_focus', 'menu_index', 'menu_text_motion')]])
+        self.run('menu-scales-host', [self.cxx, '-std=' + CXX_STD, '-O2', '-Iinclude', '-o', exe, *self.MENU_SCALE_SOURCES])
         self.run('menu-scales', [exe, host / 'sprite-scales.json'])
         self.py('menu-fit', 'optimize_menu_textures.py')
 
@@ -767,17 +875,24 @@ class Builder:
     # -- stage table ------------------------------------------------------
 
     def define_stages(self):
-        stages = []
+        stages, self.uses = [], {}
         R = lambda *paths: [self.root / p for p in paths]
 
-        def add(name, action, outputs):
+        def add(name, action, outputs, args=None, files=()):
+            # A stage is described by its arguments (tools) or its method's
+            # source (everything else), plus files it reads that its code
+            # doesn't name.
             stages.append((name, action, outputs))
+            self.uses[name] = (args, list(files))
 
         def tool(name, args, *outputs):
-            add(name, lambda: self.py(name, *args), R(*outputs))
+            add(name, lambda: self.py(name, *args), R(*outputs), ['tools/' + args[0], *args[1:]])
 
         J, D = str(self.jobs), self.disc
-        add('converters', self.dependencies, R('build/export_brres.mjs', 'build/export_driver.mjs'))
+        # The converters and pinned packages feed every later stage.
+        add('converters', self.dependencies, R('build/export_brres.mjs', 'build/export_driver.mjs'),
+            files=['tools/*.ts', 'tools/*.mjs', 'package.json', 'package-lock.json', 'dependencies.json', 'requirements.txt',
+                   'patches/noclip-brres.patch'])
         add('extract', self.extract, R('data/extracted/disc-files.json', 'assets/common/kartParam.bin', 'build/original/main.dol',
                                        'assets/race-ui/Font/kart_kanji_font.brfnt'))
         tool('startline', ['generate_startline_policy.py'], 'tools/course_startline_faces.json')
@@ -833,10 +948,10 @@ class Builder:
             tool(name, args, out)
         tool('native-resource', ['stage_native_mii_resource.py', self.cfl], 'build/native-mii-resource/receipt.json')
         add('star-colors', lambda: self.node('star-colors', 'build/export_star.mjs', 'assets/common/driver.brres', 'include/mkw/star_colors.hpp'),
-            R('include/mkw/star_colors.hpp'))
+            R('include/mkw/star_colors.hpp'), ['build/export_star.mjs', 'assets/common/driver.brres', 'include/mkw/star_colors.hpp'])
         tool('award-inputs', ['prepare_award_assets.py', D], 'build/award-source/award-sources.json')
         add('award-scenes', lambda: self.node('award-scenes', 'build/export_award_scene.mjs', 'build/award-source'),
-            R('build/award-source/scene-bindings.json'))
+            R('build/award-source/scene-bindings.json'), ['build/export_award_scene.mjs', 'build/award-source'])
         tool('award-cameras', ['cook_award_cameras.py'], 'include/mkw/award_camera_data.hpp')
         tool('award-drive', ['cook_award_drive.py'], 'include/mkw/award_drive_data.hpp')
         tool('award-lighting', ['cook_award_lighting.py'], 'include/mkw/award_lighting.hpp')
@@ -878,12 +993,75 @@ class Builder:
         tool('drift', ['cook_effects.py', 'assets/common/Effect/RKRace.breft', 'sd-card/3ds/mkw-3ds/textures'], 'sd-card/3ds/mkw-3ds/textures/drift-effects.bin')
         tool('drift-bike', ['cook_effects.py', 'assets/common/Effect/RKRace.breft', 'sd-card/3ds/mkw-3ds/textures', '--bike'],
              'sd-card/3ds/mkw-3ds/textures/drift-effects-bike.bin')
-        add('menu-fit', self.fit_menu, R('build/host-tools/sprite-scales.json', 'sd-card/3ds/mkw-3ds/models/menu-texture-fit.json'))
+        add('menu-fit', self.fit_menu, R('build/host-tools/sprite-scales.json', 'sd-card/3ds/mkw-3ds/models/menu-texture-fit.json'),
+            files=self.MENU_SCALE_SOURCES)
         add('banner', self.banner, [self.banner_work / 'production/banner-startgrid.bnr', self.banner_work / 'production/icon.icn'])
         # Always rerun: both are incremental and pick up source changes.
         add('compile', self.compile, None)
         add('package', self.package, None)
         return stages
+
+    def method_source(self, method, seen):
+        """A stage method's source with the Builder methods it calls."""
+        seen.add(method.__name__)
+        text = textwrap.dedent(inspect.getsource(method))
+        for called in re.findall(r'self\.(\w+)\(', text):
+            if called not in seen and called not in ('run', 'py', 'node', 'checkpointed') and inspect.isfunction(getattr(Builder, called, None)):
+                text += self.method_source(getattr(self, called), seen)
+        return text
+
+    def fingerprints(self, index=None):
+        """Each cooking stage's fingerprint, chained with every earlier one's: a
+        stage whose code or inputs changed runs again with everything after it,
+        as --from would, since later stages read earlier stages' output."""
+        index = index or SourceIndex(read_json(self.work / 'source-files.json', []))
+        keys, chain = {}, ''
+        for name, action, outputs in self.stages:
+            if outputs is None:
+                continue
+            args, files = self.uses[name]
+            used = set().union(*(index.glob(f) for f in files)) if files else set()
+            if args is None:
+                described = self.method_source(action, set())
+                used |= index.python(described, 'tools')
+            else:
+                described, skip = [], False
+                for arg in args:
+                    if skip:
+                        skip = False
+                    elif arg == '--jobs':
+                        skip = True
+                    elif isinstance(arg, Path) and arg == self.disc:
+                        described.append('<disc>')
+                    elif isinstance(arg, Path) and arg == self.cfl:
+                        described.append('<cfl> ' + digest(arg))
+                    else:
+                        described.append(str(arg))
+                        used |= index.named(str(arg))
+            h = hashlib.sha256(chain.encode())
+            h.update(json.dumps([name, described, [(f, index.hashes[f]) for f in index.closure(used)]]).encode())
+            chain = keys[name] = h.hexdigest()
+        return keys
+
+    def baseline(self):
+        """For a work folder from before fingerprints: the fingerprints of the
+        commit its last package was built from (build-info.json), so stages
+        whose code changed since then cook again. None when that commit is
+        unknown or had local changes."""
+        commit = read_json(self.output / 'build-info.json', {}).get('commit', '')
+        listing = subprocess.run(['git', '-C', str(REPO), 'ls-tree', '-r', '-z', '--name-only', commit],
+                                 capture_output=True) if commit and not commit.endswith('-dirty') else None
+        if not listing or listing.returncode:
+            return None, commit
+        with subprocess.Popen(['git', '-C', str(REPO), 'cat-file', '--batch'], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as cat:
+            def read(name):
+                cat.stdin.write(f'{commit}:{name}\n'.encode())
+                cat.stdin.flush()
+                size = int(cat.stdout.readline().split()[2])
+                data = cat.stdout.read(size)
+                cat.stdout.read(1)
+                return data
+            return self.fingerprints(SourceIndex(listing.stdout.decode().split('\0')[:-1], read)), commit
 
     def main(self, start):
         self.prepare()
@@ -901,16 +1079,31 @@ class Builder:
             for kind in ('courses', 'garage'):
                 if kind in again and (self.work / 'checkpoints' / kind).is_dir():
                     shutil.rmtree(self.work / 'checkpoints' / kind)
+        keys, base = self.fingerprints(), None
+        adopting = 'fingerprints' not in state
+        if adopting:
+            # A work folder from before fingerprints: its finished stages count
+            # as cooked from the commit of its last package, or from this tree
+            # when that is unknown.
+            base, commit = self.baseline() if state['stages'] else (None, '')
+            state['fingerprints'] = {s: (base or keys)[s] for s in state['stages'] if s in keys}
+            if state['stages']:
+                log(f'Recorded stage fingerprints as of {commit[:12]}' if base else 'Recorded stage fingerprints for the finished stages')
+        recorded = state['fingerprints']
         write_json(self.state_path, state)
         began = time.monotonic()
         for index, (name, action, outputs) in enumerate(self.stages, 1):
             done = name in state['stages'] and outputs is not None and all(p.exists() for p in outputs)
-            if done:
+            if done and recorded.get(name) == keys[name]:
                 continue
-            # An unfinished stage invalidates everything after it.
+            # An unfinished or changed stage invalidates everything after it.
             state['stages'] = [s for s in state['stages'] if names.index(s) < index - 1]
             write_json(self.state_path, state)
-            log(f'[{index}/{len(self.stages)}] {name}')
+            log(f'[{index}/{len(self.stages)}] {name}' + ('  (its code or inputs changed since it was cooked)' if done else ''))
+            self.stage_key = keys.get(name, '')
+            # Unstamped checkpoints predate fingerprints; they count only if
+            # nothing they depend on changed since.
+            self.adopt_checkpoints = adopting and (base is None or base.get(name) == keys.get(name))
             started = time.monotonic()
             action()
             absent = [str(p) for p in outputs or [] if not p.exists()]
@@ -919,6 +1112,7 @@ class Builder:
             log(f'      {name} done in {time.monotonic() - started:.0f} s')
             if outputs is not None:
                 state['stages'].append(name)
+                recorded[name] = keys[name]
                 write_json(self.state_path, state)
         log(f'\nDone (this run: {(time.monotonic() - began) / 60:.0f} min):\n'
             f'  CIA:        {self.cia_path}\n'

@@ -93,8 +93,11 @@ If your console has never run a homebrew game with sound, dump its DSP
 firmware once with DSP1.
 
 To update, run `git pull`, then the same build command; only what changed is
-rebuilt, usually in a few minutes. Copy the new `sd/3ds` over the old one and
-install the new CIA. Your saves are separate files (`rksys.dat` and its
+rebuilt, usually in a few minutes. The game code is recompiled where it
+changed, and a cook stage runs again when its tool or a file it reads changed,
+together with the stages after it (an early stage can take as long as a first
+build's cooking). Copy the new `sd/3ds` over the old one and install the new
+CIA. Your saves are separate files (`rksys.dat` and its
 backup, `license-options-*.dat`, `last-license.txt`, `mii-*.3dsmii`), so they
 stay.
 
