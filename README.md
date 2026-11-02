@@ -26,8 +26,7 @@ converted from your own disc.
 
 ## Building
 
-Already built an older version? See
-[Updating to the newest version](#updating-to-the-newest-version).
+Already built an older version? See [Updating](#updating).
 
 The steps are for Windows. On Linux or macOS install the same tools with your
 package manager and use `python3` instead of `py -3`.
@@ -85,75 +84,36 @@ The results are in `build/standard/output/`:
 - `sd/3ds/`, the game data for the SD card;
 - `mkw-3ds.3dsx`, the same game for the Homebrew Launcher.
 
-## Updating to the newest version
+## Updating
 
-If you built the game before and want the newest version, get the newest code
-first, then run the builder again. What you do depends on how you got the code.
+If you've built an older version, update from the folder you cloned:
 
-### You cloned the repository with git (the usual case)
+```sh
+git pull
+py -3 tools/build.py --disc "C:/Games/RMCE01.wbfs" --cfl "C:/Games/CFL_Res.dat"
+```
 
-1. Open a terminal in the folder you cloned and get the newest code:
+Only what changed gets rebuilt, so this usually takes a few minutes (longer
+if an early cook stage changed). Copy the new `sd/3ds` over the old one on
+your SD card and install the new CIA with FBI. Your saves
+(`rksys.dat`, `license-options-*.dat`, `last-license.txt`, `mii-*.3dsmii`)
+aren't touched.
 
-   ```sh
-   git pull
-   ```
+If `git pull` complains about local changes, run `git stash` first, or
+`git reset --hard origin/main` to throw them away.
 
-   If git refuses because you changed files in the folder, put your changes
-   aside with `git stash` and run `git pull` again. If you don't need those
-   changes, `git reset --hard origin/main` throws them away and matches this
-   repository exactly.
+If you downloaded a ZIP instead of cloning, clone the repo (step 5) and do a
+full build; the builder only works in a git clone. The same goes for builds
+made by hand before `tools/build.py` existed: the first run builds everything.
 
-2. Run the **same build command** as before, with `--disc` and `--cfl`:
+If an updated build fails, run the command again and it picks up where it
+stopped. If the game still looks wrong, add `--from extract` to redo all the
+cooking, or delete `build/standard` to start from scratch.
 
-   ```sh
-   py -3 tools/build.py --disc "C:/Games/RMCE01.wbfs" --cfl "C:/Games/CFL_Res.dat"
-   ```
-
-   It reuses your `build/standard` folder and rebuilds only what changed,
-   usually in a few minutes. The game code is recompiled where it changed, and
-   a cook stage runs again when its tool or a file it reads changed, together
-   with the stages after it (an early stage can take as long as a first
-   build's cooking).
-
-3. Install the update as in [Installing](#installing): copy the new
-   `build/standard/output/sd/3ds` over the old one on the SD card and install
-   the new CIA with FBI (it replaces the old one). Your saves are separate
-   files (`rksys.dat` and its backup, `license-options-*.dat`,
-   `last-license.txt`, `mii-*.3dsmii`), so they stay.
-
-### You downloaded a ZIP, or your folder has no `.git` folder
-
-`git pull` and `tools/build.py` only work in a folder made with `git clone`.
-Clone the repository into a new folder (step 5) and run the build command
-there. This is a full build, about an hour. Later updates are then just
-`git pull` and the build command.
-
-### You built before `tools/build.py` existed
-
-Older versions were built by hand. Run `git pull` (or clone again), then the
-build command from step 7. It builds everything into `build/standard` and
-doesn't use your old build folders, so the first run is a full build.
-
-### Checking which version you have
-
-- `git log -1 --oneline` shows the commit your folder is on; compare it with
-  the newest commit on
-  [GitHub](https://github.com/ethanseagull/MarioKartWii-3DS-Redux/commits/main).
-- `build/standard/output/build-info.json` shows the commit your last build was
-  made from. A commit ending in `-dirty` had local changes.
-- [CHANGELOG.md](CHANGELOG.md) lists what changed.
-
-The version in the CIA's name (from [VERSION](VERSION)) doesn't change with
-every commit, so use the commit to tell builds apart.
-
-### If the updated build fails or looks wrong
-
-- Run the build command again: a stopped build continues where it stopped.
-- To redo all cooking from the disc, add `--from extract`. To start over
-  completely, delete the `build/standard` folder and run the build command
-  again (a full build, about an hour).
-- Building from a different disc image needs a new folder (`--work DIR`);
-  the builder stops if the disc doesn't match the one it built from.
+To see what's new, check [CHANGELOG.md](CHANGELOG.md), or compare
+`git log -1` with the
+[latest commit](https://github.com/ethanseagull/MarioKartWii-3DS-Redux/commits/main).
+The version in the CIA's file name doesn't change with every commit.
 
 ## Installing
 
