@@ -85,16 +85,6 @@ The results are in `build/standard/output/`:
 - `sd/3ds/`, the game data for the SD card;
 - `mkw-3ds.3dsx`, the same game for the Homebrew Launcher.
 
-## Installing
-
-8. Copy the `sd/3ds` folder to the root of your SD card. The game data ends
-   up in `sd:/3ds/mkw-3ds/`.
-9. Copy the CIA to the SD card and install it with FBI. Or skip the CIA and
-   start `mkw-3ds.3dsx` from the Homebrew Launcher.
-
-If your console has never run a homebrew game with sound, dump its DSP
-firmware once with DSP1.
-
 ## Updating to the newest version
 
 If you built the game before and want the newest version, get the newest code
@@ -164,6 +154,16 @@ every commit, so use the commit to tell builds apart.
   again (a full build, about an hour).
 - Building from a different disc image needs a new folder (`--work DIR`);
   the builder stops if the disc doesn't match the one it built from.
+
+## Installing
+
+8. Copy the `sd/3ds` folder to the root of your SD card. The game data ends
+   up in `sd:/3ds/mkw-3ds/`.
+9. Copy the CIA to the SD card and install it with FBI. Or skip the CIA and
+   start `mkw-3ds.3dsx` from the Homebrew Launcher.
+
+If your console has never run a homebrew game with sound, dump its DSP
+firmware once with DSP1.
 
 ## Build options
 
