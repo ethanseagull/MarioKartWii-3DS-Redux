@@ -26,6 +26,9 @@ converted from your own disc.
 
 ## Building
 
+Already built an older version? See
+[Updating to the newest version](#updating-to-the-newest-version).
+
 The steps are for Windows. On Linux or macOS install the same tools with your
 package manager and use `python3` instead of `py -3`.
 
@@ -92,16 +95,79 @@ The results are in `build/standard/output/`:
 If your console has never run a homebrew game with sound, dump its DSP
 firmware once with DSP1.
 
-To update, run `git pull`, then the same build command; only what changed is
-rebuilt, usually in a few minutes. The game code is recompiled where it
-changed, and a cook stage runs again when its tool or a file it reads changed,
-together with the stages after it (an early stage can take as long as a first
-build's cooking). Copy the new `sd/3ds` over the old one and install the new
-CIA. Your saves are separate files (`rksys.dat` and its
-backup, `license-options-*.dat`, `last-license.txt`, `mii-*.3dsmii`), so they
-stay.
+## Updating to the newest version
 
-Build options: `--work DIR` builds somewhere other than `build/standard`,
+If you built the game before and want the newest version, get the newest code
+first, then run the builder again. What you do depends on how you got the code.
+
+### You cloned the repository with git (the usual case)
+
+1. Open a terminal in the folder you cloned and get the newest code:
+
+   ```sh
+   git pull
+   ```
+
+   If git refuses because you changed files in the folder, put your changes
+   aside with `git stash` and run `git pull` again. If you don't need those
+   changes, `git reset --hard origin/main` throws them away and matches this
+   repository exactly.
+
+2. Run the **same build command** as before, with `--disc` and `--cfl`:
+
+   ```sh
+   py -3 tools/build.py --disc "C:/Games/RMCE01.wbfs" --cfl "C:/Games/CFL_Res.dat"
+   ```
+
+   It reuses your `build/standard` folder and rebuilds only what changed,
+   usually in a few minutes. The game code is recompiled where it changed, and
+   a cook stage runs again when its tool or a file it reads changed, together
+   with the stages after it (an early stage can take as long as a first
+   build's cooking).
+
+3. Install the update as in [Installing](#installing): copy the new
+   `build/standard/output/sd/3ds` over the old one on the SD card and install
+   the new CIA with FBI (it replaces the old one). Your saves are separate
+   files (`rksys.dat` and its backup, `license-options-*.dat`,
+   `last-license.txt`, `mii-*.3dsmii`), so they stay.
+
+### You downloaded a ZIP, or your folder has no `.git` folder
+
+`git pull` and `tools/build.py` only work in a folder made with `git clone`.
+Clone the repository into a new folder (step 5) and run the build command
+there. This is a full build, about an hour. Later updates are then just
+`git pull` and the build command.
+
+### You built before `tools/build.py` existed
+
+Older versions were built by hand. Run `git pull` (or clone again), then the
+build command from step 7. It builds everything into `build/standard` and
+doesn't use your old build folders, so the first run is a full build.
+
+### Checking which version you have
+
+- `git log -1 --oneline` shows the commit your folder is on; compare it with
+  the newest commit on
+  [GitHub](https://github.com/ethanseagull/MarioKartWii-3DS-Redux/commits/main).
+- `build/standard/output/build-info.json` shows the commit your last build was
+  made from. A commit ending in `-dirty` had local changes.
+- [CHANGELOG.md](CHANGELOG.md) lists what changed.
+
+The version in the CIA's name (from [VERSION](VERSION)) doesn't change with
+every commit, so use the commit to tell builds apart.
+
+### If the updated build fails or looks wrong
+
+- Run the build command again: a stopped build continues where it stopped.
+- To redo all cooking from the disc, add `--from extract`. To start over
+  completely, delete the `build/standard` folder and run the build command
+  again (a full build, about an hour).
+- Building from a different disc image needs a new folder (`--work DIR`);
+  the builder stops if the disc doesn't match the one it built from.
+
+## Build options
+
+`--work DIR` builds somewhere other than `build/standard`,
 `--jobs N` sets how many converters run at once (default 4), and
 `--from STAGE` runs one stage and everything after it again
 (`--list-stages` lists them).
