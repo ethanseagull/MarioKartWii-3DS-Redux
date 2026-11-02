@@ -29,11 +29,14 @@ converted from your own disc.
 Already built an older version? See [Updating](#updating).
 
 The steps are for Windows. On Linux or macOS install the same tools with your
-package manager and use `python3` instead of `py -3`.
+package manager and use `python3.12` instead of `py -3.12`.
 
 ### Set up (once)
 
-1. Install [Python](https://www.python.org/downloads/) 3.11 or newer.
+1. Install [Python](https://www.python.org/downloads/) **3.12 (64-bit)**.
+   Use this version for the build: newer Python versions may require compiling
+   dependencies such as `imagequant` with Microsoft C++ Build Tools. The
+   commands below select 3.12 even if another Python version is installed.
 2. Install [Git](https://git-scm.com/download/win).
 3. Install [devkitPro](https://devkitpro.org/wiki/Getting_Started) and select
    the 3DS packages (devkitARM, libctru and 3ds-tools).
@@ -67,7 +70,7 @@ needs the soxr resampler, which most builds have.
 7. Open a terminal (PowerShell is fine) in the folder you cloned and run:
 
    ```sh
-   py -3 tools/build.py --disc "C:/Games/RMCE01.wbfs" --cfl "C:/Games/CFL_Res.dat"
+   py -3.12 tools/build.py --disc "C:/Games/RMCE01.wbfs" --cfl "C:/Games/CFL_Res.dat"
    ```
 
    The first run takes about an hour on a fast PC and needs nothing from you
@@ -84,13 +87,33 @@ The results are in `build/standard/output/`:
 - `sd/3ds/`, the game data for the SD card;
 - `mkw-3ds.3dsx`, the same game for the Homebrew Launcher.
 
+### If the Python environment uses another version
+
+The builder reuses `.venv`, so installing Python 3.12 does not change an
+environment created with a different version. If the builder reports a
+version mismatch, or `imagequant` fails with "Microsoft Visual C++ 14.0 or
+greater is required", remove only `.venv` from the cloned folder and rerun:
+
+```powershell
+Remove-Item -LiteralPath .venv -Recurse -Force
+py -3.12 tools/build.py --disc "C:/Games/RMCE01.wbfs" --cfl "C:/Games/CFL_Res.dat"
+```
+
+Use your own disc and CFL paths. On Linux or macOS, remove `.venv` and use
+`python3.12` for the build command. Keep `build/standard`; completed build
+stages are still there and the build resumes from them.
+
 ## Updating
 
 If you've built an older version, update from the folder you cloned:
 
+Install Python 3.12 if needed. If your existing `.venv` uses another version,
+follow [the environment recovery steps above](#if-the-python-environment-uses-another-version).
+This keeps completed build stages in `build/standard`.
+
 ```sh
 git pull
-py -3 tools/build.py --disc "C:/Games/RMCE01.wbfs" --cfl "C:/Games/CFL_Res.dat"
+py -3.12 tools/build.py --disc "C:/Games/RMCE01.wbfs" --cfl "C:/Games/CFL_Res.dat"
 ```
 
 Only what changed gets rebuilt, so this usually takes a few minutes (longer
@@ -106,8 +129,8 @@ If you downloaded a ZIP instead of cloning, clone the repo (step 5) and do a
 full build; the builder only works in a git clone. The same goes for builds
 made by hand before `tools/build.py` existed: the first run builds everything.
 
-If an updated build fails, run the command again and it picks up where it
-stopped. If the game still looks wrong, add `--from extract` to redo all the
+If an updated build fails, fix the reported issue and run the same command
+again; it picks up where it stopped. If the game still looks wrong, add `--from extract` to redo all the
 cooking, or delete `build/standard` to start from scratch.
 
 To see what's new, check [CHANGELOG.md](CHANGELOG.md), or compare

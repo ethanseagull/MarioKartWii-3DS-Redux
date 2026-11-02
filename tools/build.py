@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the standard (release) game from your own Mario Kart Wii USA disc.
 
-    python tools/build.py --disc <RMCE01.iso|.wbfs> --cfl <CFL_Res.dat>
+    py -3.12 tools/build.py --disc <RMCE01.iso|.wbfs> --cfl <CFL_Res.dat>
 
 It sets up .venv from requirements.txt, fetches the pinned converters in
 dependencies.json (noclip, gclib, cfl-tool, pycgfx), extracts the disc, runs
@@ -30,6 +30,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 VENV = REPO / '.venv'
 VENV_PYTHON = VENV / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+BUILD_PYTHON = (3, 12)
 # Packages needed beyond requirements.txt are listed there too (gltflib for the banner).
 DEPENDENCIES = [('noclip', 'noclip'), ('gclib', 'gclib'), ('cfl_tool', 'cfl-tool'), ('pycgfx', 'pycgfx')]
 TITLE_ID = '000400000F4B5700'
@@ -286,6 +287,30 @@ def fetch_dependencies(source):
         log('Applied patches/noclip-brres.patch')
 
 
+def check_python(version, *, venv=False):
+    if tuple(version[:2]) == BUILD_PYTHON:
+        return
+    required = '.'.join(map(str, BUILD_PYTHON))
+    found = '.'.join(map(str, version[:3]))
+    command = f'py -{required}' if os.name == 'nt' else f'python{required}'
+    location = f'The existing virtual environment {VENV}' if venv else 'This build command'
+    recovery = f'Remove only {VENV} and rerun the build. ' if venv else ''
+    raise BuildError(f'{location} uses Python {found}; the standard build requires Python {required}. '
+                     f'{recovery}Install Python {required} if needed, then use '
+                     f'{command} tools/build.py --disc "..." --cfl "..." (see README.md).')
+
+
+def check_venv():
+    if VENV_PYTHON.is_file():
+        result = subprocess.run([str(VENV_PYTHON), '-c',
+                                 'import json, sys; print(json.dumps(list(sys.version_info[:3])))'],
+                                capture_output=True, text=True)
+        if result.returncode:
+            raise BuildError(f'The existing virtual environment {VENV} cannot start. '
+                             'Remove only that directory and rerun the build (see README.md).')
+        check_python(json.loads(result.stdout), venv=True)
+
+
 def prepare_venv(source):
     if not VENV_PYTHON.is_file():
         log(f'Creating {VENV}')
@@ -302,10 +327,10 @@ def prepare_venv(source):
 
 
 def bootstrap(args):
-    if sys.version_info < (3, 11):
-        raise BuildError('Python 3.11 or newer is required.')
     if sys.platform in ('cygwin', 'msys'):
-        raise BuildError('Run this with a native Python (on Windows: py -3 tools/build.py ...), not the MSYS2 one.')
+        raise BuildError('Run this with a native Python (on Windows: py -3.12 tools/build.py ...), not the MSYS2 one.')
+    check_python(sys.version_info)
+    check_venv()
     disc, cfl = Path(args.disc).expanduser().resolve(), Path(args.cfl).expanduser().resolve()
     check_disc(disc)
     check_cfl(cfl)

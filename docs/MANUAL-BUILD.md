@@ -11,7 +11,7 @@ the number of parallel jobs.
 
 ## 1. Tools and converters
 
-devkitARM, libctru, picasso, tex3ds, 3dsxtool, Python 3.11+, Node.js, Git,
+devkitARM, libctru, picasso, tex3ds, 3dsxtool, Python 3.12, Node.js, Git,
 ffmpeg (with soxr), makerom, bannertool and a host C++23 compiler. The pinned
 versions are in `dependencies.json` (converters) and
 `tools/release/toolchain.lock.json` (host tools).
@@ -22,13 +22,16 @@ git clone https://github.com/LagoLunatic/gclib vendor/gclib
 git clone https://github.com/jamesrhg/cfl-tool vendor/cfl-tool
 git clone https://github.com/skyfloogle/pycgfx.git vendor/pycgfx
 git -C vendor/noclip apply --ignore-whitespace ../../patches/noclip-brres.patch
-python -m venv .venv && .venv/Scripts/python -m pip install -r requirements.txt
+py -3.12 -m venv .venv
+.venv/Scripts/python -m pip install -r requirements.txt
 npm ci --no-audit --no-fund
 node tools/bundle_cooker.mjs tools/export_brres.ts   # and every other tools/export_*.ts
 ```
 
 Install the Python requirements after `vendor/gclib` exists; it is an editable
-dependency.
+dependency. On Linux or macOS, create the environment with
+`python3.12 -m venv .venv` and use `.venv/bin/python`. For the later commands, `python` means the
+interpreter in this environment.
 
 ## 2. Extract the disc
 
