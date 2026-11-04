@@ -28,6 +28,8 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.8.14.
 - Races on a `tools/build.py` SD card no longer stop with "required drift definitions": the drift effects load from `race.pak`.
 - A trailing green or red shell no longer spins; thrown shells still do.
 - Held and trailing items follow the ground under the kart instead of its body, so a bike's lean, a wheelie or a trick no longer tips them into the road.
+- Up and down on the Circle Pad tilt the vehicle in the air, as on the Wii.
+- Circle Pad steering: a radial deadzone, full lock a little before the rim, and full lock on diagonals.
 
 # Building
 

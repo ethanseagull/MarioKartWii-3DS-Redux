@@ -2308,9 +2308,11 @@ int main() {
             }
             if(auto* camera=K::Render::KartCamera::Instance())
                 camera->requestLookBack(fullRace&&!qaMode&&!replay&&!raceGrid.finished()&&bool(held&(KEY_X|KEY_ZL)));
-            // Preserve the Wii input lattice used by ghost records.
-            int stick=mkw::circlePadSteering(pad.dx);
-            if(garageTest){buttons=1;stick=frames%fixtureFrames<32?-4:4;}
+            // Preserve the Wii input lattice used by ghost records. Stick Y tilts
+            // the vehicle in the air (KartMove::calcDive).
+            const auto padStick=mkw::circlePadStick(pad.dx,pad.dy);
+            int stick=padStick.x,stickY=padStick.y;
+            if(garageTest){buttons=1;stick=frames%fixtureFrames<32?-4:4;stickY=0;}
             auto* controller=K::System::KPadDirector::Instance()->hostController();
             auto start=svcGetSystemTick();
             if(replay||effectsTest||animationTest)accumulator=1;
@@ -2327,7 +2329,7 @@ int main() {
                     if(raceTrick==K::System::Trick::Left)raceTrick=K::System::Trick::Right;
                     else if(raceTrick==K::System::Trick::Right)raceTrick=K::System::Trick::Left;
                 }
-                controller->setInputsRawStick(buttons,(selectedMirror?-stick:stick)+7,7,raceTrick);
+                controller->setInputsRawStick(buttons,(selectedMirror?-stick:stick)+7,stickY+7,raceTrick);
                 if(fullRace){
                     // After the goal retail hands the player to its AI
                     // (AIEngine PostRaceDriving, USA 0x80728C28): the CPU
