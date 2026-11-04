@@ -1889,6 +1889,12 @@ void Renderer::drawNow(const Model& model,const Vertex* vertices,const C3D_Mtx& 
         if(inkBlack){auto* ink=C3D_GetTexEnv(5);C3D_TexEnvColor(ink,(ink->color&0xff000000u)|((255u-inkBlack)*0x010101u));
             C3D_TexEnvOpRgb(ink,GPU_TEVOP_RGB_SRC_COLOR,GPU_TEVOP_RGB_SRC_COLOR,GPU_TEVOP_RGB_SRC_COLOR);
             C3D_TexEnvSrc(ink,C3D_RGB,GPU_PREVIOUS,GPU_CONSTANT);C3D_TexEnvFunc(ink,C3D_RGB,GPU_MODULATE);C3D_TexEnvScale(ink,C3D_RGB,GPU_TEVSCALE_1);}
+        // Ghost racer passes (Renderer::ghostPass): alpha test kept, blending replaced.
+        if(execGhostPass_==1)C3D_DepthTest(true,GPU_GEQUAL,GPU_WRITE_DEPTH);
+        else if(execGhostPass_==2){
+            C3D_DepthTest(true,GPU_GEQUAL,GPU_WRITE_COLOR);C3D_BlendingColor(uint32_t(execGhostAlpha_)<<24);
+            C3D_AlphaBlend(GPU_BLEND_ADD,GPU_BLEND_ADD,GPU_CONSTANT_ALPHA,GPU_ONE_MINUS_CONSTANT_ALPHA,GPU_ZERO,GPU_ONE);
+        }
         last=o?nullptr:&s;lastRetail=retail;lastEnvironment=retailEnvironment;
         } // !repeat
         C3D_BoolUnifSet(GPU_VERTEX_SHADER,projectedWaterLoc_,s.menuReflection==11||s.menuReflection==22);

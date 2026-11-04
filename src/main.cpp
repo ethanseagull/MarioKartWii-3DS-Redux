@@ -162,6 +162,38 @@ static unsigned selectedCpu=1,selectedCpuVehicles=0,selectedItems=0;
 // Time Trials: one racer, no item boxes, a Triple Mushroom at the start, and
 // the best finish per course kept on the SD card (milliseconds, 0 = none).
 static bool timeTrial=false;
+// Time Trials staff ghost (MenuState::ghostChoice: 1 staff, 2 expert), raced
+// as player 1 from the disc's Race/TimeAttack/ghostN/ghostN_comp_NN.rkg.
+// Both ghosts' finish times decide the license's beaten flags (RKPD +0x0c/+0x10).
+static unsigned staffGhost=0;
+static std::vector<K::u8> staffGhostFile;
+static std::array<uint32_t,2> staffGhostTimes{};
+// Header check and finish time (ms) of one staff ghost; 0 when the SD card
+// has no such file or it is not a playable ghost of this course.
+static uint32_t readStaffGhost(unsigned course,unsigned kind,std::vector<K::u8>* file=nullptr){
+    char path[64];const unsigned n=mkw::licenseSaveCourse(course);
+    std::snprintf(path,sizeof path,"Race/TimeAttack/ghost%u/ghost%u_comp_%02u.rkg",kind+1,kind+1,n);
+    FILE* f=fopen(path,"rb");if(!f)return 0;
+    K::u8 head[0x10];bool ok=fread(head,1,sizeof head,f)==sizeof head;
+    auto be=[&](unsigned at){return uint32_t(head[at])<<24|uint32_t(head[at+1])<<16|uint32_t(head[at+2])<<8|head[at+3];};
+    const uint32_t time=be(4),ids=be(8);const unsigned m=time>>25,s=(time>>18)&127,ms=(time>>8)&1023;
+    // Retail ghosts only: a known character (no Mii) and vehicle, as RawGhostFile::isValid.
+    ok=ok&&!std::memcmp(head,"RKGD",4)&&((time>>2)&63)==unsigned(Courses[course].id)&&((ids>>20)&63)<24&&(ids>>26)<36&&s<60&&ms<1000;
+    if(ok&&file){
+        fseek(f,0,SEEK_END);const long size=ftell(f);fseek(f,0,SEEK_SET);
+        // RawGhostFile copies a whole 0x2800-byte buffer from an uncompressed ghost.
+        ok=size>0x88&&size<=0x2800;if(ok){file->assign(0x2800,0);ok=fread(file->data(),1,size_t(size),f)==size_t(size);}
+    }
+    fclose(f);return ok?(m*60+s)*1000+ms:0;
+}
+// Bit n: course n's staff ghost beaten, so its expert staff ghost is listed.
+static uint32_t expertGhostCourses(const mkw::LicenseSave& save){uint32_t mask=0;for(unsigned i=0;i<32;++i)if(save.staffGhostBeaten(i))mask|=1u<<i;return mask;}
+// The ghost page lists a cup's staff ghosts: read their headers once, when its Course page opens.
+static void probeStaffGhosts(mkw::MenuState& menu){
+    static uint8_t probed=0;const unsigned cup=std::min(menu.selection.course/4,7u);
+    if(probed>>cup&1)return;probed|=uint8_t(1u<<cup);
+    for(unsigned c=cup*4;c<cup*4+4;++c)for(unsigned kind=0;kind<2;++kind)menu.staffGhostTimes[c][kind]=readStaffGhost(c,kind);
+}
 static bool battleMode=false,coinRunnersMode=false;
 static unsigned battleTicks=0;
 static mkw::BalloonBattle balloonBattle;
@@ -240,7 +272,10 @@ static void configure(K::System::RaceConfig* config,void* context) {
     s.cpuDifficulty=uint8_t(selectedCpu);s.cpuVehicles=uint8_t(selectedCpuVehicles);s.itemMode=uint8_t(selectedItems);
     s.gameMode=static_cast<K::System::RaceConfig::Scenario::GameMode>(selectedRaceMode);
     s.teams=selectedTeams;s.humanTeam=uint8_t(selectedHumanTeam);s.battleType=coinRunnersMode?1:0;
-    if(fullRace){static_cast<mkw::RaceGrid*>(context)->configure(*config,selectedGarageIndex(),timeTrial?1:12,selectedRoster.ready?&selectedRoster.choices:nullptr);for(unsigned i=0;i<s.playerCount;++i)s.players[i].startPosition=selectedStartPositions[i];s.players[0].driftIsAuto=automaticDrift;return;}
+    if(fullRace){static_cast<mkw::RaceGrid*>(context)->configure(*config,selectedGarageIndex(),timeTrial?(staffGhost?2:1):12,selectedRoster.ready?&selectedRoster.choices:nullptr);for(unsigned i=0;i<s.playerCount;++i)s.players[i].startPosition=selectedStartPositions[i];s.players[0].driftIsAuto=automaticDrift;
+        // RaceConfig::initControllers takes the ghost's racer and inputs from its file.
+        if(staffGhost){config->setGhost(staffGhostFile.data());s.players[1].type=K::System::RaceConfig::Player::Type::Ghost;}
+        return;}
     auto& p=s.players[0];p.type=K::System::RaceConfig::Player::Type::Local;
     const auto& driver=selectedVehicle();
     p.character=static_cast<K::Character>(driver.character);p.vehicle=static_cast<K::Vehicle>(driver.vehicle);p.driftIsAuto=false;
@@ -842,7 +877,8 @@ int main() {
                 if(selectionSave->ok)licenseSaves[selectionSave->slot]=selectionSave->value;
                 selectionSave.reset();saveStarted=0;
             }
-            for(unsigned slot=0;slot<4;++slot)menu.licenseUnlocks[slot]=licenseSaves[slot].unlockFlags;
+            for(unsigned slot=0;slot<4;++slot){menu.licenseUnlocks[slot]=licenseSaves[slot].unlockFlags;menu.licenseExpertGhosts[slot]=expertGhostCourses(licenseSaves[slot]);}
+            if(menu.selection.mode==mkw::UiMode::TimeTrials&&(menu.page==mkw::UiPage::Course||menu.page==mkw::UiPage::Ghost))probeStaffGhosts(menu);
             // The logical page becomes Race while the pause exit still animates.
             // Keep the resident course for ResumeRace; only release when leaving
             // the race section for an unrelated menu or a different race.
@@ -1292,6 +1328,9 @@ int main() {
         const unsigned cc=vs?menu.selection.vsClass:menu.selection.mode==mkw::UiMode::GrandPrix?unsigned(menu.selection.engineClass):2;
         selectedMirror=cc==3;selectedEngineClass=std::min(cc,2u);
         selectedCpu=battleMode?menu.selection.battleCpu:vs?menu.selection.vsCpu:(selectedRaceMode==0?std::min(selectedEngineClass,2u):1u);selectedCpuVehicles=battleMode?menu.selection.battleVehicles:vs?menu.selection.vsVehicles:0;selectedItems=battleMode?menu.selection.battleItems:vs?menu.selection.vsItems:0;
+        staffGhost=timeTrial&&courseChoice<32?std::min(menu.ghostChoice,2u):0;staffGhostTimes={};
+        if(timeTrial&&courseChoice<32)for(unsigned kind=0;kind<2;++kind)staffGhostTimes[kind]=readStaffGhost(courseChoice,kind,staffGhost==kind+1?&staffGhostFile:nullptr);
+        if(staffGhost&&!staffGhostTimes[staffGhost-1]){report("FAIL staff ghost file: racing alone");staffGhost=0;}
     };
     if(fullRace){if(runMenu()!=mkw::UiAction::StartRace){finishAutoplay();renderer.waitForGpu();menuModels.reset(renderer);menuIcons.reset(renderer);menuRenderer.release();mkw::SoundSystem::instance().stop();mkw::MenuMovieAudio::shutdown();mkw::shutdownLoadingScreen();renderer.shutdown();gfxExit();return 0;}applySelection();menu.raceStarted();menuProfile->write("sdmc:/3ds/mkw-3ds/menu-performance.csv");raceLoadStart=svcGetSystemTick();}
     bool dataReady=exists("Race/Common.szs")&&courseAvailable(courseChoice);
@@ -1442,7 +1481,7 @@ int main() {
     // order with the VS points before this race and the points it adds.
     auto fillResults=[&](){
         const auto& scenario=K::System::RaceConfig::Instance()->raceScenario();
-        const unsigned n=std::min(raceGrid.count(),12u);
+        const unsigned n=std::min(raceGrid.itemCount(),12u); // a staff ghost has no results row
         std::array<unsigned,12> order{};for(unsigned i=0;i<n;++i)order[i]=i;
         std::stable_sort(order.begin(),order.begin()+n,[&](unsigned a,unsigned b){return battleMode?battleRank(a)<battleRank(b):raceGrid.rank(a)<raceGrid.rank(b);});
         if(battleMode){
@@ -1794,7 +1833,7 @@ int main() {
                 if(balloonBattle.replenish(unsigned(racer)))balloonRuntime.replenish(unsigned(racer));
         },nullptr);
         if(!raceGrid.reset()){trackLoadFailed=true;report("FAIL course CPU route: race suspended; choose another map");}
-        raceItems->resetFromCourse(raceGrid.count());
+        raceItems->resetFromCourse(raceGrid.itemCount());
         if(battleMode&&!raceGrid.ai().setBattleSources(*raceItems,coinRunnersMode?&coinBattle:nullptr)){
             trackLoadFailed=true;report("FAIL original battle search graph");
         }
@@ -1805,7 +1844,8 @@ int main() {
             for(unsigned i=0;i<raceGrid.count();++i)teams[i]=mkw::RaceTeam(scenario.players[i].team);
             if(!balloonRuntime.reset(raceGrid.count(),teams)){trackLoadFailed=true;report("FAIL original balloon models");}
         }
-        if(timeTrial){raceItems->reset({},raceGrid.count());raceItems->give(0,mkw::ItemKind::TripleMushroom);}
+        // A staff ghost is no item racer: Kinoko's KartItem replays its own Triple Mushroom.
+        if(timeTrial){raceItems->reset({},raceGrid.itemCount());raceItems->give(0,mkw::ItemKind::TripleMushroom);}
         // DIAG: the grid, items and AI apart from the opponents' graphics (logged as "grid and opponents").
         if(reload)stage("grid, items and AI");
         if(reload){if(!opponents.load()){trackLoadFailed=true;report("FAIL opponent graphics load");}}
@@ -2546,7 +2586,7 @@ int main() {
                                 LOGF("QA held player=%u step=%u item=%d pow=%u local_pow=%u bombs=%u blasts=%u",g.player,physicsSteps,int(h.item),unsigned(h.pow),unsigned(raceItems->hud(0).pow),bombs,blasts);
                             }
                         }
-                    raceItems->beforeStepNative(inputs.data(),raceGrid.count(),K::System::RaceManager::Instance()->isStageReached(K::System::RaceManager::Stage::Race),raceGrid.bulletNoEndPlayers());
+                    raceItems->beforeStepNative(inputs.data(),raceGrid.itemCount(),K::System::RaceManager::Instance()->isStageReached(K::System::RaceManager::Stage::Race),raceGrid.bulletNoEndPlayers());
                     for(unsigned i=0;i<raceGrid.count();++i){
                         const auto& h=raceItems->hud(i);const bool held=h.deployed&&h.heldCharges>0;
                         raceGrid.ai().setItemView(i,{uint8_t(h.item),uint8_t(held?h.heldCharges:0),h.roulette!=0,held,
@@ -2621,7 +2661,15 @@ int main() {
                 }
                 if(intro.active()&&!raceWarmupFrames){intro.step();++introTick;}
                 if(fullRace){
-                    raceGrid.afterStep();raceItems->afterStepNative(raceGrid.count());
+                    raceGrid.afterStep();raceItems->afterStepNative(raceGrid.itemCount());
+                    if(kQa&&staffGhost&&raceGrid.ghost(1)){
+                        // Sync check: the replayed ghost's finish against the time in its file.
+                        static bool logged=false;const auto& ghost=K::System::RaceManager::Instance()->player(1);
+                        if(!ghost.finished())logged=false;
+                        else if(!logged){logged=true;const auto& t=ghost.raceTimer();const unsigned ms=unsigned(t.min)*60000u+unsigned(t.sec)*1000u+unsigned(t.mil);
+                            if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/staff-ghost-sync.txt","a")){fprintf(f,"course=%u ghost=%u record_ms=%u replay_ms=%u step=%u\n",courseChoice,staffGhost,unsigned(staffGhostTimes[staffGhost-1]),ms,physicsSteps);fclose(f);}
+                            LOGF("staff ghost finish course=%u record=%u replay=%u",courseChoice,unsigned(staffGhostTimes[staffGhost-1]),ms);}
+                    }
                     if(coinRunnersMode){
                         const auto* race=K::System::RaceManager::Instance();
                         coinBattle.step(race->isStageReached(K::System::RaceManager::Stage::Race)&&
@@ -2708,6 +2756,13 @@ int main() {
                         if(timeTrial&&courseChoice<bestTimes.size()){
                             const auto& t=race->player(0).raceTimer();const uint32_t ms=uint32_t(t.min)*60000u+uint32_t(t.sec)*1000u+uint32_t(t.mil);
                             if(ms&&(!bestTimes[courseChoice]||ms<bestTimes[courseChoice])){bestTimes[courseChoice]=ms;licenseSaves[activeLicense].times=bestTimes;menu.licenseBestTimes[activeLicense]=bestTimes;raceSavePending=true;}
+                            // Beating the staff ghost's time unlocks the expert staff ghost here.
+                            auto& save=licenseSaves[activeLicense];
+                            if(!qaMode&&!replay&&save.timeTrialFinish(courseChoice,ms,staffGhostTimes[0],staffGhostTimes[1]))raceSavePending=true;
+                            if(!qaMode&&!replay&&staffGhost){
+                                ++(ms<staffGhostTimes[staffGhost-1]?activeRecords.ghostWins:activeRecords.ghostLosses);save.records=activeRecords;raceSavePending=true;
+                                LOGF("staff ghost %u: player %u ms, ghost %u ms (record), ghost finished=%d",staffGhost,unsigned(ms),unsigned(staffGhostTimes[staffGhost-1]),int(race->player(1).finished()));
+                            }
                         }
                     }
                     {
@@ -2819,7 +2874,7 @@ int main() {
                         if(battleMode)audio.battleResultKind=uint8_t(battleOutcome.kind(mkw::RaceTeam(K::System::RaceConfig::Instance()->raceScenario().players[0].team),battleScore(0)));
                         audio.resultPointsChanged=results.pointsChanged();
                         audio.resultSlideSound=results.slideSound();
-                        audio.finished=roundFinished;audio.rank=battleMode?battleRank(0):me.finishOrder()?me.finishOrder():raceGrid.rank();
+                        audio.finished=roundFinished;audio.rank=battleMode?battleRank(0):me.finishOrder()&&!timeTrial?me.finishOrder():raceGrid.rank(); // a staff ghost may finish first
                         audio.star=st.onBit(St::Star);audio.mega=st.onBit(St::Mega);audio.shocked=st.onBit(St::Shocked);
                         audio.introShot=intro.active()?intro.shot():-1;audio.hudRank=fullRace&&!battleMode&&!intro.active()?raceGrid.rank():0;
                         const uint16_t coinCues=coinBattle.takeCues(),coinArrivalCues=coinBattle.takeArrivalCues();
@@ -3581,6 +3636,8 @@ int main() {
                                   objects.data(),unsigned(objects.size()));
             }
             if(mergeJudgeShadow)renderer.setShadowUnion(false);
+            // A staff ghost blends over everything opaque, the player's shadow included.
+            if(fullRace&&timeTrial){renderer.diagPass(mkw::diag::PassOpponents);opponents.drawGhosts(renderer);}
             renderer.diagPass(mkw::diag::PassEffects);
             renderer.drawSparks(driftEffects,sparkTexture);
             renderer.drawEffects(raceEffects,effectTextures->data());

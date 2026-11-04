@@ -44,8 +44,13 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.8.14.
 - Movie frames are stored LZ4-compressed (lossless): all movies together take 796 MB instead of 889 MB, even with the opening and staff rolls at twice the frames, and the opening reads slightly less from the SD card per second than it did at 30 fps.
 - The opening and staff roll sound is the movies' original DSP ADPCM, decoded as it plays, instead of decoded PCM: the same samples, about a third of the size.
 
+# Time Trials
+
+- Staff ghosts: race the disc's Staff Ghost on every course, and its Expert Staff Ghost once you beat the Staff Ghost's time. The ghost is translucent, can't be bumped and uses its own Triple Mushroom. Beating staff ghosts counts towards the retail unlocks that need them, and ghost races count as Ghost Races in your records.
+
 # Fixes
 
+- Time Trials no longer place Moonview Highway's Bob-omb cars, as on the Wii.
 - Award ceremonies no longer fail at the driving scene: its effect bank is now cooked.
 - The select and controller sounds no longer play a semitone flat.
 - R tricks off boost ramps, half-pipes and zippers, not only trick surfaces.

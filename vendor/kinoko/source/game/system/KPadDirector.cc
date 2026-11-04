@@ -21,17 +21,18 @@ void KPadDirector::reset() {
 
 /// @addr{0x80524580}
 void KPadDirector::startGhostProxies() {
-    m_playerInputs[0].startGhostProxy();
+    for (size_t i = 0; i < m_playerCount; ++i) m_playerInputs[i].startGhostProxy();
 }
 
 /// @addr{0x805245DC}
 void KPadDirector::endGhostProxies() {
-    m_playerInputs[0].endGhostProxy();
+    for (size_t i = 0; i < m_playerCount; ++i) m_playerInputs[i].endGhostProxy();
 }
 
 /// @addr{0x8052453C}
-void KPadDirector::setGhostPad(const u8 *inputs, bool driftIsAuto) {
-    m_playerInputs[0].setGhostController(m_ghostController, inputs, driftIsAuto);
+void KPadDirector::setGhostPad(const u8 *inputs, bool driftIsAuto, size_t index) {
+    ASSERT(index < m_playerCount);
+    m_playerInputs[index].setGhostController(m_ghostController, inputs, driftIsAuto);
 }
 
 void KPadDirector::setHostPad(bool driftIsAuto, size_t index) {

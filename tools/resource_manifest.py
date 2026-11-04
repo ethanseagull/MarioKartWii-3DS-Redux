@@ -43,6 +43,12 @@ files[native_resource]=Path('mii/CFL_Res.dat')
 # Real ceremony kart simulation reads its original KMP/KCL through ResourceManager.
 for name in ('winningrun_demo','ending_demo'):
  files[ROOT/f'build/award-source/Race/Course/{name}.szs']=Path(f'Race/Course/{name}.szs')
+# Time Trials staff ghosts (ghost1) and expert staff ghosts (ghost2), as on the disc.
+for kind in (1,2):
+ for n in range(32):
+  name=f'Race/TimeAttack/ghost{kind}/ghost{kind}_comp_{n:02d}.rkg';source=ROOT/'data/extracted'/name
+  if not source.is_file():raise ValueError('Staff ghost missing from the extracted disc: '+name)
+  files[source]=Path(name)
 staff=ROOT/'build/staff'
 staff_receipt=staff/'models/staff-ui.json'
 if not staff_receipt.is_file():raise ValueError('Cook Staff UI and both movies into build/staff before packaging')

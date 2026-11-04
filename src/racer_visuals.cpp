@@ -38,6 +38,7 @@ struct RacerVisuals::Impl {
         VehicleAnimation vehicle;
         struct Clock {int clip=-1;unsigned start=0;} bodyClock;
         std::array<Clock,9> extraClocks;
+        bool ghost=false;
     };
     std::array<std::unique_ptr<Racer>,11> racers;
     unsigned count=0;
@@ -61,6 +62,7 @@ struct RacerVisuals::Impl {
     }
     std::array<std::pair<Impl*,unsigned>,11> jobContext{};
     void prepareRacer(unsigned i);
+    void drawPrepared(Renderer& renderer,unsigned i);
 };
 RacerVisuals::RacerVisuals():impl_(std::make_unique<Impl>()){}
 RacerVisuals::~RacerVisuals()=default;
@@ -103,6 +105,7 @@ bool RacerVisuals::load(){
             const int c=r->animation->find(driverVehicleClipName(name,true));
             if(c>=0)r->controller.setDuration(name,r->animation->duration(c));
         }
+        r->ghost=player.type==K::System::RaceConfig::Player::Type::Ghost;
         impl_->racers[i-1]=std::move(r);++impl_->count;
     }
     resetAnimation();return true;
@@ -246,11 +249,6 @@ void RacerVisuals::prepare(const Renderer& renderer,const RaceItems& items,Vec3 
 void RacerVisuals::draw(Renderer& renderer,const RaceItems& items,Vec3 viewer,unsigned tick,const Model* playerShadow,const C3D_Mtx* playerTransform){
     auto& d=*impl_;
     if(!d.frame.open){d.openFrame(renderer,items,viewer,tick);d.queued.fill(false);}
-    auto drawSkinned=[&](const DriverAnimation* bank,const Model& model,const C3D_Mtx& matrix){
-        if(bank&&bank->gpuSkinned())renderer.setSkinPalette(bank->palette(),bank->matrixCount(),21);
-        renderer.draw(model,matrix);
-        renderer.setSkinPalette(nullptr,0,12);
-    };
     // Run the racers the worker has not reached yet here, from the back of its
     // queue (it takes them from the front), so this thread waits only for jobs
     // already running. Draws keep their order below.
@@ -260,14 +258,30 @@ void RacerVisuals::draw(Renderer& renderer,const RaceItems& items,Vec3 viewer,un
     for(unsigned i=0;i<11;++i)if(auto* r=d.racers[i].get()){
         if(d.queued[i])jobWorker().finish(d.jobs[i]);else d.prepareRacer(i);
         const auto& out=d.prepared[i];
-        if(out.draw&&r->shadow&&d.frame.view.visible(*r->shadow,out.body))shadows[shadowCount++]={r->shadow.get(),out.body};
+        if(out.draw&&!r->ghost&&r->shadow&&d.frame.view.visible(*r->shadow,out.body))shadows[shadowCount++]={r->shadow.get(),out.body};
     }
     // Submit all racers in one stencil batch: overlaps darken once. Resolve
     // before the racer models, so their own volumes cannot shade the casters.
     renderer.drawShadowVolumes(shadows.data(),shadowCount,.5f);
-    for(unsigned i=0;i<11;++i)if(auto* r=d.racers[i].get()){
-        const auto& out=d.prepared[i];
-        if(!out.draw)continue;
+    for(unsigned i=0;i<11;++i)if(d.racers[i]&&!d.racers[i]->ghost)d.drawPrepared(renderer,i);
+    d.frame.open=false;
+}
+void RacerVisuals::drawGhosts(Renderer& renderer){
+    // Retail ghosts are see-through but hide their own far side: depth first.
+    for(unsigned i=0;i<11;++i)if(impl_->racers[i]&&impl_->racers[i]->ghost){
+        for(uint8_t pass=1;pass<=2;++pass){renderer.ghostPass=pass;impl_->drawPrepared(renderer,i);}
+        renderer.ghostPass=0;
+    }
+}
+void RacerVisuals::Impl::drawPrepared(Renderer& renderer,unsigned i){
+    auto drawSkinned=[&](const DriverAnimation* bank,const Model& model,const C3D_Mtx& matrix){
+        if(bank&&bank->gpuSkinned())renderer.setSkinPalette(bank->palette(),bank->matrixCount(),21);
+        renderer.draw(model,matrix);
+        renderer.setSkinPalette(nullptr,0,12);
+    };
+    auto* r=racers[i].get();const auto& out=prepared[i];
+    if(!r||!out.draw)return;
+    {
         renderer.additiveColor=out.additive;
         if(out.bodyVisible){if(out.lod==1)drawSkinned(r->bodyAnimation.get(),*r->body,out.body);else renderer.draw(*(out.lod>=3?r->bodyLodRear:r->bodyLod),out.body);}
         if(out.lowHandleVisible)renderer.draw(*(out.lod>=3?r->handleLodRear:r->handleLod),out.lowHandle);
@@ -277,6 +291,5 @@ void RacerVisuals::draw(Renderer& renderer,const RaceItems& items,Vec3 viewer,un
         for(unsigned e=0;e<out.extras;++e){const auto& x=out.extra[e];if(x.visible)drawSkinned(r->extraAnimation[x.part].get(),*r->extras[x.part],x.matrix);}
         renderer.additiveColor=0;
     }
-    d.frame.open=false;
 }
 }

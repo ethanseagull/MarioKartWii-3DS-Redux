@@ -5,6 +5,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <utility>
 
 namespace mkw {
 namespace {
@@ -79,6 +80,7 @@ void decode(const unsigned char* p,unsigned slot,LicenseSave& r){
  for(unsigned i=0;i<r.name.size();++i)r.name[i]=be16(p+0x14+2*i);
  std::copy_n(p+0x28,r.miiId.size(),r.miiId.begin());
  for(unsigned i=0;i<r.unlockFlags.size();++i)r.unlockFlags[i]=be32(p+0x30+4*i);
+ r.staffGhosts=be32(p+0x0c);r.expertGhosts=be32(p+0x10);
  const unsigned rules=be16(p+0x80);auto& s=r.settings;
  s.vsClass=rules>>14;s.vsCpu=(rules>>12)&3;s.vsVehicles=(rules>>10)&3;s.vsCourses=(rules>>8)&3;s.vsItems=(rules>>6)&3;
  const unsigned races=(rules>>2)&15;s.vsRaces=races<std::size(UiVsRaceCounts)?UiVsRaceCounts[races]:4;
@@ -128,6 +130,8 @@ void encode(unsigned char* p,unsigned slot,const LicenseSave& r){
   std::copy(r.miiId.begin(),r.miiId.end(),p+0x28);
  for(unsigned i=0;i<r.unlockFlags.size();++i)
   if(r.unlockFlags[i]!=previous.unlockFlags[i])put32(p+0x30+4*i,r.unlockFlags[i]);
+ if(r.staffGhosts!=previous.staffGhosts)put32(p+0x0c,r.staffGhosts);
+ if(r.expertGhosts!=previous.expertGhosts)put32(p+0x10,r.expertGhosts);
  const auto& s=r.settings;const unsigned raceIndex=std::find(std::begin(UiVsRaceCounts),std::end(UiVsRaceCounts),s.vsRaces)-std::begin(UiVsRaceCounts);
  if(!previous.occupied||s.vsClass!=previous.settings.vsClass||s.vsCpu!=previous.settings.vsCpu||s.vsVehicles!=previous.settings.vsVehicles||s.vsCourses!=previous.settings.vsCourses||s.vsItems!=previous.settings.vsItems||s.vsRaces!=previous.settings.vsRaces)
   put16(p+0x80,(s.vsClass<<14)|(s.vsCpu<<12)|(s.vsVehicles<<10)|(s.vsCourses<<8)|(s.vsItems<<6)|(raceIndex<<2)|(be16(p+0x80)&3));
@@ -201,8 +205,12 @@ std::vector<LicenseUnlockNotice> LicenseSave::availableUnlocks() const{
  grant(58,place(0,3,3)&&place(0,7,3));grant(59,place(1,3,3)&&place(1,7,3));
  unsigned timeCourses=0;for(auto time:times)timeCourses+=time!=0;
  grant(18,timeCourses==32);grant(25,timeCourses>=16);grant(48,timeCourses>=8);
- // USA 8085ea98, SetTitleBMG 808592a4. Unsupported ghost/online/
- // Galaxy conditions remain false rather than selecting their messages.
+ // Expert staff ghosts unlocked (RKPD +0x0c bits) and ghost races won (+0xa8).
+ const unsigned experts=unsigned(__builtin_popcount(staffGhosts));
+ grant(38,experts>=1);grant(29,experts>=4);grant(21,experts>=8);grant(55,experts>=12);grant(43,experts>=24);grant(33,experts>=32);
+ grant(49,records.ghostWins>=5);grant(30,records.ghostWins>=25);grant(35,records.ghostWins>=100);grant(56,records.ghostWins>=200);grant(36,records.ghostWins>=250);
+ // USA 8085ea98, SetTitleBMG 808592a4. Unsupported online/Galaxy
+ // conditions remain false rather than selecting their messages.
  constexpr unsigned bits[]={14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,52,
   0,1,1,2,3,4,5,6,7,11,11,8,10,10,9,12,13,13,3,7,34,35,35,36,37,38,39,
   40,41,42,43,44,44,45,46,47,48,49,50,50,51,30,31,39};
@@ -226,6 +234,16 @@ std::vector<LicenseUnlockNotice> LicenseSave::availableUnlocks() const{
   notices.push_back({bit,61,0x1fe4u,0,unsigned(races[bit])});
  }
  return notices;
+}
+unsigned licenseSaveCourse(unsigned course){return course<32?SaveCourse[course]:0;}
+bool LicenseSave::staffGhostBeaten(unsigned course)const{return course<32&&(staffGhosts>>SaveCourse[course]&1);}
+bool LicenseSave::expertGhostBeaten(unsigned course)const{return course<32&&(expertGhosts>>SaveCourse[course]&1);}
+bool LicenseSave::timeTrialFinish(unsigned course,unsigned ms,unsigned staffMs,unsigned expertMs){
+ if(course>=32||!ms)return false;
+ const auto before=std::pair(staffGhosts,expertGhosts);const std::uint32_t bit=std::uint32_t(1)<<SaveCourse[course];
+ if(staffMs&&ms<staffMs)staffGhosts|=bit;
+ if(expertMs&&ms<expertMs)expertGhosts|=bit;
+ return before!=std::pair(staffGhosts,expertGhosts);
 }
 bool LicenseSave::refreshUnlocks(){
  const auto notices=availableUnlocks();

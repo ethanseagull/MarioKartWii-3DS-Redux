@@ -52,6 +52,9 @@ void RaceManager::findKartStartPoint(EGG::Vector3f &pos, EGG::Vector3f &angles, 
                 if (map->getStartPoint(i)->playerIndex() == static_cast<s16>(slot)) { startPointIdx = i; break; }
             }
         }
+    } else if (scenario.gameMode == RaceConfig::Scenario::GameMode::Time_Trial) {
+        // Time Trials: a staff ghost starts in the player's own grid slot.
+        placement = playerCount = 1;
     } else if (scenario.gameMode == RaceConfig::Scenario::GameMode::Awards) {
         // Ending has twelve individually authored delayed KTPT entries.
         const u32 slots = scenario.course == Course::Ending_Demo ? 12 : scenario.cameraMode == 12 ? 6 : 3;
