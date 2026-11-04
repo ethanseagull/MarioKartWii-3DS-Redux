@@ -6,7 +6,7 @@ build/
 dist/
 releases/
 data/
-assets/
+/assets/*
 generated/
 sd-card/
 emulator/
@@ -148,6 +148,11 @@ CFL_Res.dat
 # Explicitly supplied HOME icon and logo; never include generated banner models.
 !/tools/release/artwork/icon.png
 !/tools/release/artwork/logo.png
+
+# 3DS photos for the pause controls diagram, supplied by smol_bug (NOTICE).
+!/assets/pause-controls/
+!/assets/pause-controls/old3ds.png
+!/assets/pause-controls/new3ds.png
 
 # Current maintainer-supplied banner audio.
 !/tools/release/artwork/banneraudio.wav

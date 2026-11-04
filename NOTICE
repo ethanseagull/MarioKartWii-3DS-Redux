@@ -40,6 +40,9 @@ Mario Kart Wii and its artwork are copyright Nintendo. The repository
 contains eight inherited MK7 marker PNGs and the separately supplied HOME
 icon, logo and earlier banner audio in tools/release/artwork/. These media
 assets are not covered by the MIT license. Inclusion here is not a grant of rights to Nintendo artwork.
+The Old 3DS and New 3DS photos in assets/pause-controls/, used for the pause
+screen's controls diagram, were supplied by smol_bug (Discord) for use in this
+project. They are not covered by the MIT license.
 Game archives, banner CGFX models, native CFL_Res.dat, saves and compiled
 packages are not supplied. Builders must supply the game and system inputs.
 
