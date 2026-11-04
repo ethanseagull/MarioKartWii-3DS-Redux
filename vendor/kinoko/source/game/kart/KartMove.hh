@@ -249,6 +249,17 @@ public:
         m_cpu = true;
     }
     [[nodiscard]] f32 baseSpeed() const { return m_cpu ? m_cpuSpeed : m_baseSpeed; }
+
+    // A racer the AI drives turns its body directly and keeps the pad stick neutral outside
+    // drifts. Its kart model reads the AI's stick (Enemy::AI +0x14, AI::getStick) and a bike
+    // leans from the AI's input (KartMove +0x28C) instead of the pad.
+    void setCpuSteer(bool cpu, f32 stick, f32 lean) {
+        m_cpuSteer = cpu;
+        m_cpuStick = stick;
+        m_cpuLean = lean;
+    }
+    [[nodiscard]] bool cpuSteer() const { return m_cpuSteer; }
+    [[nodiscard]] f32 cpuStick() const { return m_cpuStick; }
     [[nodiscard]] f32 statBaseSpeed() const { return m_baseSpeed; } ///< Retail KartMove +0x14.
     void setBulletRouteFlight(bool flight,const EGG::Vector3f &up){m_bulletRouteFlight=flight;m_bulletRouteUp=up;}
     void setBulletGroundContact(bool contact,const EGG::Vector3f& normal=EGG::Vector3f::ey);
@@ -577,6 +588,9 @@ protected:
     f32 m_softSpeedLimit; ///< Base speed + boosts + wheelies, restricted to the hard speed limit.
     f32 m_cpuSpeed = 0.0f; ///< Retail +0x1c: AISpeedRace result (CPU ground speed-limit base).
     bool m_cpu = false;    ///< Set once the CPU speed has been written (KartObjectProxy::isCpu).
+    bool m_cpuSteer = false; ///< Driven by the AI this tick (see setCpuSteer).
+    f32 m_cpuStick = 0.0f;   ///< Enemy::AI +0x14: the stick the AI hands the kart and driver models.
+    f32 m_cpuLean = 0.0f;    ///< KartMove +0x28C: the AI's bike lean input.
     f32 m_speed;          ///< Current speed, restricted to the soft speed limit.
     f32 m_lastSpeed;      ///< Last frame's speed, cached to calculate angular velocity.
     f32 m_processedSpeed; ///< Offset 0x28. It's only ever just a copy of @ref m_speed.

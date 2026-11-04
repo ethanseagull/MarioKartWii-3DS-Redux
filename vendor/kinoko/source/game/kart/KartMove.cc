@@ -2971,7 +2971,8 @@ void KartMoveBike::calcVehicleRotation(f32 turn) {
     m_leanRotCap += 0.3f * (leanRotCap - m_leanRotCap);
     m_leanRotInc += 0.3f * (leanRotInc - m_leanRotInc);
 
-    f32 stickX = state()->stickX();
+    // A CPU leans from the AI's input, not its (neutral) pad stick.
+    f32 stickX = m_cpuSteer ? m_cpuLean : state()->stickX();
     f32 extVelXFactor = 0.0f;
     f32 leanRotMin = -m_leanRotCap;
     f32 leanRotMax = m_leanRotCap;

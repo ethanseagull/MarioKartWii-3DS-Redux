@@ -45,7 +45,8 @@ void KartModel::vf_1c() {
     bool frozenInIce =
             System::RaceConfig::Instance()->raceScenario().course == Course::N64_Sherbet_Land &&
             status.onBit(Kart::eStatus::InRespawn, Kart::eStatus::AfterRespawn);
-    f32 xStick = frozenInIce ? 0.0f : inputs()->currentState().stick.x;
+    f32 xStick = frozenInIce ? 0.0f :
+            move()->cpuSteer() ? move()->cpuStick() : inputs()->currentState().stick.x;
     bool isInCannon = status.onBit(Kart::eStatus::InCannon);
     f32 fVar2 = isInCannon ? 0.02f : 0.1f;
 

@@ -120,7 +120,7 @@ void RacerVisuals::step(unsigned tick,const RaceItems& items){
         r->vehicle.step(*kart);DriverSignals s;
         s.bike=kart->param()->isBike();s.handleRelativeBike=kart->param()->stats().body==K::Kart::KartParam::Stats::Body::Handle_Relative_Bike;s.wheelie=status.onBit(K::Kart::eStatus::Wheelie);
         s.airborne=status.offBit(K::Kart::eStatus::TouchingGround);s.hopping=status.onBit(K::Kart::eStatus::Hop);
-        s.steering=kart->inputs()->currentState().stick.x;
+        s.steering=kart->move()->cpuSteer()?kart->move()->cpuStick():kart->inputs()->currentState().stick.x;
                 s.burnout=status.onBit(K::Kart::eStatus::Burnout);
                 s.burnoutPitch=kart->move()->burnout().pitch();
                 s.inCannon=status.onBit(K::Kart::eStatus::InCannon);

@@ -2692,7 +2692,7 @@ int main() {
                 signals.bike=bike;signals.handleRelativeBike=kart->param()->stats().body==K::Kart::KartParam::Stats::Body::Handle_Relative_Bike;signals.wheelie=kart->status().onBit(K::Kart::eStatus::Wheelie);
                 signals.airborne=kart->status().offBit(K::Kart::eStatus::TouchingGround);
                 signals.hopping=kart->status().onBit(K::Kart::eStatus::Hop);
-                signals.steering=kart->inputs()->currentState().stick.x;
+                signals.steering=kart->move()->cpuSteer()?kart->move()->cpuStick():kart->inputs()->currentState().stick.x;
                 signals.burnout=kart->status().onBit(K::Kart::eStatus::Burnout);
                 signals.burnoutPitch=kart->move()->burnout().pitch();
                 signals.inCannon=kart->status().onBit(K::Kart::eStatus::InCannon);

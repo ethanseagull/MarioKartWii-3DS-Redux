@@ -166,7 +166,9 @@ void RaceGrid::configure(Kinoko::System::RaceConfig& config,unsigned localChoice
         const auto& choice=raceGarageChoice(choices_[i]);
         p.character=static_cast<Kinoko::Character>(choice.character);p.vehicle=static_cast<Kinoko::Vehicle>(choice.vehicle);
         p.type=i?Kinoko::System::RaceConfig::Player::Type::CPU:Kinoko::System::RaceConfig::Player::Type::Local;
-        p.driftIsAuto=i!=0;
+        // Retail CPUs drift manually (KPadAI: driftIsAuto 0, so AIControlBase::init picks
+        // the manual kart controller). The caller sets the human's transmission.
+        p.driftIsAuto=false;
     }
 }
 bool RaceGrid::reset(){
@@ -268,7 +270,7 @@ void RaceGrid::beforeStep(uint16_t bulletPlayers){
             d.bulletGravity.reset();kart->move()->setBulletRouteFlight(false,EGG::Vector3f::ey);kart->move()->setBulletGroundContact(false);
         };
         if(d.bullet&&!bullet)releaseBulletGravity();
-        if(i==0&&!bullet&&!driveLocal){if(d.bullet)kart->move()->setKartSpeedLimit();d.bullet=false;continue;}
+        if(i==0&&!bullet&&!driveLocal){if(d.bullet)kart->move()->setKartSpeedLimit();d.bullet=false;kart->move()->setCpuSteer(false,0,0);continue;}
         auto* pad=System::KPadDirector::Instance()->hostController(i);
         const auto& route=bullet?bulletRoute_:route_;
         if(!route.size()){releaseBulletGravity();pad->setInputsRawStick(0,7,7,System::Trick::None);continue;}
@@ -311,6 +313,7 @@ void RaceGrid::beforeStep(uint16_t bulletPlayers){
             const auto trick=racing&&!d.reverse?System::Trick(std::min<uint8_t>(command.trick,4)):System::Trick::None;
             const int raw=std::clamp(7+int(std::lround(aiStick*7.f)),0,14);
             pad->setInputsRawStick(buttons,unsigned(raw),7,trick);
+            kart->move()->setCpuSteer(true,command.animationStick,command.lean);
             continue;
         }
         if(i&&racing&&!bullet&&speedParamReady_){
