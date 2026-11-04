@@ -144,6 +144,10 @@ namespace K = Kinoko;
 static constexpr const char* DATA = "sdmc:/3ds/mkw-3ds";
 namespace mkw {extern std::atomic<unsigned> fileOpens;extern std::atomic<unsigned long long> fileOpenTicks;}
 static bool exists(const char* p) { FILE* f=fopen(p,"rb"); if(!f)return false; fclose(f);return true; }
+// Sky last saves its fill where the track hides most of the sky. Rainbow
+// Road's sky fills most of the screen, so there the depth test only adds
+// work (run 3, New 3DS: sky pass 1.52 -> 2.62 ms; other courses -0.14 to +0.03).
+static bool skyDrawnLast(const mkw::Renderer& renderer,K::Course course){return renderer.skyLast&&course!=K::Course::Rainbow_Road;}
 static K::u8* replayData=nullptr;
 using mkw::Courses;
 using mkw::CourseCount;
@@ -448,6 +452,8 @@ int main() {
     renderer.spatialCourse=!exists("sdmc:/3ds/mkw-3ds/no-spatial-course.txt");
     mkw::shrinkHudTextures=!exists("sdmc:/3ds/mkw-3ds/no-hud-shrink.txt");
     renderer.skyLast=!exists("sdmc:/3ds/mkw-3ds/no-sky-last.txt");
+    renderer.plainUv=!exists("sdmc:/3ds/mkw-3ds/no-plain-uv.txt");
+    renderer.fastVertex=!exists("sdmc:/3ds/mkw-3ds/no-fast-vertex.txt");
     mkw::diag::modelPixels=exists("sdmc:/3ds/mkw-3ds/model-pixels.txt");
     mkw::diag::menuFast=!exists("sdmc:/3ds/mkw-3ds/no-menu-fast.txt");mkw::diag::menuCheck=exists("sdmc:/3ds/mkw-3ds/menu-check.txt");mkw::diag::unlitBanks=!exists("sdmc:/3ds/mkw-3ds/no-unlit-banks.txt");mkw::diag::pauseKeep=!exists("sdmc:/3ds/mkw-3ds/no-pause-keep.txt");
     mkw::diag::loadCache=!exists("sdmc:/3ds/mkw-3ds/no-load-cache.txt");report(mkw::diag::loadCache?"load cache on":"load cache off");
@@ -3272,6 +3278,7 @@ int main() {
             if(playerJobQueued){playerJob.reset(&runJob<decltype(posePlayer)>,&posePlayer);mkw::jobWorker().submit(playerJob);}
             C3D_Mtx transform;Mtx_Identity(&transform);
             renderer.setCourseLighting(true);
+            const bool skyLast=skyDrawnLast(renderer,Courses[courseChoice].id);
             auto drawSky=[&](){
                 renderer.diagPass(mkw::diag::PassSky);
                 if(castleScene!=mkw::castleRegion::Inside){
@@ -3279,12 +3286,12 @@ int main() {
                     courseObjects.drawSky(renderer,physicsSteps,renderer.cameraPosition());
                 }
             };
-            if(!renderer.skyLast)drawSky();
+            if(!skyLast)drawSky();
             renderer.diagPass(mkw::diag::PassCourse);
             for(auto& model:track)drawCourseLayer(renderer,*model,transform,int(Courses[courseChoice].id),false);
             // Sky last: after the track's opaque surfaces, before anything that
             // blends or skips depth writes (road decals, glass, objects).
-            if(renderer.skyLast){renderer.setSkyBehind(true);drawSky();renderer.setSkyBehind(false);renderer.diagPass(mkw::diag::PassCourse);}
+            if(skyLast){renderer.setSkyBehind(true);drawSky();renderer.setSkyBehind(false);renderer.diagPass(mkw::diag::PassCourse);}
             // Authored road decals belong below every racer shadow. Drawing
             // them in the late glass/light pass painted over both shadow types.
             // Coconut's coplanar glass is also the whitening layer above the

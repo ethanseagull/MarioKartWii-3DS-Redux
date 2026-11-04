@@ -185,8 +185,9 @@ void Renderer::retailBeginFrame(){
     const float range=std::max(retailFog_[3]-retailFog_[2],1e-3f);
     // View space looks down -z: GX eye depth is -z.
     const float scale=-1.f/range,bias=-retailFog_[2]/range;
-    C3D_FVUnifSet(GPU_VERTEX_SHADER,fogParamLoc_,scale*float(FogRampWidth-1)/float(FogRampWidth),
-                  (bias*float(FogRampWidth-1)+0.5f)/float(FogRampWidth),scale,bias);
+    // (0, 0, scale, bias): the shader computes view z * scale + bias.
+    C3D_FVUnifSet(GPU_VERTEX_SHADER,fogParamLoc_,0,0,scale*float(FogRampWidth-1)/float(FogRampWidth),
+                  (bias*float(FogRampWidth-1)+0.5f)/float(FogRampWidth));
 }
 
 bool Renderer::retailLight(const Submesh& s){

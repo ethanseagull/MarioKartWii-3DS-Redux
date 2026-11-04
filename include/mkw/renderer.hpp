@@ -489,6 +489,13 @@ public:
     // has been drawn (depth still clear), instead of first under everything.
     // A/B: no-sky-last.txt. setSkyBehind brackets those backdrop draws.
     bool skyLast=false;
+    // Model draws whose UV transforms are identity skip them in the vertex
+    // shader (uvPlain; the same values). A/B: no-plain-uv.txt.
+    bool plainUv=false;
+    // Of those, draws without environment maps, projected textures, light
+    // textures or shadow passes take the shader's short path (fastPath; the
+    // same values). A/B: no-fast-vertex.txt.
+    bool fastVertex=false;
     void setSkyBehind(bool on){skyBehind_=on;}
     uint32_t animationFrame=0;
     // RRGGBB00 added after the model's material colour, preserving texture alpha.
@@ -667,6 +674,8 @@ private:
     int projectionLoc_=-1,modelViewLoc_=-1,lightLoc_=-1,uvScrollLoc_=-1;
     int envRowLoc_[3]={-1,-1,-1},envParamLoc_=-1,uv1RowLoc_[2]={-1,-1};
     int normalRowLoc_[3]={-1,-1,-1};
+    // The vertex shader's tint also scales the unnormalized colour bytes.
+    static constexpr float kVertexColorScale=1.f/255.f;
     int uvRowLoc_[4]={-1,-1,-1,-1},tintLoc_=-1;
     bool uvDirty_=false,tintDirty_=false;
     void resetMaterialUniforms();
@@ -705,7 +714,9 @@ private:
     const RigidPose* rigid_=nullptr;
     const float* skinPalette_=nullptr;
     unsigned skinBones_=0,skinStride_=12;
-    int bonesLoc_=-1,skinnedLoc_=-1,skinnedNormalsLoc_=-1;
+    int bonesLoc_=-1,skinnedLoc_=-1,skinnedNormalsLoc_=-1,uvPlainLoc_=-1,fastPathLoc_=-1;
+    // Sets uvPlain for the next draws from the bound UV uniforms (drawNow only).
+    void uvPlainNow(bool allowed);
     const SubmeshOverride* overrides_=nullptr;
     unsigned overrideCount_=0;
     bool initBloomTargets();

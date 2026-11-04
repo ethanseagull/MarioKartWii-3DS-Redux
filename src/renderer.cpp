@@ -588,7 +588,9 @@ bool Renderer::init(){
     bonesLoc_=shaderInstanceGetUniformLocation(program_.vertexShader,"bones");
     skinnedLoc_=shaderInstanceGetUniformLocation(program_.vertexShader,"skinned");
     skinnedNormalsLoc_=shaderInstanceGetUniformLocation(program_.vertexShader,"skinnedNormals");
-    if(bonesLoc_<0||skinnedLoc_<0||skinnedNormalsLoc_<0)return fail();
+    uvPlainLoc_=shaderInstanceGetUniformLocation(program_.vertexShader,"uvPlain");
+    fastPathLoc_=shaderInstanceGetUniformLocation(program_.vertexShader,"fastPath");
+    if(bonesLoc_<0||skinnedLoc_<0||skinnedNormalsLoc_<0||uvPlainLoc_<0||fastPathLoc_<0)return fail();
     if(!C3D_TexInit(&white_,8,8,GPU_RGBA8))return fail();
     // Blackout, cinema bars and fades may all submit in one frame. Each draw
     // keeps distinct vertices until the next FrameBegin drains GPU use.
@@ -1108,13 +1110,26 @@ static bool sameMaterial(const Submesh& a,const Submesh& b){
            a.menuReflection==b.menuReflection&&a.reflectionConstant==b.reflectionConstant&&a.reflectionAdd==b.reflectionAdd&&
            !std::memcmp(a.reflectionUv,b.reflectionUv,sizeof a.reflectionUv);
 }
+void Renderer::uvPlainNow(bool allowed){
+    // citro3d's copy of the uniforms holds what the next draw uses.
+    auto is=[](int location,float x,float y,float z,float w){
+        const auto& v=C3D_FVUnif[GPU_VERTEX_SHADER][location];return v.x==x&&v.y==y&&v.z==z&&v.w==w;};
+    const bool plain=allowed&&plainUv&&is(uvRowLoc_[0],1,0,0,0)&&is(uvRowLoc_[1],0,1,0,0)&&is(uvRowLoc_[2],1,0,0,0)&&
+        is(uvRowLoc_[3],0,1,0,0)&&is(uvScrollLoc_,0,0,0,0)&&is(uv1RowLoc_[0],1,0,0,0)&&is(uv1RowLoc_[1],0,1,0,0);
+    C3D_BoolUnifSet(GPU_VERTEX_SHADER,uvPlainLoc_,plain);
+    // The short path leaves out these features' branches.
+    auto on=[](int location){return (C3D_BoolUnifs[GPU_VERTEX_SHADER]>>(location-0x68))&1;};
+    const bool fast=plain&&fastVertex&&!on(playerShadowProjectLoc_)&&!on(environmentMappedLoc_)&&!on(environmentTexture2Loc_)&&
+        !on(environmentPrimaryLoc_)&&!on(projectedWaterLoc_)&&!on(retailBoolLoc_)&&!on(shadowCaptureLoc_);
+    C3D_BoolUnifSet(GPU_VERTEX_SHADER,fastPathLoc_,fast);
+}
 void Renderer::resetMaterialUniforms(){
     if(uvDirty_){
         C3D_FVUnifSet(GPU_VERTEX_SHADER,uvRowLoc_[0],1,0,0,0);C3D_FVUnifSet(GPU_VERTEX_SHADER,uvRowLoc_[1],0,1,0,0);
         C3D_FVUnifSet(GPU_VERTEX_SHADER,uvRowLoc_[2],1,0,0,0);C3D_FVUnifSet(GPU_VERTEX_SHADER,uvRowLoc_[3],0,1,0,0);
         uvDirty_=false;
     }
-    if(tintDirty_){C3D_FVUnifSet(GPU_VERTEX_SHADER,tintLoc_,1,1,1,1);tintDirty_=false;}
+    if(tintDirty_){constexpr float s=kVertexColorScale;C3D_FVUnifSet(GPU_VERTEX_SHADER,tintLoc_,s,s,s,s);tintDirty_=false;}
 }
 namespace {
 // DIAG (diag::modelPixels): screen pixels covered by indexed triangles, each
@@ -1275,7 +1290,7 @@ void Renderer::drawNow(const Model& model,const Vertex* vertices,const C3D_Mtx& 
             const float frame=frames?float(animationFrame%frames):0.f;
             C3D_FVUnifSet(GPU_VERTEX_SHADER,uvScrollLoc_,s.uvVelocity[0]*frame,s.uvVelocity[1]*frame,s.uvVelocity[2]*frame,s.uvVelocity[3]*frame);
         }
-        if(hasTint){C3D_FVUnifSet(GPU_VERTEX_SHADER,tintLoc_,o->tint[0],o->tint[1],o->tint[2],o->tint[3]);tintDirty_=true;}
+        if(hasTint){constexpr float s=kVertexColorScale;C3D_FVUnifSet(GPU_VERTEX_SHADER,tintLoc_,o->tint[0]*s,o->tint[1]*s,o->tint[2]*s,o->tint[3]*s);tintDirty_=true;}
         // The previous drawn submesh's material and textures, without overrides
         // or a binder: its whole state is still bound, only UVs and draws differ.
         const bool sameState=last&&!o&&!material&&sameMaterial(*last,s);
@@ -1889,6 +1904,7 @@ void Renderer::drawNow(const Model& model,const Vertex* vertices,const C3D_Mtx& 
             }else environmentUvNow(transform,s.reflectionUv,s.menuReflection==8);
             C3D_BoolUnifSet(GPU_VERTEX_SHADER,environmentPrimaryLoc_,primaryEnvironment);
         }
+        uvPlainNow(true);
         if(parts){
             const bool environment=!model.staticLightingBaked&&!(s.lighting&retail::FixedEnvironment)&&(s.flags&(1u<<25))&&((s.flags>>12)&3)==3&&rigid_->stride>=21;
             for(size_t n=0;n<parts->size();++n){
@@ -1905,6 +1921,7 @@ void Renderer::drawNow(const Model& model,const Vertex* vertices,const C3D_Mtx& 
                     for(unsigned row=0;row<3;++row)C3D_FVUnifSet(GPU_VERTEX_SHADER,envRowLoc_[row],m[12+row*3],m[13+row*3],m[14+row*3],0);
                     C3D_FVUnifSet(GPU_VERTEX_SHADER,envParamLoc_,std::cos(rigid_->environmentYaw),std::sin(rigid_->environmentYaw),1,0);
                     C3D_BoolUnifSet(GPU_VERTEX_SHADER,environmentMappedLoc_,true);
+                    uvPlainNow(true);
                 }
                 C3D_DrawElements(GPU_TRIANGLES,part.count,C3D_UNSIGNED_SHORT,model.indices+part.first);
                 stats_.triangles+=part.count/3;++stats_.drawCalls;
@@ -1928,6 +1945,7 @@ void Renderer::drawNow(const Model& model,const Vertex* vertices,const C3D_Mtx& 
         pendingEnd=retail;
     }
     if(pendingEnd)retailEndSubmesh();
+    uvPlainNow(false);
     sceneDepthMap(projection_);
     C3D_BoolUnifSet(GPU_VERTEX_SHADER,projectedWaterLoc_,false);
     C3D_BoolUnifSet(GPU_VERTEX_SHADER,environmentTexture2Loc_,false);
