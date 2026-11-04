@@ -234,6 +234,17 @@ public:
     // for the first requestBloom(). For races that request bloom. False if
     // the targets cannot exist.
     bool reserveBloom();
+    // Pause: copies the race's last upper-screen image (left eye) out of the
+    // LCD target before the pause menu draws over it (GPU idle; 512 KB
+    // LINEAR). drawPausedTop draws it full screen, in an immediate frame.
+    bool capturePausedTop();
+    bool hasPausedTop() const {return pausedTop_.data!=nullptr;}
+    void drawPausedTop();
+    // The pause screen's controls diagram for this console (Old or New 3DS),
+    // screen rows 8-135 (tools/cook_pause_controls.py). Loaded with the
+    // race image, released with it; absent when not cooked.
+    void drawPauseControls();
+    void releasePausedTop();
     bool configureStadiumScreen(bool enabled);
     // Optional conservative world bounds of the display faces. If all are
     // outside both eyes, retain the last capture without any GPU copy.
@@ -712,6 +723,8 @@ private:
     unsigned stadiumRenderFrames_=0;
     bool stadiumCaptureFrame_=false;
     std::vector<Bounds> stadiumScreens_;
+    C3D_Tex pausedTop_{};Vertex* pausedVertices_=nullptr;
+    Texture pauseControls_;
     C3D_Tex sceneTex_{},bloomTex_[4]{};
     C3D_RenderTarget* sceneTarget_=nullptr;
     C3D_RenderTarget* bloomTarget_[4]{};

@@ -23,6 +23,7 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.8.14.
 
 - Pack entries are read as whole 512-byte SD sectors, and each read also takes the small entries right after it.
 - Races after the first in a VS set or Grand Prix reuse the racers, items, effects and Lakitu read by the previous load (New 3DS, RAM cache).
+- Pausing keeps the racers loaded when the pause menu fits, so resuming is immediate.
 - The course preview camera is planned while the race sounds load.
 - `tools/pakpack.c` repacks race.pak and menu.pak in the order the game reads them, LZ4-compressed (lossless); race.pak drops from 1.78 GB to about 1 GB.
 

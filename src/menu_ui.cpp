@@ -441,8 +441,8 @@ public:
  }
  // Existing native-font name glyphs allow runtime option values without
  // adding texture assets or using a platform/system font.
- void optionText(const char* value,const UiPaneInfo& original,Pose p){
-  if(transition&&transition->preload)value="0123456789% Change Miis Erase License LED: Off Items + Events Drifts Dynamic Shadows On Brightness";
+ void optionText(const char* value,const UiPaneInfo& original,Pose p,bool fixed=false){
+  if(!fixed&&transition&&transition->preload)value="0123456789% Change Miis Erase License LED: Off Items + Events Drifts Dynamic Shadows On Brightness";
   unsigned indices[128]{},count=0;float widths[128]{},total=0;
   for(const unsigned char* ch=reinterpret_cast<const unsigned char*>(value);*ch&&count<128;++ch){
    char key[32];std::snprintf(key,sizeof key,"name_glyph_%04x",unsigned(*ch));
@@ -459,11 +459,62 @@ public:
   for(unsigned i=0;i<count;++i){auto cell=original;cell.x=x;cell.w=widths[i]*fit;cell.fontW*=fit;cell.fontH*=fit;cell.textAlign=0;
    textSprite(indices[i],cell,p);x+=cell.w;}
  }
+ // A native-font glyph run in top-screen pixels: align -1 ends at x, 0
+ // centres on x, 1 starts at x. The pause controls diagram's labels.
+ void screenText(const char* value,float x,float centerY,float height,int align,uint32_t tint=0xffffffff,bool outline=false){
+  unsigned indices[32]{},count=0;float widths[32]{},total=0;
+  const float cell=UiFontCells[0][1];
+  for(const unsigned char* ch=reinterpret_cast<const unsigned char*>(value);*ch&&count<32;++ch){
+   char key[32];std::snprintf(key,sizeof key,"name_glyph_%04x",unsigned(*ch));
+   const auto index=lookup().find(key);if(index>=std::size(UiSprites))continue;
+   indices[count]=index;widths[count]=UiSprites[index].w*height/cell;total+=widths[count++];
+  }
+  const float left=std::round(align<0?x-total:align>0?x:x-total*.5f);
+  // Small letters lose the font's own outline when minified (no mipmaps):
+  // outline ones draw a black copy half a pixel to each side first (filtered,
+  // so it fills the gaps without doubling the font's own outline).
+  constexpr float offsets[5][2]={{-.5f,0},{.5f,0},{0,-.5f},{0,.5f},{0,0}};
+  for(unsigned pass=outline?0:4;pass<5;++pass){
+   float at=left+offsets[pass][0];
+   for(unsigned i=0;i<count;++i){
+    // Whole pixels: the minified glyphs keep the same texels every frame.
+    const float h=UiSprites[indices[i]].h*height/cell,top=std::round(centerY-h*.5f)+offsets[pass][1];
+    const auto first=out.size();
+    quad(indices[i],(at-200.f)/XScale,(top-120.f)/YScale,widths[i]/XScale,h/YScale,1,pass<4?0x000000ffu:tint,{},true);
+    if(out.size()>first)out.back().menu.preserveAspect=true;
+    at+=widths[i];
+   }
+  }
+ }
+ // The Wii PauseMenu's controller page for the 3DS: labels and button
+ // letters over the diagram the renderer draws (tools/cook_pause_controls.py
+ // holds the same icon positions: L 163, R 237, Circle Pad 136, A 264).
+ void pauseControls(){
+  group(UiMenuRole::Content);
+  constexpr float top=32,bottom=104,size=16;
+  screenText("Use Item",163-13,top,size,-1);
+  screenText("Brake/Drift",237+13,top,size,1);
+  screenText("Steer",136-12,bottom,size,-1);
+  screenText("Accelerate",264+12,bottom,size,1);
+  // Icon letters at sizes the font's outline survives (no mipmaps).
+  // L/R centred in their 14 px domes (rows top-7..top+7), clear of both edges.
+  screenText("L",163,top-.5f,11,0,0xffffffffu,true);
+  screenText("R",237,top-.5f,11,0,0xffffffffu,true);
+  screenText("A",264,bottom,14,0);
+ }
  void text(const char* text,const char* base,Pose p={},uint32_t tint=0xffffffff,const char* name="text"){diag::ComposeTimer diagTimer_(9);
   const auto* r=pane(base,name);if(!r)return;
   if(layout.page==UiPage::LicenseSettings&&layout.role==UiMenuRole::Choice){optionText(text,*r,p);return;}
   const auto* shadow=pane(base,"text_shadow");
   if(!shadow&&!std::strcmp(name,"text"))shadow=pane(base,"TextBox_sha");
+  // Pause labels not baked by this menu cook ("Continue Game") use the
+  // native-font glyphs; their text is fixed, so preload draws it as is.
+  if(layout.page==UiPage::Pause&&lookup().find(text,true)>=std::size(UiSprites)){
+   if(shadow)optionText(text,*shadow,p,true);
+   optionText(text,*r,p,true);
+   if(!std::strcmp(name,"text"))selectionGlow(base,p,text);
+   return;
+  }
   if(shadow)textSprite(lookup().find(text,true,shadow->font,shadow->textStyle),*shadow,p);
   textSprite(lookup().find(text,true,r->font,r->textStyle),*r,p,tint);
   if(!std::strcmp(name,"text"))selectionGlow(base,p,text);
@@ -1178,13 +1229,14 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
   c.group(UiMenuRole::Choice,0,control("MenuEndConfirm","ButtonOK"),"confirm_free");c.button("confirm",0,control("MenuEndConfirm","ButtonOK"),"OK");break;
  }
  case UiPage::Pause:{
-  c.chrome("Pause");
+  // The Wii's PauseMenu: no title bar or Back button over the race.
+  if(s.selection.mode==UiMode::TimeTrials)c.chrome("Pause");
+  else c.pauseControls();
   for(unsigned i=0;i<s.pauseCount();++i){
    auto p=control(uiPauseMenuControl(s),s.pauseVariant(i));
-   // Match the main project's three-action pause layout. TT retains its
-   // five authored slots, including course/character changes.
-   if(s.pauseCount()==3)p.y=90.f-float(i)*85.f;
-   else if(s.selection.mode==UiMode::TimeTrials){
+   // GP/VS/BT keep the authored Continue Game/Quit Game rows (y -75/-150).
+   // TT retains its five slots, including course/character changes.
+   if(s.selection.mode==UiMode::TimeTrials){
     // Five entries fit between the header and Back footer, including focus growth.
     p.y=128.f-float(i)*64.f;p.sx*=.82f;p.sy*=.82f;
    }

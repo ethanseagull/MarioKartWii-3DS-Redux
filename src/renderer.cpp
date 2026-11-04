@@ -2726,6 +2726,58 @@ void Renderer::captureStadiumScreenNow(){
     }
 }
 
+bool Renderer::capturePausedTop(){
+    releasePausedTop();
+    if(!target_||!target_->frameBuf.colorBuf)return false;
+    waitForGpu();
+    pausedVertices_=static_cast<Vertex*>(linearAlloc(6*sizeof(Vertex)));
+    if(!pausedVertices_||!C3D_TexInit(&pausedTop_,256,512,GPU_RGBA8)){releasePausedTop();return false;}
+    // The 240x400 target's rows of 8x8 tiles into the 256-wide texture: the
+    // layout bloom's scene texture has when rendered into directly. Targets
+    // store rows bottom-up, so the 50 rows end at the texture's 64th.
+    constexpr u32 line=240*8*4,gap=(256-240)*8*4,rows=400/8,rowOffset=512/8-rows;
+    auto* to=static_cast<u8*>(pausedTop_.data)+size_t(rowOffset)*256*8*4;
+    C3D_SyncTextureCopy(static_cast<u32*>(target_->frameBuf.colorBuf),GX_BUFFER_DIM(line>>4,0),
+        reinterpret_cast<u32*>(to),GX_BUFFER_DIM(line>>4,gap>>4),line*rows,8);
+    C3D_TexSetFilter(&pausedTop_,GPU_LINEAR,GPU_LINEAR);C3D_TexSetWrap(&pausedTop_,GPU_CLAMP_TO_EDGE,GPU_CLAMP_TO_EDGE);
+    // bloomQuad's mapping of a 400x240 landscape region, source (0,0).
+    const float corners[6][2]={{0,0},{400,0},{400,240},{0,0},{400,240},{0,240}};
+    for(int i=0;i<6;++i){
+        const float x=corners[i][0],y=corners[i][1];
+        pausedVertices_[i]={{x,y,0},{0,0,1},{(240.f-y)/256.f,(400.f-x)/512.f},{0,0},{255,255,255,255}};
+    }
+    flushGpuData(pausedVertices_,6*sizeof(Vertex));
+    bool new3ds=false;APT_CheckNew3DS(&new3ds);
+    pauseControls_.load(new3ds?"textures/pause_controls_new3ds.t3x":"textures/pause_controls_old3ds.t3x");
+    return true;
+}
+void Renderer::drawPauseControls(){
+    if(!pauseControls_.ready||!pausedTop_.data)return;
+    drawScreenSpriteRegion(pauseControls_,0,8,400,128,0,0,400.f/pauseControls_.gpu.width,128.f/pauseControls_.gpu.height);
+}
+void Renderer::drawPausedTop(){
+    if(!pausedTop_.data||!pausedVertices_||recording())return;
+    flushSprites();
+    bloomPass(topTarget(),400,240);
+    C3D_TexEnvBufUpdate(C3D_Both,0);
+    for(unsigned i=0;i<6;++i)C3D_TexEnvInit(C3D_GetTexEnv(i));
+    auto* e=C3D_GetTexEnv(0);C3D_TexEnvSrc(e,C3D_Both,GPU_TEXTURE0);C3D_TexEnvFunc(e,C3D_Both,GPU_REPLACE);
+    C3D_AlphaBlend(GPU_BLEND_ADD,GPU_BLEND_ADD,GPU_ONE,GPU_ZERO,GPU_ONE,GPU_ZERO);
+    C3D_TexBind(0,&pausedTop_);
+    auto* buf=C3D_GetBufInfo();BufInfo_Init(buf);BufInfo_Add(buf,pausedVertices_,sizeof(Vertex),4,0x3210);
+    C3D_DrawArrays(GPU_TRIANGLES,0,6);stats_.triangles+=2;++stats_.drawCalls;
+    C3D_TexBind(0,nullptr);
+    e=C3D_GetTexEnv(0);C3D_TexEnvSrc(e,C3D_Both,GPU_TEXTURE0,GPU_PRIMARY_COLOR);C3D_TexEnvFunc(e,C3D_Both,GPU_MODULATE);
+    C3D_AlphaBlend(GPU_BLEND_ADD,GPU_BLEND_ADD,GPU_SRC_ALPHA,GPU_ONE_MINUS_SRC_ALPHA,GPU_ONE,GPU_ONE_MINUS_SRC_ALPHA);
+    uploadProjection(projectionLoc_,projection_);
+    spriteStateReady_=false;
+}
+void Renderer::releasePausedTop(){
+    if(pausedTop_.data||pausedVertices_)waitForGpu();
+    if(pausedTop_.data)C3D_TexDelete(&pausedTop_);
+    pausedTop_={};linearFree(pausedVertices_);pausedVertices_=nullptr;
+    pauseControls_.reset();
+}
 void Renderer::requestBloomNow(const CourseBloom& settings){
     bloomRequested_=settings.enabled();bloomSettings_=&settings;
 }

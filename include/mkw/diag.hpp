@@ -70,6 +70,9 @@ inline bool menuFast=true,menuCheck=false;
 // Opponents load compact .dsku driver banks when race.pak has them. A/B:
 // no-unlit-banks.txt.
 inline bool unlitBanks=true;
+// Pause keeps the racers and course object graphics loaded when the pause
+// menu's textures still fit, so resuming needs no reload. A/B: no-pause-keep.txt.
+inline bool pauseKeep=true;
 // Race loop iterations: raw timestamps at each profiler stage (no formatting
 // on the hot path). main.cpp reports the iteration in which the intro ends
 // or the race starts (GO), and the three after it.

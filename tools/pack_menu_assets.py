@@ -51,6 +51,8 @@ def main():
     names_manifest = ASSETS / 'models/menu-name-glyphs.json'
     if names_manifest.exists():
         files.update(r['path'] for r in json.loads(names_manifest.read_text())['glyphs'])
+    # The pause controls diagram, when its photos were cooked (cook_pause_controls.py).
+    files.update('textures/' + t.name for t in ASSETS.glob('textures/pause_controls_*.t3x'))
     for key, record in manifest['sprites'].items():
         if key in used or key in atlases:
             files.add(record['path'])

@@ -106,18 +106,17 @@ public:
  unsigned auxiliarySlot()const{return page==UiPage::MainMenu?7:(page==UiPage::Drift||page==UiPage::VSMode||page==UiPage::BattleMode)?2:~0u;}
  // Results is the retail VS end-of-race menu (VSRaceEnd): Next Race / Quit
  // Game, or only Next after the final race of a VS set (IsFinalRace).
- // Dad requested Restart in every playable mode; retain TT's extra
- // ChangeCourse/ChangeCharacter actions. Original GP/VS/BT omit Restart. TT adds
+ // GP/VS/BT match the retail PauseMenu: Continue Game / Quit Game. TT adds
  // Restart,ChangeCourse,ChangeCharacter before Quit (USA808a84a8..d0).
- unsigned pauseCount()const{return selection.mode==UiMode::TimeTrials?5u:3u;}
+ unsigned pauseCount()const{return selection.mode==UiMode::TimeTrials?5u:2u;}
  unsigned pauseQuitSlot()const{return pauseCount()-1;}
  const char* pauseVariant(unsigned i)const{
   static constexpr const char* tt[]={"ButtonContinue","ButtonRestart","ButtonChangeCourse","ButtonChangeCharacter","ButtonQuit"};
-  return selection.mode==UiMode::TimeTrials?tt[std::min(i,4u)]:i==0?"ButtonContinue":i==1?"ButtonRestart":"ButtonQuit";
+  return selection.mode==UiMode::TimeTrials?tt[std::min(i,4u)]:i==0?"ButtonContinue":"ButtonQuit";
  }
  const char* pauseLabel(unsigned i)const{
   static constexpr const char* tt[]={"Continue","Restart","Change Course","Change Character","Quit"};
-  return selection.mode==UiMode::TimeTrials?tt[std::min(i,4u)]:i==0?"Continue":i==1?"Restart":"Quit";
+  return selection.mode==UiMode::TimeTrials?tt[std::min(i,4u)]:i==0?"Continue Game":"Quit Game";
  }
  bool finalRace=false;
  UiFocusState focus{};

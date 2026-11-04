@@ -819,6 +819,7 @@ class Builder:
         stage = self.work / 'package'
         stage.mkdir(parents=True, exist_ok=True)
         shutil.copy2(self.compile_dir / 'mkw-3ds.3dsx', root / 'build/mkw-3ds.3dsx')
+        self.py('pause-controls', 'cook_pause_controls.py')
         self.py('pack-menu', 'pack_menu_assets.py')
         listing = json.loads(subprocess.run([self.python, 'tools/resource_manifest.py'], cwd=root, env=self.env,
                                             capture_output=True, text=True, check=True).stdout)

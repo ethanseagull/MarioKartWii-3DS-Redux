@@ -449,7 +449,7 @@ int main() {
     mkw::shrinkHudTextures=!exists("sdmc:/3ds/mkw-3ds/no-hud-shrink.txt");
     renderer.skyLast=!exists("sdmc:/3ds/mkw-3ds/no-sky-last.txt");
     mkw::diag::modelPixels=exists("sdmc:/3ds/mkw-3ds/model-pixels.txt");
-    mkw::diag::menuFast=!exists("sdmc:/3ds/mkw-3ds/no-menu-fast.txt");mkw::diag::menuCheck=exists("sdmc:/3ds/mkw-3ds/menu-check.txt");mkw::diag::unlitBanks=!exists("sdmc:/3ds/mkw-3ds/no-unlit-banks.txt");
+    mkw::diag::menuFast=!exists("sdmc:/3ds/mkw-3ds/no-menu-fast.txt");mkw::diag::menuCheck=exists("sdmc:/3ds/mkw-3ds/menu-check.txt");mkw::diag::unlitBanks=!exists("sdmc:/3ds/mkw-3ds/no-unlit-banks.txt");mkw::diag::pauseKeep=!exists("sdmc:/3ds/mkw-3ds/no-pause-keep.txt");
     mkw::diag::loadCache=!exists("sdmc:/3ds/mkw-3ds/no-load-cache.txt");report(mkw::diag::loadCache?"load cache on":"load cache off");
     if(!renderer.init()){report("FAIL Citro3D initialization");return startupFailure("Citro3D initialization failed.");}
     report(renderer.pipelineFrames?"pipelined race frames on":"pipelined race frames off");
@@ -651,6 +651,9 @@ int main() {
     // Set once a race's assets are resident; releaseRace (assigned with them
     // below) frees them. The menus never draw race assets.
     bool raceResident=false,raceGraphicsSuspended=false;
+    // Set for the one race frame drawn after START without the HUD or a
+    // simulation step: the image the pause menu shows, as on the Wii.
+    bool pauseImageFrame=false;
     std::function<void()> drawPausedBottom;
     std::function<void()> releaseRace,suspendRaceGraphics;
     std::function<bool()> restoreRaceGraphics;
@@ -705,14 +708,24 @@ int main() {
             if(mkw::SoundSystem::instance().start())menuSound.resetAfterEngineRestart();
         }
         if(menu.page==mkw::UiPage::Pause){
-            if(suspendRaceGraphics)suspendRaceGraphics();
-            recordPauseStage("race-graphics-released");
             std::vector<mkw::UiQuad> paused,confirmation;
             residentQuads(menu,nullptr,paused);
             auto confirm=menu;confirm.enter(mkw::UiPage::QuitConfirm);
             residentQuads(confirm,nullptr,confirmation);
             paused.insert(paused.end(),confirmation.begin(),confirmation.end());
-            bool ready=menuRenderer.prepare(paused);
+            // The race's last image (drawn without the HUD) stays behind the pause menu.
+            if(mkw::diag::pauseKeep)recordPauseStage(renderer.capturePausedTop()?"race-image-kept":"race-image-failed");
+            // The racers stay loaded while the pause menu fits beside them;
+            // resuming then reloads nothing. Otherwise they're released.
+            if(mkw::diag::pauseKeep){mkw::AssetLoader::instance().stop();mkw::jobWorker().finishAll();}
+            bool ready=mkw::diag::pauseKeep&&menuRenderer.prepare(paused);
+            if(ready)recordPauseStage("race-graphics-kept");
+            else{
+                menuRenderer.release(renderer);renderer.releasePausedTop();renderer.waitForGpu();
+                if(suspendRaceGraphics)suspendRaceGraphics();
+                recordPauseStage("race-graphics-released");
+                ready=menuRenderer.prepare(paused);
+            }
             recordPauseStage(ready?"pause-menu-ready":"pause-menu-allocation-failed");
             if(!ready){
                 menuRenderer.release(renderer);renderer.waitForGpu();
@@ -722,7 +735,7 @@ int main() {
             }
             while(!ready&&aptMainLoop()){
                 hidScanInput();const unsigned down=hidKeysDown();
-                if(down&(KEY_B|KEY_START)){menu.enter(mkw::UiPage::Race);return mkw::UiAction::ResumeRace;}
+                if(down&(KEY_B|KEY_START)){menu.enter(mkw::UiPage::Race);renderer.releasePausedTop();return mkw::UiAction::ResumeRace;}
                 if(down&KEY_A){menuRenderer.release(renderer);renderer.waitForGpu();ready=menuRenderer.prepare(paused);}
                 renderer.begin({0,0,1000},{0,0,0},{0,1,0});renderer.drawScreenFade(1.f,false);
                 renderer.drawScreenText("Pause menu could not load",24,65,1.5f,0xffffffffu);
@@ -749,7 +762,7 @@ int main() {
         std::shared_ptr<LicenseSelectionSaveJob> selectionSave;
         u64 saveStarted=0;
         auto leave=[&](mkw::UiAction action){
-            loader.stop();renderer.waitForGpu();menuAudio.close();
+            loader.stop();renderer.waitForGpu();renderer.releasePausedTop();menuAudio.close();
             menuModels.reset(renderer);menuIcons.reset(renderer);
             menuRenderer.release(renderer);
             renderer.setRetailLighting(raceResident?mkw::courseLighting(Courses[courseChoice].archive):nullptr,false);
@@ -1081,8 +1094,14 @@ int main() {
             // GPU idle: publish streamed movie frames for this frame.
             menuRenderer.uploadMovies();
             menuProfile->mark(MenuStage::Movies);
-            renderer.drawScreenFade(1.f,false);
-            drawMenuBackdrop(renderer,menuRenderer,quads);
+            // Pause pages show the race as it was (no HUD, not dimmed: the Wii's
+            // PauseMenu) in place of the menu backdrop (quad 0).
+            if((visual.page==mkw::UiPage::Pause||visual.page==mkw::UiPage::QuitConfirm)&&renderer.hasPausedTop()){
+                renderer.drawPausedTop();
+                // The Wii's controller page: GP/VS/BT (TT's five buttons fill the screen).
+                if(visual.page==mkw::UiPage::Pause&&visual.selection.mode!=mkw::UiMode::TimeTrials)renderer.drawPauseControls();
+            }
+            else{renderer.drawScreenFade(1.f,false);drawMenuBackdrop(renderer,menuRenderer,quads);}
             menuProfile->mark(MenuStage::Background);
             menuModels.draw(renderer,visual,motion);
             menuProfile->mark(MenuStage::Scene);
@@ -1872,7 +1891,11 @@ int main() {
         raceGraphicsSuspended=true;
     };
     restoreRaceGraphics=[&](){
-        if(!raceGraphicsSuspended)return true;
+        if(!raceGraphicsSuspended){
+            // Kept through the pause: only the pause menu's textures go.
+            if(raceResident){renderer.waitForGpu();menuRenderer.release(renderer);menuModels.reset(renderer);menuIcons.reset(renderer);renderer.waitForGpu();}
+            return true;
+        }
         mkw::LoadingScope loading;
         renderer.waitForGpu();menuRenderer.release(renderer);menuModels.reset(renderer);menuIcons.reset(renderer);renderer.waitForGpu();
         auto attempt=[&](){
@@ -2221,7 +2244,9 @@ int main() {
             if(down&KEY_START)menu.input({false,false,false,false,false,false,true});
             // Mario Kart 7: a tap on the lower screen switches its map view.
             if((down&KEY_TOUCH)&&menu.page==mkw::UiPage::Race&&!intro.active())bottomScreen.toggleView();
-            if(menu.page!=mkw::UiPage::Race&&menu.page!=mkw::UiPage::Results){
+            if(menu.page==mkw::UiPage::Pause&&!nextRaceQueued&&mkw::diag::pauseKeep&&!pauseImageFrame){pauseImageFrame=true;raceSound.pause(true);}
+            else if(menu.page!=mkw::UiPage::Race&&menu.page!=mkw::UiPage::Results){
+                pauseImageFrame=false;
                 if(menu.page==mkw::UiPage::Pause)raceSound.pause(true);
                 // A Grand Prix's next race starts without visiting the menus.
                 auto action=nextRaceQueued?mkw::UiAction::StartRace:runMenu();nextRaceQueued=false;renderer.setDeferred(deferredRace);if(action==mkw::UiAction::Exit)break;
@@ -2263,6 +2288,7 @@ int main() {
         // should the refresh count ever stall, the clock.
         accumulator+=fullRace&&refreshes?double(std::min<u32>(refreshes,6)):std::min(delta,0.1)*60.0;
         if(raceWarmupFrames)accumulator=1; // settle initial support, never catch up loading wall time
+        if(pauseImageFrame)accumulator=0;
         // Diagnostic overlay: automatic race profiling (racing frames only).
         {const bool profiled=fullRace&&dataReady&&!trackLoadFailed&&!raceWarmupFrames&&menu.page==mkw::UiPage::Race&&!intro.active()&&!results.active();
         // Logs held in RAM reach the card before the profiler writes its files.
@@ -3103,7 +3129,10 @@ int main() {
                 // Never stall the 60 Hz input/physics loop for a busy render
                 // list. Coalesce only the presentation; next frame snapshots
                 // the newest pose, inputs and original animation clocks.
-                if(!renderer.canRecordFrame()||!presentation.due(physicsSteps)){profiler->end(physicsSteps,renderer,false);continue;}
+                // The pause image frame runs no physics step but is always drawn:
+                // skipped, the pause would keep the last frame, HUD and all.
+                if(pauseImageFrame){if(!renderer.canRecordFrame())renderer.waitForGpu();}
+                else if(!renderer.canRecordFrame()||!presentation.due(physicsSteps)){profiler->end(physicsSteps,renderer,false);continue;}
             }
             animationBudget.present(physicsSteps,animationBudgetOn&&fullRace&&!intro.active()&&!results.active()&&!raceGrid.finished()&&!raceWarmupFrames);
             renderer.loadingFrame=raceWarmupFrames!=0;
@@ -3122,7 +3151,7 @@ int main() {
                 // Only pages drawn over the race compose here; a page the race is
                 // leaving for (e.g. the course choice after Next Race) is loaded
                 // by runMenu once the race is released.
-                if(menu.page==mkw::UiPage::Pause||menu.page==mkw::UiPage::QuitConfirm)mkw::composeMenu(menu,uiRace,raceQuads);
+                if(!pauseImageFrame&&(menu.page==mkw::UiPage::Pause||menu.page==mkw::UiPage::QuitConfirm))mkw::composeMenu(menu,uiRace,raceQuads);
                 else raceQuads.clear();
                 if(menuRenderer.needsPrepare(raceQuads)){renderer.waitForGpu();
                     if(!menuRenderer.prepare(raceQuads))report("FAIL race map UI asset load");}
@@ -3404,18 +3433,18 @@ int main() {
             // behind the screen; the full-screen wipe and the pause menu on the
             // screen plane.
             renderer.diagPass(mkw::diag::PassHud);
-            if(fullRace&&intro.active()){renderer.setScreenDepth(renderer.stereoLayer(mkw::stereo::HudLayer));flowUi.drawIntro(renderer,introInfo(),introTick);}
-            if(fullRace&&!intro.active()){auto* race=K::System::RaceManager::Instance();
+            if(fullRace&&!pauseImageFrame&&intro.active()){renderer.setScreenDepth(renderer.stereoLayer(mkw::stereo::HudLayer));flowUi.drawIntro(renderer,introInfo(),introTick);}
+            if(fullRace&&!pauseImageFrame&&!intro.active()){auto* race=K::System::RaceManager::Instance();
 
                 raceHud.drawOverlay(renderer,*raceItems,unsigned(race->stage()),race->timer(),battleMode?battleRank(0):raceGrid.rank(),raceGrid.lap(),battleMode?battleTicks>=balloonBattle.durationTicks():raceGrid.finished(),physicsSteps,results.finishFrame(),results.hudSlide(),camera->lookingBack());
 }
             renderer.setScreenDepth(renderer.stereoLayer(mkw::stereo::HudLayer));
-            if(fullRace)flowUi.drawResults(renderer,results,bottomScreen.miiPortrait());
+            if(fullRace&&!pauseImageFrame)flowUi.drawResults(renderer,results,bottomScreen.miiPortrait());
             renderer.setScreenDepth(0);
             if(fullRace)flowUi.drawWipe(renderer,cameraDirector->wipeProgress());
             renderer.diagPass(mkw::diag::PassNone);
             profiler->mark(Profile::Hud);
-            if(fullRace&&menu.page!=mkw::UiPage::Race)menuRenderer.draw(renderer,raceQuads,false);
+            if(fullRace&&!pauseImageFrame&&menu.page!=mkw::UiPage::Race)menuRenderer.draw(renderer,raceQuads,false);
             // Leaving after the end-of-race menu: the scene fader covers everything.
             if(fullRace)renderer.drawScreenFade(results.leaveFade(),false);
             if(fullRace&&bottomScreen.active()&&!intro.active()){
