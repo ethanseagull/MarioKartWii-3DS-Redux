@@ -245,9 +245,12 @@ public:
     bool hasPausedTop() const {return pausedTop_.data!=nullptr;}
     void drawPausedTop();
     // The pause screen's controls diagram for this console (Old or New 3DS),
-    // screen rows 8-135 (tools/cook_pause_controls.py). Loaded with the
-    // race image, released with it; absent when not cooked.
+    // screen rows 8-135 (tools/cook_pause_controls.py). Loaded with the race
+    // (or at the latest with the race image) and kept until the race ends;
+    // absent when not cooked.
+    void preparePauseControls();
     void drawPauseControls();
+    void releasePauseControls();
     void releasePausedTop();
     bool configureStadiumScreen(bool enabled);
     // Optional conservative world bounds of the display faces. If all are

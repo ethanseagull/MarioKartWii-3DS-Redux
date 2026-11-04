@@ -2797,9 +2797,17 @@ bool Renderer::capturePausedTop(){
         pausedVertices_[i]={{x,y,0},{0,0,1},{(240.f-y)/256.f,(400.f-x)/512.f},{0,0},{255,255,255,255}};
     }
     flushGpuData(pausedVertices_,6*sizeof(Vertex));
+    preparePauseControls();
+    return true;
+}
+void Renderer::preparePauseControls(){
+    if(pauseControls_.ready)return;
     bool new3ds=false;APT_CheckNew3DS(&new3ds);
     pauseControls_.load(new3ds?"textures/pause_controls_new3ds.t3x":"textures/pause_controls_old3ds.t3x");
-    return true;
+}
+void Renderer::releasePauseControls(){
+    if(pauseControls_.ready)waitForGpu();
+    pauseControls_.reset();
 }
 void Renderer::drawPauseControls(){
     if(!pauseControls_.ready||!pausedTop_.data)return;
@@ -2826,7 +2834,6 @@ void Renderer::releasePausedTop(){
     if(pausedTop_.data||pausedVertices_)waitForGpu();
     if(pausedTop_.data)C3D_TexDelete(&pausedTop_);
     pausedTop_={};linearFree(pausedVertices_);pausedVertices_=nullptr;
-    pauseControls_.reset();
 }
 void Renderer::requestBloomNow(const CourseBloom& settings){
     bloomRequested_=settings.enabled();bloomSettings_=&settings;

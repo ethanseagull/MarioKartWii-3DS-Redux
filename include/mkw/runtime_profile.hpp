@@ -71,6 +71,9 @@ public:
  }
  // Pause: save what exists so far; the race continues in the same files.
  void finish(){if(frames_)write(false);skip_=true;}
+ // Pause without writing: the race keeps its files, and the first frame
+ // after resuming (which measures the pause) is skipped.
+ void hold(){skip_=true;}
 private:
  struct Row {float time=0;unsigned course=0,frame=0,ticks=0,rendered=0;float interval=0;std::array<float,StageCount> ms{};float gpu=0;unsigned draws=0,triangles=0,culledTriangles=0,culledSubmeshes=0;RenderMetrics metrics{};float command=0,renderThread=0,renderWait=0,recordWait=0,hook=0,gpuGap=0;unsigned passSkip=0,opens=0;float openMs=0;};
  struct Second {unsigned loops=0,rendered=0,late1=0,late2=0,ticks=0,draws=0,triangles=0,culledTriangles=0,flushBytes=0,skinned=0,linearFree=0,opens=0,leaveOuts=0;
@@ -197,6 +200,7 @@ public:
  void mark(Stage){}
  void end(unsigned,const Renderer&,bool=true){}
  void finish(){}
+ void hold(){}
  void autoFrame(bool){}
  void context(bool,bool,bool,bool,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false){}
 #else
@@ -212,6 +216,8 @@ public:
 #endif
  }
  ~RuntimeProfile(){finish();}
+ // Captures save on pause (no measured frame writes to the card).
+ void hold(){finish();}
  void autoFrame(bool){}
  void context(bool,bool,bool,bool,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false){}
  void begin(unsigned course,unsigned frame,unsigned ticks,float interval){

@@ -269,13 +269,25 @@ static void report(const char* text) {
 }
 #define LOGF(...) do{char logLine_[256];snprintf(logLine_,sizeof logLine_,__VA_ARGS__);report(logLine_);}while(0)
 #endif
-// Narrow pause regression trace, written only at a START/menu transition.
-// Keep the last transition even in release packages; no per-frame SD writes.
+// Narrow pause regression trace: the last START/menu transition, timed from
+// START. Held in RAM and written when the race ends; SD writes during the
+// transition would delay the pause menu they measure.
+#ifndef MKW_RELEASE
+static std::string pauseTrace;static u64 pauseTraceStart=0;
+#endif
 static void recordPauseStage(const char* stage,bool begin=false){
 #ifndef MKW_RELEASE
-    if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/pause-transition.txt",begin?"w":"a")){
-        fprintf(f,"HW87 %s\n",stage);fclose(f);
-    }
+    const u64 now=svcGetSystemTick();
+    if(begin){pauseTrace.clear();pauseTraceStart=now;}
+    char line[96];snprintf(line,sizeof line,"HW87 %s %.1f ms\n",stage,double(now-pauseTraceStart)*1000.0/SYSCLOCK_ARM11);
+    pauseTrace+=line;
+#endif
+}
+static void writePauseTrace(){
+#ifndef MKW_RELEASE
+    if(pauseTrace.empty())return;
+    if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/pause-transition.txt","w")){fputs(pauseTrace.c_str(),f);fclose(f);}
+    pauseTrace.clear();
 #endif
 }
 // QA captures: a stereo frame also writes its right eye beside the left
@@ -649,15 +661,19 @@ int main() {
         view.active=false;view.entering=false;view.back=false;view.preload=true;view.holdFrame=0;view.selectedControl=mkw::uiSelectedMenuControl(state);
         mkw::composeMenu(state,uiRace,out,view);
     };
+    // The pause page and Quit's confirmation, as composed for this mode.
+    auto pauseQuads=[&](std::vector<mkw::UiQuad>& paused){
+        auto state=menu;state.enter(mkw::UiPage::Pause);
+        std::vector<mkw::UiQuad> confirmation;
+        residentQuads(state,nullptr,paused);
+        state.enter(mkw::UiPage::QuitConfirm);residentQuads(state,nullptr,confirmation);
+        paused.insert(paused.end(),confirmation.begin(),confirmation.end());
+    };
     std::array<std::uint32_t,4> pauseReserves{};
     auto pauseTextureReserve=[&](){
         auto& reserve=pauseReserves[unsigned(menu.selection.mode)];
         if(reserve)return reserve;
-        auto state=menu;state.enter(mkw::UiPage::Pause);
-        std::vector<mkw::UiQuad> paused,confirmation;
-        residentQuads(state,nullptr,paused);
-        state.enter(mkw::UiPage::QuitConfirm);residentQuads(state,nullptr,confirmation);
-        paused.insert(paused.end(),confirmation.begin(),confirmation.end());
+        std::vector<mkw::UiQuad> paused;pauseQuads(paused);
         // Plan the space without reading textures during driving. Use the
         // fitted allocation sizes and leave headroom for allocation overhead.
         reserve=std::max<std::uint32_t>(2u<<20,mkw::uiResidentTextureBytes(paused)+(128u<<10));
@@ -669,6 +685,10 @@ int main() {
     // Set for the one race frame drawn after START without the HUD or a
     // simulation step: the image the pause menu shows, as on the Wii.
     bool pauseImageFrame=false;
+    // The pause textures load at the end of a race load, into the space
+    // pauseTextureReserve keeps, and stay through the race (resumes included):
+    // START then reads nothing from the card. Empty when not resident.
+    std::vector<mkw::UiQuad> pauseResident;bool pausePinned=false;
     std::function<void()> drawPausedBottom;
     std::function<void()> releaseRace,suspendRaceGraphics;
     std::function<bool()> restoreRaceGraphics;
@@ -713,7 +733,9 @@ int main() {
         gyroTrick.reset();
         for(unsigned slot=0;slot<4;++slot)menu.licenseUnlocks[slot]=licenseSaves[slot].unlockFlags;
         if(menu.page==mkw::UiPage::MainMenu)nextUnlock();
-        if(menu.page==mkw::UiPage::Pause){mkw::animationStride.store(1);recordPauseStage("menu-enter",true);profiler->finish();mkw::diag::deferSdLogs(false);}
+        // The race profile and held logs stay in RAM until the race ends: card
+        // writes here would delay the pause menu.
+        if(menu.page==mkw::UiPage::Pause){mkw::animationStride.store(1);recordPauseStage("menu-enter",!mkw::diag::pauseKeep);profiler->hold();}
         renderer.setDualScreenIntro(false);
         renderer.frameSync=true;
         renderer.setDeferred(false);
@@ -723,11 +745,7 @@ int main() {
             if(mkw::SoundSystem::instance().start())menuSound.resetAfterEngineRestart();
         }
         if(menu.page==mkw::UiPage::Pause){
-            std::vector<mkw::UiQuad> paused,confirmation;
-            residentQuads(menu,nullptr,paused);
-            auto confirm=menu;confirm.enter(mkw::UiPage::QuitConfirm);
-            residentQuads(confirm,nullptr,confirmation);
-            paused.insert(paused.end(),confirmation.begin(),confirmation.end());
+            std::vector<mkw::UiQuad> paused;pauseQuads(paused);
             // The race's last image (drawn without the HUD) stays behind the pause menu.
             if(mkw::diag::pauseKeep)recordPauseStage(renderer.capturePausedTop()?"race-image-kept":"race-image-failed");
             // The racers stay loaded while the pause menu fits beside them;
@@ -736,7 +754,9 @@ int main() {
             bool ready=mkw::diag::pauseKeep&&menuRenderer.prepare(paused);
             if(ready)recordPauseStage("race-graphics-kept");
             else{
-                menuRenderer.release(renderer);renderer.releasePausedTop();renderer.waitForGpu();
+                menuRenderer.release(renderer);renderer.releasePausedTop();renderer.releasePauseControls();renderer.waitForGpu();
+                // Racers reload on resume; the pause textures don't come back during this race.
+                pauseResident.clear();
                 if(suspendRaceGraphics)suspendRaceGraphics();
                 recordPauseStage("race-graphics-released");
                 ready=menuRenderer.prepare(paused);
@@ -779,7 +799,9 @@ int main() {
         auto leave=[&](mkw::UiAction action){
             loader.stop();renderer.waitForGpu();renderer.releasePausedTop();menuAudio.close();
             menuModels.reset(renderer);menuIcons.reset(renderer);
-            menuRenderer.release(renderer);
+            // Back to the race: only the pause textures stay.
+            if(action==mkw::UiAction::ResumeRace&&!pauseResident.empty())menuRenderer.prepare(pauseResident);
+            else menuRenderer.release(renderer);
             renderer.setRetailLighting(raceResident?mkw::courseLighting(Courses[courseChoice].archive):nullptr,false);
             renderer.waitForGpu();return action;
         };
@@ -1065,7 +1087,8 @@ int main() {
             menuRenderer.update(renderer);menuModels.update(renderer,visual,motion);menuIcons.update(renderer,visual);
             if(menuProfile->enabled())loader.drainSlow([](const char* label,const char* detail,float run,float wait,void* profile){char text[256];snprintf(text,sizeof text,"slow job %.1f ms (queued %.1f ms): %s %s",run,wait,label,detail);static_cast<mkw::MenuProfile*>(profile)->event(text);},menuProfile.get());
             menuProfile->mark(MenuStage::Resident);
-            if(!revealed)revealed=menuRenderer.ready(visualResident)&&menuModels.ready(visual)&&menuIcons.ready(mkw::MenuVehicleIcons::driverFor(visual));
+            if(!revealed){revealed=menuRenderer.ready(visualResident)&&menuModels.ready(visual)&&menuIcons.ready(mkw::MenuVehicleIcons::driverFor(visual));
+                if(revealed&&visual.page==mkw::UiPage::Pause)recordPauseStage("menu-shown");}
             menuProfile->mark(MenuStage::Textures);
             // The engine plays the title wave (W_BGM_TITLE) and every other menu sound;
             // the THP opening keeps its own stream. The cooked title WAV remains the
@@ -1929,6 +1952,10 @@ int main() {
         sky.clear();track.clear();courseObjects.reset();trackCourse=-1;raceResident=false;intro.stop();
         renderer.setRetailLighting(nullptr);raceSound.quit();bottomScreen.unload(renderer);
         unloadRaceVfx();
+        // The pause textures become ordinary menu textures (the menus may be
+        // drawing when this runs, so the menu renderer keeps them).
+        pauseResident.clear();pausePinned=false;renderer.releasePauseControls();
+        writePauseTrace();
     };
     decltype(driverController) pausedDriverController;
     decltype(driverPose) pausedDriverPose;
@@ -2046,7 +2073,14 @@ int main() {
                     svcSleepThread(20*1000000LL);
                 }
                 stage("sound cache ready");
-                courseObjects.setAllocationReserve(pauseTextureReserve());
+                // Everything above left pauseTextureReserve free; the pause
+                // textures take it now. Course objects then keep only their own reserve.
+                pauseQuads(pauseResident);
+                if(!menuRenderer.prepare(pauseResident)){menuRenderer.release(renderer);pauseResident.clear();}
+                renderer.preparePauseControls();
+                pausePinned=!pauseResident.empty();
+                courseObjects.setAllocationReserve(pausePinned?0:pauseTextureReserve());
+                stage("pause menu");
             }
             // Execute and retire the first complete render, then its reuse
             // frame while still black. Resource allocation alone does not
@@ -2305,7 +2339,7 @@ int main() {
             if(down&KEY_START)menu.input({false,false,false,false,false,false,true});
             // Mario Kart 7: a tap on the lower screen switches its map view.
             if((down&KEY_TOUCH)&&menu.page==mkw::UiPage::Race&&!intro.active())bottomScreen.toggleView();
-            if(menu.page==mkw::UiPage::Pause&&!nextRaceQueued&&mkw::diag::pauseKeep&&!pauseImageFrame){pauseImageFrame=true;raceSound.pause(true);}
+            if(menu.page==mkw::UiPage::Pause&&!nextRaceQueued&&mkw::diag::pauseKeep&&!pauseImageFrame){pauseImageFrame=true;raceSound.pause(true);recordPauseStage("start",true);}
             else if(menu.page!=mkw::UiPage::Race&&menu.page!=mkw::UiPage::Results){
                 pauseImageFrame=false;
                 if(menu.page==mkw::UiPage::Pause)raceSound.pause(true);
@@ -2353,8 +2387,10 @@ int main() {
         // Diagnostic overlay: automatic race profiling (racing frames only).
         {const bool profiled=fullRace&&dataReady&&!trackLoadFailed&&!raceWarmupFrames&&menu.page==mkw::UiPage::Race&&!intro.active()&&!results.active();
         // Logs held in RAM reach the card before the profiler writes its files.
-        if(!profiled)mkw::diag::deferSdLogs(false);
-        profiler->autoFrame(profiled);
+        // A pause keeps both in RAM (runMenu holds the profile).
+        const bool pausing=pauseImageFrame||menu.page==mkw::UiPage::Pause||menu.page==mkw::UiPage::QuitConfirm;
+        if(!profiled&&!pausing)mkw::diag::deferSdLogs(false);
+        if(!pausing)profiler->autoFrame(profiled);
         if(profiled){if(!cpuTrace.every)mkw::diag::deferSdLogs(true);
             const auto* bloom=mkw::courseBloom(Courses[courseChoice].archive);const int id=int(Courses[courseChoice].id);
             profiler->context(renderer.stereoWanted(),bloom&&bloom->enabled(),id==18||id==6||id==35,menu.selection.dynamicShadows,renderer.pipelineFrames,renderer.bloomMerge,renderer.shadowRects,playerTexturesVram,renderer.drawDistance,renderer.spatialCourse,mkw::shrinkHudTextures,skyDrawnLast(renderer,Courses[courseChoice].id),renderer.plainUv,renderer.fastVertex,vramPriority);}
@@ -3237,8 +3273,12 @@ int main() {
                 // by runMenu once the race is released.
                 if(!pauseImageFrame&&(menu.page==mkw::UiPage::Pause||menu.page==mkw::UiPage::QuitConfirm))mkw::composeMenu(menu,uiRace,raceQuads);
                 else raceQuads.clear();
-                if(menuRenderer.needsPrepare(raceQuads)){renderer.waitForGpu();
-                    if(!menuRenderer.prepare(raceQuads))report("FAIL race map UI asset load");}
+                // The pause textures stay until the results, which need their space.
+                const bool pin=!pauseResident.empty()&&!results.active();
+                const auto& resident=raceQuads.empty()&&pin?pauseResident:raceQuads;
+                if(menuRenderer.needsPrepare(resident)){renderer.waitForGpu();
+                    if(!menuRenderer.prepare(resident))report("FAIL race map UI asset load");}
+                if(pin!=pausePinned){pausePinned=pin;courseObjects.setAllocationReserve(pin?0:pauseTextureReserve());}
                 // Board and menu textures arrive one per frame after the finish,
                 // well before the board slides in.
                 if(results.active()&&!resultsReported){
