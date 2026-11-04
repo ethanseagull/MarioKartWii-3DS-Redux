@@ -143,6 +143,18 @@ bool Texture::loadMemory(const void* data,size_t size,bool vram) {
     auto t=Tex3DS_TextureImport(data,size,&gpu,nullptr,vram);
     if(!t){gpu={};return false;}
     Tex3DS_TextureFree(t);
+    // Old 3DS: textures over 256x256 texels (course roads, shadows, a few
+    // objects) start at their first mip level, about the size they had before
+    // the texel budgets. Skies have no mips and stay. Level 1 onward is already
+    // laid out as a complete chain, so it moves into a smaller allocation.
+    if(renderQuality().reduced&&!vram&&gpu.maxLevel&&gpu.width*gpu.height>256*256){
+        C3D_Tex small{};
+        const C3D_TexInitParams params{u16(gpu.width/2),u16(gpu.height/2),u8(gpu.maxLevel-1),gpu.fmt,GPU_TEX_2D,false};
+        if(C3D_TexInitWithParams(&small,nullptr,params)){
+            std::memcpy(small.data,static_cast<const uint8_t*>(gpu.data)+gpu.size,C3D_TexCalcTotalSize(small.size,small.maxLevel));
+            C3D_TexDelete(&gpu);gpu=small;
+        }
+    }
     C3D_TexFlush(&gpu); // Make decoded LINEAR pixels visible before first sampling.
     C3D_TexSetFilter(&gpu,GPU_LINEAR,GPU_LINEAR);
     // HW10: retain the full mip chain and bilinear texel filtering, but

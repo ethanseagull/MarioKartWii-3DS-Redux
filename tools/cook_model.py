@@ -18,17 +18,33 @@ WATER_WORDS={'water','sea','river','fountain','lake'}
 # Lower-case words of a source name, split at underscores, digits and case
 # changes: 'TR_houseALL' -> tr, house, all; 'water0_HIG' -> water, hig.
 def name_words(name):return {w.lower() for w in re.findall(r'[A-Z]+(?![a-z])|[A-Z]?[a-z]+',name)}
+# Texel budgets of the course, sky and course-object cooks (texel_budget), in
+# place of the max_texture cap: a texture keeps its power-of-two source size
+# while width*height fits; above that its longer axis halves, never below 256,
+# and no axis exceeds 1024. Sky panoramas, baked shadow maps (the secondary
+# texture of lighting mode 1) and road textures get the large budget. A flat
+# 256 cap squeezed long road strips (1024x128 -> 256x32) far below the Wii's
+# own detail.
+COURSE_TEXELS=256*256
+LARGE_TEXELS=512*512
+def budget_size(width,height,texels):
+ size=[min(1024,max(8,1<<(n-1).bit_length())) for n in (width,height)]
+ while size[0]*size[1]>texels and max(size)>256:size[0 if size[0]>=size[1] else 1]//=2
+ return tuple(size)
 
-def cook(source,out,prefix,max_texture=256,preserve_vertices=False,reuse_textures=False,texture_prefix=None,encoded_textures=None,course_geometry=False,texture_overrides=None):
+def cook(source,out,prefix,max_texture=256,preserve_vertices=False,reuse_textures=False,texture_prefix=None,encoded_textures=None,course_geometry=False,texture_overrides=None,texel_budget=None):
  # Models of one archive may share texture_prefix; encoded_textures names the
  # textures this run already wrote, so each is encoded once.
+ # texel_budget (COURSE_TEXELS or LARGE_TEXELS) replaces max_texture with
+ # budget_size.
  data=json.loads((source/'model.json').read_text());(out/'textures').mkdir(parents=True,exist_ok=True);(out/'models').mkdir(parents=True,exist_ok=True)
+ shadows={shape['secondary'] for model in data['models'] for shape in model['shapes'] if shape.get('lightingMode')==1 and shape.get('secondary',-1)>=0}
  depth_layers=course_layers(data['models']) if course_geometry or (prefix.startswith('course_') and '_sky' not in prefix) else {}
  triangle_depth_layers=triangle_layers(data['models'],prefix)
  unknown=set(texture_overrides or {})-{t['name'] for t in data['textures']}
  if unknown:raise ValueError('Unknown replacement textures: '+str(sorted(unknown)))
  names=[];audits=[]
- for t in data['textures']:
+ for index,t in enumerate(data['textures']):
   raw=(source/(t['file']+'.bin')).read_bytes();palpath=source/(t['file']+'.pal');pal=palpath.read_bytes() if palpath.exists() else b''
   replacement=(texture_overrides or {}).get(t['name'])
   exact_award_face=award_face_textures.selected(prefix,t['name']) and t['format']==14
@@ -37,7 +53,11 @@ def cook(source,out,prefix,max_texture=256,preserve_vertices=False,reuse_texture
   elif exact_award_face:im=award_face_textures.decode(raw,t['width'],t['height'])
   else:
    im=decode_image(io.BytesIO(raw),io.BytesIO(pal),ImageFormat(t['format']),PaletteFormat(t['paletteFormat'] or 0),len(pal)//2,t['width'],t['height']).convert('RGBA')
-  im.thumbnail((max_texture,max_texture),Image.Resampling.LANCZOS);size=tuple(max(8,1<<(n-1).bit_length()) for n in im.size)
+  if texel_budget:
+   large=index in shadows or 'road' in t['name'].lower() or 'michi' in t['name'].lower()
+   size=budget_size(*im.size,max(texel_budget,LARGE_TEXELS) if large else texel_budget)
+  else:
+   im.thumbnail((max_texture,max_texture),Image.Resampling.LANCZOS);size=tuple(max(8,1<<(n-1).bit_length()) for n in im.size)
   if size!=im.size:im=im.resize(size,Image.Resampling.LANCZOS)
   name=f'{texture_prefix or prefix}_{len(names):03d}';names.append(name);png=out/'textures'/f'{name}.png'
   replacement_audit=({'preparedImage':str(replacement),'preparedSha256':hashlib.sha256(Path(replacement).read_bytes()).hexdigest()} if replacement is not None else {})

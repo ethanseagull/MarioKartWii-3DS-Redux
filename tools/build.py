@@ -590,7 +590,7 @@ class Builder:
     def courses(self):
         root, sd = self.root, self.root / 'sd-card/3ds/mkw-3ds'
         from course_catalog import courses
-        from cook_model import cook
+        from cook_model import cook, COURSE_TEXELS, LARGE_TEXELS
         from import_courses import kmp_database
 
         def one(c):
@@ -603,7 +603,8 @@ class Builder:
                 settings = {**self.env, 'MKW_FREEZE_NONLINEAR_UV': '1', 'MKW_COURSE_MATERIALS': '1', 'MKW_RETAIL_LIGHTING': '1',
                             'MKW_RETAIL_SKY': '1' if kind == 'sky' else '0'}
                 self.run(prefix + '-export', [self.tools['node'], 'build/export_brres.mjs', source, root / 'build/course-exports' / prefix], env=settings)
-                parts = cook(root / 'build/course-exports' / prefix, sd, prefix, course_geometry=kind == 'course')
+                parts = cook(root / 'build/course-exports' / prefix, sd, prefix, course_geometry=kind == 'course',
+                             texel_budget=LARGE_TEXELS if kind == 'sky' else COURSE_TEXELS)
                 detail = read_json(sd / f'models/{prefix}-receipt.json')
                 visuals.append({'kind': kind, 'resource': resource, 'parts': parts, 'lighting': detail.get('lighting'), 'limitations': detail['limitations']})
                 lists.append('models/' + prefix + '.list')
