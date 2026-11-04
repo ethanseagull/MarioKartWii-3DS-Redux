@@ -562,7 +562,6 @@ template <class T, int N> struct Ring {
 
 // ======================================================================
 struct SoundSystem::Impl {
- std::string root;
  Archive archive; Engine engine; std::unique_ptr<NdspHardware> hw;
  FILE* brsar = nullptr;
  Thread audioThread = nullptr, ioThread = nullptr;
@@ -998,7 +997,9 @@ struct SoundSystem::Impl {
  }
  static std::unique_ptr<StreamFeed> openStream(void* ctx, const char* path, u32 startSample) {
   auto* self = static_cast<Impl*>(ctx);
-  char full[256]; std::snprintf(full, sizeof full, "%saudio/%s", self->root.c_str(), path);
+  // Relative to the asset folder (the working directory), so fopen finds the
+  // stream in stream.pak (asset_pack.hpp openFile only serves relative paths).
+  char full[256]; std::snprintf(full, sizeof full, "audio/%s", path);
   auto* feed = new BrstmFeed();
   feed->path = full; feed->startAt = startSample;
   LightLock_Lock(&self->streamLock); self->feeds.push_back(feed); LightLock_Unlock(&self->streamLock);
@@ -1029,9 +1030,6 @@ bool SoundSystem::start() {
  MenuMovieAudio::initialize();
  if (!MenuMovieAudio::dspReady()) return false;
  auto* s = new Impl();
- // Asset root: the process chdir()s to it at boot (main.cpp).
- char cwd[256] = {};
- if (getcwd(cwd, sizeof cwd - 1)) { s->root = cwd; if (!s->root.empty() && s->root.back() != '/') s->root += '/'; }
  std::vector<u8> arc;
  if (FILE* f = std::fopen("audio/sound.arc", "rb")) {
   std::fseek(f, 0, SEEK_END); const long n = std::ftell(f); std::fseek(f, 0, SEEK_SET);
