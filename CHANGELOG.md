@@ -18,6 +18,15 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.8.14.
 - Kept Lakitu's joints, the pack indexes, course part lists and the last license cached instead of reloading them every race.
 - Opponents load compact animation banks (`.dsku`), about 40% smaller.
 - Sped up menu text animation by caching its results.
+- Model draws with plain texture coordinates and none of the extra effects take a shorter vertex shader path.
+- Course textures take VRAM by priority: the sky first, then the track textures that cover the most surface per byte.
+
+# Racing and visuals
+
+- GP, VS and Battle pause as on the Wii: the race stays frozen behind the menu without its HUD, with Continue Game and Quit Game. A controls diagram of the console shows above them when its photos were cooked (`tools/cook_pause_controls.py`; the photos aren't in the repository). Time Trials keeps its five buttons.
+- CPU racers drift manually, as on the Wii, and after a fall their path restarts from their respawn point.
+- Course, sky and course object textures are cooked to a texel budget instead of a flat 256 cap, so long road strips, skies and baked shadow maps keep more of the Wii's detail. The Old 3DS loads the larger ones one mip level down.
+- New 3DS: every opponent keeps its full-detail kart, driver and wheels at any distance, and crowds and animated items run every tick, as in the Wii's single-player races.
 
 # Loading
 
@@ -26,7 +35,7 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.8.14.
 - Pausing keeps the racers loaded when the pause menu fits, so resuming is immediate.
 - The pause menu's textures load with the race and stay until it ends, so START reads nothing from the SD card.
 - The course preview camera is planned while the race sounds load.
-- `tools/pakpack.c` repacks race.pak and menu.pak in the order the game reads them, LZ4-compressed (lossless); race.pak drops from 1.78 GB to about 1 GB.
+- `tools/pakpack.c` can repack race.pak and menu.pak in the order the game reads them, LZ4-compressed (lossless); race.pak drops from 1.78 GB to about 1 GB. `tools/build.py` doesn't run it: it's a manual step (`tools/diag/README.md`), and the game reads both pack formats.
 
 # Fixes
 
