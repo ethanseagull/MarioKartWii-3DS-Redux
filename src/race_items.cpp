@@ -301,9 +301,10 @@ void RaceItems::updateHeldItems(unsigned player,ItemWorldQuery query){
             state.positions[slot]=state.trailing.positions[slot];
             // 27d9b8/27da58: rear-facing traps, forward-facing shells, spring
             // tilt from hop displacement, and .08 up-vector response.
-            Vec3 facing=normalized(racer.forward+state.trailing.backward*2+Vec3{0,-.0007f*state.trailing.hop*(state.trailing.hop-oldHop),0},-racer.forward);
+            const Vec3 up=heldUp(racer),forward=heldForward(racer,up);
+            Vec3 facing=normalized(forward+state.trailing.backward*2+Vec3{0,-.0007f*state.trailing.hop*(state.trailing.hop-oldHop),0},-forward);
             if(h.heldKind==ItemKind::GreenShell||h.heldKind==ItemKind::RedShell)facing=-facing;
-            state.ups[slot]=normalized(lerp(state.ups[slot],racer.up,.08f),racer.up);
+            state.ups[slot]=normalized(lerp(state.ups[slot],up,.08f),up);
             state.forwards[slot]=facing;
             const float before=state.scales[slot];
             state.scales[slot]=heldGrowth(state.scales[slot],prop.heldScale,state.age,singleHeld(h.heldKind),slot);
@@ -319,7 +320,7 @@ void RaceItems::updateHeldItems(unsigned player,ItemWorldQuery query){
     state.radiusX+=.2f*((racer.itemGeometry[1]+30)*racer.scale.z-state.radiusX);
     state.radiusZ+=.2f*((racer.itemGeometry[0]+30)*racer.scale.x-state.radiusZ);
     state.hop=(state.hop+.4f*racer.hop)*.8f;
-    const Vec3 forward=normalized(racer.forward,{0,0,1}),up=normalized(racer.up,{0,1,0});
+    const Vec3 up=heldUp(racer),forward=heldForward(racer,up);
     const Vec3 right=normalized(cross(up,forward),{1,0,0});
     const Vec3 center=racer.position+forward*(racer.itemGeometry[3]*racer.scale.z)+up*(racer.itemGeometry[2]*racer.scale.y+prop.terrain*state.scales[0]*racer.scale.y+state.hop-racer.hop);
     for(unsigned slot=0;slot<3;++slot)if(h.heldMask&(1u<<slot)){
@@ -342,7 +343,6 @@ void RaceItems::scatterHeld(unsigned player,unsigned slot){
     // Preserve the held model's current facing, including a triple shell's
     // independent spin phase, when damage turns it into a dropped object.
     a.up=d.ups[slot];a.yaw=std::atan2(d.forwards[slot].x,d.forwards[slot].z);
-    if(singleHeld(h.heldKind)&&spinningShell(kind))a.yaw+=shellVisualSpin(frame_);
     // Shared dropped-object initializer 291f34: tangent velocity, 25-unit
     // up impulse plus clamped inherited vertical motion and radial 13*index.
     const auto& r=racers_[player];const Vec3 up=normalized(r.up,{0,1,0});

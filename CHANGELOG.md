@@ -26,6 +26,8 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.8.14.
 - R tricks off boost ramps, half-pipes and zippers, not only trick surfaces.
 - HOME banner: Mario has both eyes and the kart's textures are on the right parts.
 - Races on a `tools/build.py` SD card no longer stop with "required drift definitions": the drift effects load from `race.pak`.
+- A trailing green or red shell no longer spins; thrown shells still do.
+- Held and trailing items follow the ground under the kart instead of its body, so a bike's lean, a wheelie or a trick no longer tips them into the road.
 
 # Building
 

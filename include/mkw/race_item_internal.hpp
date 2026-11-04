@@ -21,8 +21,15 @@ inline ItemKind baseKind(ItemKind kind){
         kind==ItemKind::TripleRedShell?ItemKind::RedShell:kind==ItemKind::TripleMushroom?ItemKind::Mushroom:kind;
 }
 inline Vec3 itemMotion(const ItemRacer& r){return r.haveVelocity?r.velocity:normalized(r.forward,{0,0,1})*r.speed;}
+// Held items ride the kart's smoothed ground normal (KartMove +0x38), not its body,
+// so a bike's lean, a wheelie or a trick spin never tips them into the road.
+inline Vec3 heldUp(const ItemRacer& r){return normalized(r.smoothedUp,normalized(r.up,{0,1,0}));}
+inline Vec3 heldForward(const ItemRacer& r,Vec3 up){
+    const Vec3 forward=normalized(r.forward,{0,0,1});
+    return normalized(forward-up*dot(forward,up),forward);
+}
 inline TrailingItemPose trailingPose(const ItemRacer& r,float terrainRadius=40){
-    const Vec3 forward=normalized(r.forward,{0,0,1}),up=normalized(r.up,{0,1,0});
+    const Vec3 up=heldUp(r),forward=heldForward(r,up);
     return {r.position+forward*(r.itemGeometry[3]*r.scale.z),forward,up,r.scale,
         r.itemGeometry[0]*(r.bike?.8f:.9f)+40,r.itemGeometry[2]*r.scale.y+terrainRadius,
         r.speed,r.speedRatio,r.hop,dot(r.haveVelocity?r.velocity:r.forward*r.speed,r.forward)>0,!r.grounded};

@@ -521,13 +521,7 @@ void RaceHud::drawWorld(Renderer& renderer,const RaceItems& items,Vec3 viewer,un
     for(unsigned player=0;player<Kinoko::System::RaceConfig::Instance()->raceScenario().playerCount;++player){
         const auto& effect=items.hud(player);if(!effect.deployed)continue;
         for(unsigned slot=0;slot<3;++slot)if(effect.heldMask&(1u<<slot)){
-            auto pose=items.heldItemVisual(player,slot);
-            if(spinningShell(effect.heldKind)){
-                const float spin=shellVisualSpin(items.frame());
-                pose.forward=pose.forward*std::cos(spin)+pose.right*std::sin(spin);
-                pose.right=cross(pose.up,pose.forward);
-            }
-            shadow(effect.heldKind,items.heldItemPosition(player,slot),pose);
+            shadow(effect.heldKind,items.heldItemPosition(player,slot),items.heldItemVisual(player,slot));
         }
     }
     renderer.drawShadowVolumes(shadows.data(),shadowCount,.5f);
@@ -644,13 +638,8 @@ void RaceHud::drawWorld(Renderer& renderer,const RaceItems& items,Vec3 viewer,un
         auto& heldModel=i==0?impl_->models[orbitModel]:impl_->staticModels[orbitModel];
         if(orbit&&heldModel)for(unsigned n=0;n<3;++n)if(effect.heldMask&(1u<<n)){
             const Vec3 position=items.heldItemPosition(i,n);
-            auto visual=items.heldItemVisual(i,n);
-            if(spinningShell(effect.heldKind)){
-                // Triples already carry their own source spin in heldItemVisual.
-                const float spin=shellVisualSpin(items.frame());
-                visual.forward=visual.forward*std::cos(spin)+visual.right*std::sin(spin);
-                visual.right=cross(visual.up,visual.forward);
-            }
+            // A trailing shell holds still; triples carry their orbit spin in heldItemVisual.
+            const auto visual=items.heldItemVisual(i,n);
             if(orbitModel==unsigned(ItemKind::FakeBox)){
                 C3D_Mtx t;fakeBoxTransform(t,position,visual.scale,tick);
                 const auto& boxModel=i==0?impl_->models[3]:impl_->staticModels[3];
