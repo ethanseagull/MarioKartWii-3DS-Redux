@@ -430,6 +430,13 @@ int main() {
     unsigned benchmarkStart=0;bool benchmarkSeeded=false;
     if(benchmark)if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/benchmark-progress.txt","r")){unsigned n=0;if(fscanf(f,"%u",&n)==1&&n<32)benchmarkStart=n;fclose(f);}
     if(benchmark){char text[64];snprintf(text,sizeof text,"benchmark start course %u",benchmarkStart);report(text);}
+    // Diagnostic overlay, short single-course A/B: benchmark-course.txt (0-31, cup
+    // order) races every race of the set on that course; unit1-alternate.txt
+    // turns no-unit1-vram.txt's change off on every second race load (on first).
+    unsigned benchmarkCourse=32;
+    if(benchmark)if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/benchmark-course.txt","r")){unsigned n=32;if(fscanf(f,"%u",&n)==1&&n<32)benchmarkCourse=n;fclose(f);}
+    const bool unitOneAlternate=benchmark&&exists("sdmc:/3ds/mkw-3ds/unit1-alternate.txt");
+    unsigned unitOneRace=0;
     // GPU pass leave-out (mkw/diag.hpp): unattended runs, or gpu-passes.txt.
     // no-gpu-passes.txt: no leave-out frames, so every racing frame draws every pass (cross-build comparisons).
     mkw::diag::passState.enabled=kQa&&(autoplay||exists("sdmc:/3ds/mkw-3ds/gpu-passes.txt"))&&!exists("sdmc:/3ds/mkw-3ds/no-gpu-passes.txt");
@@ -474,6 +481,12 @@ int main() {
     renderer.plainUv=!exists("sdmc:/3ds/mkw-3ds/no-plain-uv.txt");
     renderer.fastVertex=!exists("sdmc:/3ds/mkw-3ds/no-fast-vertex.txt");
     renderer.unitOneEtc1a4=!exists("sdmc:/3ds/mkw-3ds/no-unit1-vram.txt");
+    // unit1-alternate.txt (above): set before every race load.
+    auto alternateUnitOne=[&](){
+        if(!unitOneAlternate)return;
+        renderer.unitOneEtc1a4=unitOneRace++%2==0;
+        LOGF("unit1 vram %s (alternate race %u)",renderer.unitOneEtc1a4?"on":"off",unitOneRace);
+    };
     mkw::diag::modelPixels=exists("sdmc:/3ds/mkw-3ds/model-pixels.txt");
     mkw::diag::menuFast=!exists("sdmc:/3ds/mkw-3ds/no-menu-fast.txt");mkw::diag::menuCheck=exists("sdmc:/3ds/mkw-3ds/menu-check.txt");mkw::diag::unlitBanks=!exists("sdmc:/3ds/mkw-3ds/no-unlit-banks.txt");mkw::diag::pauseKeep=!exists("sdmc:/3ds/mkw-3ds/no-pause-keep.txt");
     mkw::diag::loadCache=!exists("sdmc:/3ds/mkw-3ds/no-load-cache.txt");report(mkw::diag::loadCache?"load cache on":"load cache off");
@@ -833,7 +846,8 @@ int main() {
                 // A resumed run starts the in-order deck at the saved course
                 // (prepareVsCourses has just put the set's first course on Confirm).
                 if(!benchmarkSeeded&&menu.page==mkw::UiPage::Confirm&&menu.vsCourseIndex==0){
-                    benchmarkSeeded=true;menu.vsCourseIndex=benchmarkStart;menu.selection.course=menu.vsCourseDeck[benchmarkStart];}}
+                    benchmarkSeeded=true;menu.vsCourseIndex=benchmarkStart;menu.selection.course=menu.vsCourseDeck[benchmarkStart];
+                    if(benchmarkCourse<32){menu.vsCourseDeck.fill(benchmarkCourse);menu.selection.course=benchmarkCourse;}}}
             menuProfile->begin(unsigned(menu.page),transition.active());
             hidScanInput();unsigned down=hidKeysDown();
             unsigned navigation=down|hidKeysDownRepeat();
@@ -2121,6 +2135,7 @@ int main() {
     report(mkw::renderQuality().reduced?"render quality reduced":"render quality full");
     if(dataReady){
         K::System::RaceConfig::RegisterInitCallback(configure,&raceGrid);
+        alternateUnitOne();
         stage("start");report(Courses[courseChoice].name);{mkw::LoadingScope loading;scenes.changeScene(0);}report("Kinoko race initialized");stage("kinoko scene");
         if((kQa&&exists("sdmc:/3ds/mkw-3ds/roster-test.txt"))||(kQa&&exists("sdmc:/3ds/mkw-3ds/garage_controls-test.txt"))){
             bool garageControls=(kQa&&exists("sdmc:/3ds/mkw-3ds/garage_controls-test.txt"));
@@ -2363,7 +2378,9 @@ int main() {
                     applySelection();startVsRace(action==mkw::UiAction::RestartRace);
                     // A different or previously failed course reloads completely;
                     // restarting the same race keeps its scenery.
-                    const bool reloadTrack=trackCourse!=int(courseChoice);
+                    // The A/B's course textures are placed in VRAM again on every load.
+                    alternateUnitOne();
+                    const bool reloadTrack=trackCourse!=int(courseChoice)||unitOneAlternate;
                     if(reloadTrack){courseObjects.reset();track.clear();sky.clear();}
                     stage("start");
                     // Kinoko cannot recover from a missing course archive, so check first.

@@ -50,6 +50,12 @@ to the HOME Menu (about 100 minutes).
 - A race with no forward progress for 60 s is finished on the spot and
   listed under `"stuck"` in the result file; leave those rows out of
   comparisons.
+- `benchmark-course.txt` (a course number, 0–31) races every race of the
+  set on that course instead, for a short single-course A/B. With it,
+  `unit1-alternate.txt` turns `no-unit1-vram.txt`'s change on for the first
+  race load and off for the next, and so on (`runtime.log`: `unit1 vram
+  on/off`); every load then places the course textures again. The set still
+  counts 32 races: end the script with `quit` after the last race you want.
 - The benchmark forces VS rules to Courses: In Order, Races: 32, which can be
   saved to your license. Delete both files afterwards, or the DIAG title
   autoplays every launch.
