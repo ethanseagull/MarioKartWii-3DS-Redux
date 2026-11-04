@@ -365,6 +365,8 @@ int main() {
         report("FAIL asset directory or Race/Common.szs");
         return startupFailure("Game resources could not be found.");
     }
+    // DIAG: SD read speed test (read-bench.txt), once.
+    if(kQa&&exists("sdmc:/3ds/mkw-3ds/read-bench.txt")){int mode=1;if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/read-bench.txt","r")){if(fscanf(f,"%d",&mode)!=1)mode=1;fclose(f);}remove("sdmc:/3ds/mkw-3ds/read-bench.txt");mkw::pack::readBench("sdmc:/3ds/mkw-3ds/read-bench-result.txt",report,mode);}
     // ARM11 VFP: round-to-nearest, flush denormals. Keep Kinoko's explicit Wii
     // arithmetic and disable compiler FP contraction; ghost trace is the oracle.
     unsigned fpscr;asm volatile("vmrs %0, fpscr":"=r"(fpscr));
@@ -413,17 +415,17 @@ int main() {
     using MenuStage=mkw::MenuProfile::Stage;
     uint64_t raceLoadStart=0;
     // QA: race load stage timing with file-open counts.
-    uint64_t stageTick=0;unsigned stageOpens=0;unsigned long long stageOpenTicks=0,stageReadBytes=0,stageReadTicks=0;
+    uint64_t stageTick=0;unsigned stageOpens=0,stageReads=0;unsigned long long stageOpenTicks=0,stageReadBytes=0,stageReadTicks=0;
     auto stage=[&](const char* name){
         const auto now=svcGetSystemTick();const unsigned opens=mkw::fileOpens.load();const auto openTicks=mkw::fileOpenTicks.load();
-        const auto readBytes=mkw::packReadBytes.load(),readTicks=mkw::packReadTicks.load();
-        if(stageTick&&menuProfile->enabled()){char text[200];snprintf(text,sizeof text,"load %s %.1f ms, %u opens (%.1f ms opening), %llu KB from packs (%.1f ms reading)",name,double(now-stageTick)*1000.0/SYSCLOCK_ARM11,opens-stageOpens,double(openTicks-stageOpenTicks)*1000.0/SYSCLOCK_ARM11,(readBytes-stageReadBytes)/1024,double(readTicks-stageReadTicks)*1000.0/SYSCLOCK_ARM11);menuProfile->event(text);report(text);}
+        const unsigned reads=mkw::packReads.load();const auto readBytes=mkw::packReadBytes.load(),readTicks=mkw::packReadTicks.load();
+        if(stageTick&&menuProfile->enabled()){char text[240];snprintf(text,sizeof text,"load %s %.1f ms, %u opens (%.1f ms opening), %llu KB in %u reads from packs (%.1f ms reading), heap %u KB used, linear %lu KB free",name,double(now-stageTick)*1000.0/SYSCLOCK_ARM11,opens-stageOpens,double(openTicks-stageOpenTicks)*1000.0/SYSCLOCK_ARM11,(readBytes-stageReadBytes)/1024,reads-stageReads,double(readTicks-stageReadTicks)*1000.0/SYSCLOCK_ARM11,unsigned(mallinfo().uordblks/1024),(unsigned long)linearSpaceFree()/1024);menuProfile->event(text);report(text);}
         // Each open in the stage, slow SD directory lookups included.
         mkw::openTrace.take([&](const mkw::OpenTrace::Open& o){
             if(!stageTick||!menuProfile->enabled()||!std::strncmp(o.path,"sdmc:/3ds/mkw-3ds/",18))return;
             char text[160];snprintf(text,sizeof text,"  open %s %.1f ms%s",o.path,double(o.ticks)*1000.0/SYSCLOCK_ARM11,o.found?"":" (missing)");report(text);
         });
-        stageTick=now;stageOpens=opens;stageOpenTicks=openTicks;stageReadBytes=readBytes;stageReadTicks=readTicks;
+        stageTick=now;stageOpens=opens;stageReads=reads;stageOpenTicks=openTicks;stageReadBytes=readBytes;stageReadTicks=readTicks;
     };
     auto finishAutoplay=[&](){
         if(!menuProfile->enabled())return;
@@ -775,7 +777,7 @@ int main() {
             // The logical page becomes Race while the pause exit still animates.
             // Keep the resident course for ResumeRace; only release when leaving
             // the race section for an unrelated menu or a different race.
-            if(raceResident&&!menu.retainsRaceAssets()&&!transition.visual(menu).retainsRaceAssets())releaseRace();
+            if(raceResident&&!menu.retainsRaceAssets()&&!transition.visual(menu).retainsRaceAssets()){releaseRace();mkw::pack::dropCache();}
             if(!renderer.bottomEnabled()&&!renderer.enableBottom()){report("FAIL lower menu target");return leave(mkw::UiAction::Exit);}
             if(benchmark){menu.selection.mode=mkw::UiMode::VS;menu.selection.teams=false;menu.selection.vsCourses=2;menu.selection.vsRaces=32;
                 // A resumed run starts the in-order deck at the saved course
@@ -1380,38 +1382,46 @@ int main() {
     auto introInfo=[&](){return mkw::RaceIntroInfo{courseChoice,selectedMirror?3u:selectedEngineClass,courseChoice/4,vsSet.race?vsSet.race-1:0,raceCount(),selectedRaceMode==3&&menu.selection.coinRunners?4:selectedRaceMode,menu.selection.teams};};
     std::vector<std::unique_ptr<mkw::Model>> track,sky;
     unsigned raceWarmupFrames=0;
+    // The preview camera's clearance from walls and scenery, every frame,
+    // planned ahead. CPU only: the race load runs it while the sound
+    // cache reads from the SD card.
+    auto planIntroClearance=[&](){
+        introClearance.clear();
+        if(!intro.active())return;
+        const auto planStart=svcGetSystemTick();
+        mkw::IntroMeshClearance visibleScenery;
+        if(Courses[courseChoice].id==K::Course::Dry_Dry_Ruins){
+            for(const auto& model:track)for(const auto& sub:model->submeshes){
+                if(!mkw::playerShadow::receives(sub.flags))continue;
+                for(unsigned i=sub.first;i+2<sub.first+sub.count;i+=3)
+                    visibleScenery.add(model->vertices[model->indices[i]].position,
+                        model->vertices[model->indices[i+1]].position,model->vertices[model->indices[i+2]].position);
+            }
+            visibleScenery.build();
+        }
+        const auto sceneryBuilt=svcGetSystemTick();
+        auto query=[](void* context,float radius,mkw::Vec3 center,mkw::Vec3& out){
+            out={};bool hit=false;
+            if(auto* collision=K::Field::CollisionDirector::Instance()){
+                K::EGG::Vector3f push;bool wall=false;
+                hit=collision->checkCameraSphere(radius,{center.x,center.y,center.z},{center.x,center.y,center.z},push,wall);
+                if(hit)out=vec(push);
+            }
+            mkw::Vec3 visiblePush;
+            if(static_cast<mkw::IntroMeshClearance*>(context)->correction(radius,center,visiblePush)){
+                hit=true;if(mkw::dot(visiblePush,visiblePush)>mkw::dot(out,out))out=visiblePush;
+            }
+            return hit;
+        };
+        introClearance.build(intro.previewFrames(),query,&visibleScenery);
+        LOGF("intro clearance preplanned=%u unresolved=%u, scenery %.1f ms, path %.1f ms",introClearance.frames(),introClearance.residual(),
+            double(sceneryBuilt-planStart)*1000.0/SYSCLOCK_ARM11,double(svcGetSystemTick()-sceneryBuilt)*1000.0/SYSCLOCK_ARM11);
+    };
     auto startIntro=[&](){
         intro.stop();introClearance.clear();
         if(!fullRace)return;
         size_t size=0;const void* kmp=K::System::ResourceManager::Instance()->getFile("course.kmp",&size,K::System::ArchiveId::Course);
-        if(intro.load(kmp,size)){
-            mkw::IntroMeshClearance visibleScenery;
-            if(Courses[courseChoice].id==K::Course::Dry_Dry_Ruins){
-                for(const auto& model:track)for(const auto& sub:model->submeshes){
-                    if(!mkw::playerShadow::receives(sub.flags))continue;
-                    for(unsigned i=sub.first;i+2<sub.first+sub.count;i+=3)
-                        visibleScenery.add(model->vertices[model->indices[i]].position,
-                            model->vertices[model->indices[i+1]].position,model->vertices[model->indices[i+2]].position);
-                }
-                visibleScenery.build();
-            }
-            auto query=[](void* context,float radius,mkw::Vec3 center,mkw::Vec3& out){
-                out={};bool hit=false;
-                if(auto* collision=K::Field::CollisionDirector::Instance()){
-                    K::EGG::Vector3f push;bool wall=false;
-                    hit=collision->checkCameraSphere(radius,{center.x,center.y,center.z},{center.x,center.y,center.z},push,wall);
-                    if(hit)out=vec(push);
-                }
-                mkw::Vec3 visiblePush;
-                if(static_cast<mkw::IntroMeshClearance*>(context)->correction(radius,center,visiblePush)){
-                    hit=true;if(mkw::dot(visiblePush,visiblePush)>mkw::dot(out,out))out=visiblePush;
-                }
-                return hit;
-            };
-            introClearance.build(intro.previewFrames(),query,&visibleScenery);
-            LOGF("intro clearance preplanned=%u unresolved=%u",introClearance.frames(),introClearance.residual());
-            intro.start();
-        }
+        if(intro.load(kmp,size))intro.start();
         LOGF("course preview %s: %u frames",intro.active()?"playing":"absent",intro.frames());
         introTick=0;introCaptured=~0u;
         if(intro.active()&&!flowUi.loadIntro(introInfo()))LOGF("course preview labels failed to load");
@@ -1910,19 +1920,25 @@ int main() {
             if(fullRace&&!finishingMenuCue&&!mkw::SoundSystem::instance().carryingMusic()){raceSound.quit();mkw::SoundSystem::instance().stop();
                 if(!mkw::SoundSystem::instance().start()){report("FAIL required sound engine");return false;}}
             stage("sound engine");
+            // The RAM cache keeps what the next race reads again; not the course's own files.
+            mkw::pack::cacheReads(true);
             if(!loadRaceVfx())return false;stage("race effects");
             if(fullRace&&!lakitu.load()){report("FAIL required Lakitu");return false;}
             stage("Lakitu");
+            mkw::pack::cacheReads(false);
             loadTrack();if(trackLoadFailed)return false;stage("course lighting");
+            mkw::pack::cacheReads(true);
             if(!loadDriver()){report("FAIL required player graphics");return false;}
             stage("player graphics");
             if(fullRace&&!raceHud.load()){report("FAIL required item/HUD graphics or animation");return false;}
             stage("items and HUD");
             if(fullRace&&!flowUi.load()){report("FAIL required race transitions");return false;}
             stage("race transitions");
+            mkw::pack::cacheReads(false);
             if(fullRace&&!loadBottomScreen())return false;stage("bottom screen");
             moveCourseTexturesToVram();stage("texture VRAM transfer");
-            resetRaceSystems(true);if(trackLoadFailed)return false;stage("grid and opponents");
+            mkw::pack::cacheReads(true);
+            resetRaceSystems(true);mkw::pack::cacheReads(false);if(trackLoadFailed)return false;stage("grid and opponents");
             if(fullRace){
                 startIntro();
                 if(intro.active()&&!flowUi.loadIntro(introInfo())){report("FAIL required preview labels");return false;}
@@ -1940,6 +1956,7 @@ int main() {
                 }
                 if(!beginRaceSound()){report("FAIL required race sound cache budget");return false;}
                 stage("sound cache plan");
+                planIntroClearance();stage("intro clearance");
                 const auto started=svcGetSystemTick();
                 while(!raceSound.resourcesReady()){
                     // Slow SD cards may need a long first read. Only a
@@ -1955,18 +1972,25 @@ int main() {
             // prime pose uploads, shadow captures or their GPU dependencies.
             raceWarmupFrames=fullRace?2u:0u;
             if(fullRace)K::System::RaceManager::Instance()->setIntroHeld(true);
-            raceResident=fullRace;return true;
+            raceResident=fullRace;
+            {char text[64];snprintf(text,sizeof text,"race cache %u KB",unsigned(mkw::pack::trimCache()/1024));report(text);}
+            return true;
         };
         // Release the preceding race before the first attempt too. A second
         // race must not need room for both generations of graphics/audio.
         cleanup();stage("race cleanup");
-        const bool ok=mkw::loadRequiredResources(attempt,cleanup);
+        // A failed attempt retries with the heap the cache held.
+        const bool ok=mkw::loadRequiredResources(attempt,[&](){mkw::pack::dropCache();cleanup();});
         trackLoadFailed=!ok;
         return ok;
     };
     // Old 3DS draws reduced detail; full-quality.txt keeps every draw for QA.
     // Set before the first race loads: some reductions apply at load.
     bool new3ds=false;APT_CheckNew3DS(&new3ds);
+    // Race-load RAM cache: New 3DS only (the Old 3DS heap has no room). A/B: no-race-cache.txt.
+    const size_t raceCacheLimit=new3ds&&!exists("sdmc:/3ds/mkw-3ds/no-race-cache.txt")?mkw::pack::cacheLimitFor(envGetHeapSize()):0;
+    mkw::pack::enableCache(raceCacheLimit);
+    {char text[80];snprintf(text,sizeof text,"heap %lu KB, race cache limit %lu KB",(unsigned long)envGetHeapSize()/1024,(unsigned long)raceCacheLimit/1024);report(text);}
     mkw::renderQuality().setReduced(!new3ds&&!(kQa&&exists("sdmc:/3ds/mkw-3ds/full-quality.txt")));
     mkw::renderQuality().mipmaps=!exists("sdmc:/3ds/mkw-3ds/diagnose-no-mipmaps.txt");
     // New 3DS draws every opponent at full detail (A/B: racer-lod.txt brings back the distance LOD).
@@ -2117,7 +2141,7 @@ int main() {
             // race before freeing its child heap; the root keeps configuration
             // and archive/input services alive for the next menu selection.
             mkw::AssetLoader::instance().stop();renderer.waitForGpu();
-            releaseRace();menuAudio.close();menuModels.reset(renderer);menuIcons.reset(renderer);menuRenderer.release(renderer);
+            releaseRace();mkw::pack::dropCache();menuAudio.close();menuModels.reset(renderer);menuIcons.reset(renderer);menuRenderer.release(renderer);
             if(!mkw::SoundSystem::instance().carryingMusic())mkw::SoundSystem::instance().stop();renderer.clearUnusedTextureCache();
             results.reset();resultsInput={};nextRaceQueued=false;
             if(scenes.currentSceneId()==2){
@@ -2203,7 +2227,7 @@ int main() {
                 auto action=nextRaceQueued?mkw::UiAction::StartRace:runMenu();nextRaceQueued=false;renderer.setDeferred(deferredRace);if(action==mkw::UiAction::Exit)break;
                 if(action==mkw::UiAction::ResumeRace){
                     if(restoreRaceGraphics&&restoreRaceGraphics())raceSound.pause(false);
-                    else {report("FAIL resume graphics load");releaseRace();menu.enter(mkw::UiPage::Error);}
+                    else {report("FAIL resume graphics load");releaseRace();mkw::pack::dropCache();menu.enter(mkw::UiPage::Error);}
                 }
                 if(action==mkw::UiAction::StartRace||action==mkw::UiAction::RestartRace){
                     mkw::LoadingScope loading;
@@ -2254,7 +2278,7 @@ int main() {
             if(trackLoadFailed){
                 accumulator=0;
                 // Unwind the partial race before the error page's menu runs.
-                if(fullRace){renderer.waitForGpu();releaseRace();menu.enter(mkw::UiPage::Error);}
+                if(fullRace){renderer.waitForGpu();releaseRace();mkw::pack::dropCache();menu.enter(mkw::UiPage::Error);}
                 else if(kQa)printf("\x1b[18;1HCourse load/route failed");
                 gspWaitForVBlank();continue;
             }

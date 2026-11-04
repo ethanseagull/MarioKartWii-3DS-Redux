@@ -37,7 +37,7 @@ u32 __wrap_linearSpaceFree(void){Guard g;return __real_linearSpaceFree();}
 #include <string>
 #include <mkw/diag.hpp>
 namespace mkw {std::atomic<unsigned> fileOpens{0};std::atomic<unsigned long long> fileOpenTicks{0};
-std::atomic<unsigned long long> packReadBytes{0},packReadTicks{0};
+std::atomic<unsigned> packReads{0};std::atomic<unsigned long long> packReadBytes{0},packReadTicks{0};
 // DIAG: the last opens (path, ticks, found), printed under each load stage.
 OpenTrace openTrace;}
 extern "C" FILE* __real_fopen(const char* path,const char* mode);

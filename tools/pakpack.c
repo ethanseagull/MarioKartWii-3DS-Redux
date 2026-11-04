@@ -1,0 +1,206 @@
+/* Repack an MPK1 archive (tools/pack_race_assets.py) as MPK2: entries laid out
+ * in a given order and LZ4-compressed where that saves space.
+ *
+ * usage: pakpack in.pak order.txt out.pak [name=file ...]
+ * name=file adds a loose file as entry name (e.g. a stream the game reads whole).
+ * order.txt lists entry names, one per line, in the order their data is
+ * written; entries it doesn't name follow in index order. Data the game
+ * reads together then sits together, so one SD request covers several entries.
+ *
+ * MPK2: "MPK2", u32 count, u32 namesBytes; count x {u32 name, u32 offset,
+ * u32 size, u32 stored} sorted by name; the names; data at 32-byte offsets.
+ * stored == size: raw. stored < size: one LZ4 block (lz4 block format) that
+ * decodes to size bytes. Lossless: the game gets the same bytes either way.
+ * Bit 31 of stored marks entries order.txt names (read in that order by the
+ * game): the reader reads further ahead among them.
+ * Build: gcc -O2 -o pakpack pakpack.c
+ */
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef struct {uint32_t name, offset, size, stored, rank; uint8_t *data; const char *source;} Entry;
+
+static uint32_t u32(const uint8_t *p) {return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24;}
+static void put32(uint8_t *p, uint32_t v) {p[0] = v; p[1] = v >> 8; p[2] = v >> 16; p[3] = v >> 24;}
+
+/* LZ4 block compressor: hash chains, lazy matching one step ahead. */
+#define HASH_BITS 16
+#define WINDOW 65535
+#define MIN_MATCH 4
+#define CHAIN 96
+static uint32_t hash4(const uint8_t *p) {return (u32(p) * 2654435761u) >> (32 - HASH_BITS);}
+
+static size_t emit(uint8_t *o, const uint8_t *lit, size_t litLen, size_t matchLen, size_t dist) {
+    uint8_t *start = o, *token = o++;
+    size_t ml = matchLen ? matchLen - MIN_MATCH : 0;
+    *token = (uint8_t)((litLen < 15 ? litLen : 15) << 4 | (ml < 15 ? ml : 15));
+    if (litLen >= 15) {size_t n = litLen - 15; while (n >= 255) {*o++ = 255; n -= 255;} *o++ = (uint8_t)n;}
+    memcpy(o, lit, litLen); o += litLen;
+    if (matchLen) {
+        *o++ = (uint8_t)dist; *o++ = (uint8_t)(dist >> 8);
+        if (ml >= 15) {size_t n = ml - 15; while (n >= 255) {*o++ = 255; n -= 255;} *o++ = (uint8_t)n;}
+    }
+    return (size_t)(o - start);
+}
+
+static void best(const uint8_t *in, size_t n, size_t i, const int32_t *head, const int32_t *prev, size_t limit, size_t *len, size_t *dist) {
+    *len = 0; *dist = 0;
+    if (i + MIN_MATCH > limit) return;
+    int chain = CHAIN;
+    for (int32_t c = head[hash4(in + i)]; c >= 0 && i - (size_t)c <= WINDOW && chain--; c = prev[c]) {
+        size_t l = 0, max = limit - i;
+        if (in[c + *len] != in[i + *len]) continue;
+        while (l < max && in[c + l] == in[i + l]) l++;
+        if (l >= MIN_MATCH && l > *len) {*len = l; *dist = i - (size_t)c; if (l == max) break;}
+    }
+    (void)n;
+}
+
+static size_t lz4(const uint8_t *in, size_t n, uint8_t *out) {
+    static int32_t head[1 << HASH_BITS];
+    int32_t *prev = malloc((n ? n : 1) * sizeof *prev);
+    for (size_t i = 0; i < (1u << HASH_BITS); i++) head[i] = -1;
+    size_t o = 0, anchor = 0, i = 0;
+    /* The last match must start 12 bytes before the end; the last 5 are literals. */
+    const size_t matchEnd = n > 5 ? n - 5 : 0, startLimit = n > 12 ? n - 12 : 0;
+    #define INSERT(k) do {if ((k) + MIN_MATCH <= n) {uint32_t h_ = hash4(in + (k)); prev[k] = head[h_]; head[h_] = (int32_t)(k);}} while (0)
+    while (i < startLimit) {
+        size_t len, dist; best(in, n, i, head, prev, matchEnd, &len, &dist);
+        if (len >= MIN_MATCH) {
+            size_t len2, dist2; INSERT(i);
+            best(in, n, i + 1, head, prev, matchEnd, &len2, &dist2);
+            if (len2 > len + 1) {i++; continue;}
+            o += emit(out + o, in + anchor, i - anchor, len, dist);
+            for (size_t k = i + 1; k < i + len; k++) INSERT(k);
+            i += len; anchor = i;
+        } else {INSERT(i); i++;}
+    }
+    o += emit(out + o, in + anchor, n - anchor, 0, 0);
+    free(prev);
+    return o;
+}
+
+/* Reference decoder, to check every block before it's written. */
+static int unlz4(const uint8_t *in, size_t n, uint8_t *out, size_t size) {
+    size_t i = 0, o = 0;
+    while (i < n) {
+        uint8_t token = in[i++]; size_t lit = token >> 4;
+        if (lit == 15) {uint8_t b; do {if (i >= n) return 0; b = in[i++]; lit += b;} while (b == 255);}
+        if (lit > n - i || lit > size - o) return 0;
+        memcpy(out + o, in + i, lit); i += lit; o += lit;
+        if (i == n) break;
+        if (n - i < 2) return 0;
+        size_t dist = in[i] | in[i + 1] << 8; i += 2;
+        size_t ml = (token & 15);
+        if (ml == 15) {uint8_t b; do {if (i >= n) return 0; b = in[i++]; ml += b;} while (b == 255);}
+        ml += MIN_MATCH;
+        if (!dist || dist > o || ml > size - o) return 0;
+        for (size_t k = 0; k < ml; k++, o++) out[o] = out[o - dist];
+    }
+    return o == size;
+}
+
+static Entry *entries; static char *names;
+static int byRank(const void *a, const void *b) {
+    const Entry *x = a, *y = b; return x->rank < y->rank ? -1 : x->rank > y->rank;
+}
+static int byName(const void *a, const void *b) {
+    const Entry *x = a, *y = b; return strcmp(names + x->name, names + y->name);
+}
+static int findName(uint32_t count, const char *key) {
+    int lo = 0, hi = (int)count - 1;
+    while (lo <= hi) {int mid = (lo + hi) / 2, c = strcmp(names + entries[mid].name, key); if (!c) return mid; if (c < 0) lo = mid + 1; else hi = mid - 1;}
+    return -1;
+}
+
+int main(int argc, char **argv) {
+    if (argc < 4) {fprintf(stderr, "usage: pakpack in.pak order.txt out.pak [name=file ...]\n"); return 2;}
+    FILE *in = fopen(argv[1], "rb"); if (!in) {perror(argv[1]); return 1;}
+    uint8_t header[12];
+    if (fread(header, 1, 12, in) != 12 || memcmp(header, "MPK1", 4)) {fprintf(stderr, "not MPK1\n"); return 1;}
+    uint32_t count = u32(header + 4), namesBytes = u32(header + 8);
+    uint8_t *table = malloc((size_t)count * 12); names = malloc(namesBytes);
+    entries = calloc(count, sizeof *entries);
+    if (fread(table, 12, count, in) != count || fread(names, 1, namesBytes, in) != namesBytes) {fprintf(stderr, "short index\n"); return 1;}
+    for (uint32_t i = 0; i < count; i++) {
+        entries[i].name = u32(table + i * 12); entries[i].offset = u32(table + i * 12 + 4); entries[i].size = u32(table + i * 12 + 8);
+        entries[i].rank = 0xffffffffu;
+    }
+    /* Loose files join the index (kept sorted by name for the game's lookup). */
+    for (int x = 4; x < argc; x++) {
+        const char *eq = strchr(argv[x], '='); if (!eq) {fprintf(stderr, "expected name=file: %s\n", argv[x]); return 2;}
+        size_t len = (size_t)(eq - argv[x]);
+        FILE *f = fopen(eq + 1, "rb"); if (!f) {perror(eq + 1); return 1;}
+        fseek(f, 0, SEEK_END); long bytes = ftell(f); fclose(f);
+        names = realloc(names, namesBytes + len + 1); memcpy(names + namesBytes, argv[x], len); names[namesBytes + len] = 0;
+        entries = realloc(entries, (count + 1) * sizeof *entries);
+        Entry e = {namesBytes, 0, (uint32_t)bytes, 0, 0xffffffffu, NULL, eq + 1};
+        namesBytes += (uint32_t)len + 1;
+        if (findName(count, names + e.name) >= 0) {fprintf(stderr, "already packed: %s\n", names + e.name); return 1;}
+        entries[count++] = e;
+        qsort(entries, count, sizeof *entries, byName);
+    }
+    put32(header + 4, count); put32(header + 8, namesBytes);
+    /* Order: named entries first, in file order; the rest keep index order. */
+    FILE *order = fopen(argv[2], "r"); if (!order) {perror(argv[2]); return 1;}
+    char line[1024]; uint32_t ranked = 0;
+    while (fgets(line, sizeof line, order)) {
+        line[strcspn(line, "\r\n")] = 0; if (!line[0]) continue;
+        int k = findName(count, line); if (k >= 0 && entries[k].rank == 0xffffffffu) entries[k].rank = ranked++;
+    }
+    fclose(order);
+    for (uint32_t i = 0; i < count; i++) if (entries[i].rank == 0xffffffffu) entries[i].rank = ranked + i;
+    const uint32_t traced = ranked;
+    /* Compress each entry; keep the LZ4 block only when it saves 10% and a sector's worth. */
+    uint64_t raw = 0, packed = 0; uint32_t compressed = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        Entry *e = &entries[i];
+        uint8_t *data = malloc(e->size ? e->size : 1);
+        if (e->source) {
+            FILE *f = fopen(e->source, "rb");
+            if (!f || fread(data, 1, e->size, f) != e->size) {fprintf(stderr, "read %s\n", e->source); return 1;}
+            fclose(f);
+        } else if (fseek(in, (long)e->offset, SEEK_SET) || fread(data, 1, e->size, in) != e->size) {fprintf(stderr, "read %s\n", names + e->name); return 1;}
+        uint8_t *block = malloc(e->size + e->size / 255 + 16);
+        size_t n = e->size >= 64 ? lz4(data, e->size, block) : e->size;
+        if (n < e->size && n + 512 <= e->size && n * 10 <= (size_t)e->size * 9) {
+            uint8_t *check = malloc(e->size);
+            if (!unlz4(block, n, check, e->size) || memcmp(check, data, e->size)) {fprintf(stderr, "lz4 check failed: %s\n", names + e->name); return 1;}
+            free(check); free(data); e->data = block; e->stored = (uint32_t)n; compressed++;
+        } else {free(block); e->data = data; e->stored = e->size;}
+        raw += e->size; packed += e->stored;
+        if (i % 2000 == 0) fprintf(stderr, "%u/%u\r", i, count);
+    }
+    fclose(in);
+    /* Lay out data by rank. */
+    Entry *byOrder = malloc((size_t)count * sizeof *byOrder); memcpy(byOrder, entries, (size_t)count * sizeof *byOrder);
+    qsort(byOrder, count, sizeof *byOrder, byRank);
+    uint32_t headerBytes = 12 + 16 * count + namesBytes;
+    uint64_t at = (headerBytes + 31u) & ~31u;
+    FILE *out = fopen(argv[3], "wb"); if (!out) {perror(argv[3]); return 1;}
+    uint8_t zero[32] = {0};
+    if (fseek(out, (long)at, SEEK_SET)) return 1;
+    for (uint32_t i = 0; i < count; i++) {
+        Entry *e = &byOrder[i];
+        if (at + e->stored >= (1ull << 31)) {fprintf(stderr, "over 2 GiB\n"); return 1;}
+        entries[findName(count, names + e->name)].offset = (uint32_t)at;
+        fwrite(e->data, 1, e->stored, out);
+        uint32_t pad = ((e->stored + 31u) & ~31u) - e->stored; fwrite(zero, 1, pad, out);
+        at += e->stored + pad; free(e->data);
+    }
+    /* Index in name order, as in MPK1. */
+    fseek(out, 0, SEEK_SET);
+    memcpy(header, "MPK2", 4); fwrite(header, 1, 12, out);
+    for (uint32_t i = 0; i < count; i++) {
+        uint8_t rec[16]; put32(rec, entries[i].name); put32(rec + 4, entries[i].offset);
+        put32(rec + 8, entries[i].size); put32(rec + 12, entries[i].stored | (entries[i].rank < traced ? 0x80000000u : 0));
+        fwrite(rec, 1, 16, out);
+    }
+    fwrite(names, 1, namesBytes, out);
+    fclose(out);
+    fprintf(stderr, "%u entries, %u compressed: %.1f MB -> %.1f MB of data, file %.1f MB\n",
+        count, compressed, raw / 1048576.0, packed / 1048576.0, at / 1048576.0);
+    return 0;
+}

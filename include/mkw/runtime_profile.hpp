@@ -14,8 +14,8 @@
 #endif
 namespace mkw {
 extern std::atomic<unsigned> fileOpens;extern std::atomic<unsigned long long> fileOpenTicks;
-// DIAG: bytes and time of reads from menu.pak/race.pak (asset_pack.cpp).
-extern std::atomic<unsigned long long> packReadBytes,packReadTicks;
+// DIAG: count, bytes and time of reads from menu.pak/race.pak (asset_pack.cpp).
+extern std::atomic<unsigned> packReads;extern std::atomic<unsigned long long> packReadBytes,packReadTicks;
 // Optional physical-device/emulator evidence. Marker is on writable SD even
 // for ROMFS builds; package allowlists never install it. Batched I/O keeps
 // diagnostics out of every frame's hot path. Keep this object off the ARM stack.
