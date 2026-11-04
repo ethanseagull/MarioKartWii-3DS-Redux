@@ -229,7 +229,7 @@ AwardSceneResult runStaff(Renderer& renderer,const AwardResults& source,const Na
   if(phase==0&&(tick>=6300||((down&(KEY_A|KEY_START))&&tick>=70))){
    LoadingScope loading;renderer.waitForGpu();session.cast.reset();session.physics.reset();renderer.setRetailLighting(nullptr);sound.stop();
    const auto video=variant?"movies/staff_true.gmv":"movies/staff_normal.gmv";
-   const auto audio=variant?"movies/staff_true.wav":"movies/staff_normal.wav";
+   const auto audio=variant?"movies/staff_true.adp":"movies/staff_normal.adp";
    if(!session.movie.open(video,false)){report("FAIL staff movie open");return AwardSceneResult::Failed;}
    const bool audioEnabled=session.audio.open(audio,false);
    session.movie.request(0);const auto movieWait=svcGetSystemTick();

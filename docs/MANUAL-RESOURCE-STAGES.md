@@ -58,7 +58,7 @@ done by `tools/build.py` or split up as described in MANUAL-BUILD.md.
 | menu interface | `{py} tools/cook_menu_ui.py` | `sd-card/3ds/mkw-3ds/models/menu-ui.json` |
 | menu lighting | `{py} tools/cook_menu_lighting.py` | `include/mkw/menu_lighting.hpp`, `build/menu-lighting.json` |
 | menu models | `{py} tools/cook_menu_models.py --machines --jobs {jobs}` | `sd-card/3ds/mkw-3ds/models/menu-models.json` |
-| menu movies | `{py} tools/cook_menu_movies.py --jobs {jobs}` | `sd-card/3ds/mkw-3ds/models/menu-movies.json`, `sd-card/3ds/mkw-3ds/movies/title.wav` |
+| menu movies | `{py} tools/cook_menu_movies.py --jobs {jobs}` | `sd-card/3ds/mkw-3ds/models/menu-movies.json`, `sd-card/3ds/mkw-3ds/movies/title.adp` |
 | menu texture fitting | `{py} tools/optimize_menu_textures.py` | `sd-card/3ds/mkw-3ds/models/menu-texture-fit.json` |
 | menu audio | `{py} tools/cook_menu_audio.py` | `sd-card/3ds/mkw-3ds/models/menu-audio.json` |
 | race bottom screen | `{py} tools/cook_race_map.py --jobs {jobs}` | `build/race-map/textures/race_bottom_ui.t3x` |

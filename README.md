@@ -122,6 +122,11 @@ your SD card and install the new CIA with FBI. Your saves
 (`rksys.dat`, `license-options-*.dat`, `last-license.txt`, `mii-*.3dsmii`)
 aren't touched.
 
+The game data is now three packs (`menu.pak`, `race.pak`, `stream.pak`) and
+`mkw-3ds.3dsx`. If your card has data from an older build, delete everything
+else in `sd:/3ds/mkw-3ds/` except your saves before copying: old loose files
+still work but slow down every file the game opens.
+
 If `git pull` complains about local changes, run `git stash` first, or
 `git reset --hard origin/main` to throw them away.
 

@@ -2,7 +2,9 @@
 """Cook every retail menu THP frame into seekable GPU-native ETC1 GMV atlases.
 
 One original THP atlas stays one stream: all four course/button previews share
-one SD read and texture upload per source frame. No frame-rate decimation.
+one SD read and texture upload per source frame. Every source frame is kept
+(59.94 fps, as on the Wii). Frames are stored as GMV2: LZ4 bands, lossless
+(tools/pakpack.c --gmv). The movies' sound is their original DSP ADPCM (MADP).
 """
 import argparse
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
@@ -14,7 +16,6 @@ import struct
 import subprocess
 import tempfile
 import time
-import wave
 import array
 import sys
 import shutil
@@ -59,8 +60,7 @@ def make_spec(record, identifier):
     if identifier == 'cup_select': target_width, target_height = 400, round(height*400/width)
     texture_width, texture_height = power_of_two(target_width), power_of_two(target_height)
     fps_denominator = 100000
-    source_step = 2 if identifier == 'title' and movie.fps > 30 else 1
-    fps_numerator = round(movie.fps/source_step*fps_denominator)
+    fps_numerator = round(movie.fps*fps_denominator)
     regions = []
     if identifier == 'top_menu':
         # CropMovie's PPC f1..f4 are v0,v1,u0,u1, confirmed against
@@ -103,7 +103,7 @@ def make_spec(record, identifier):
         ], crop=region['crop']))
     return dict(name=identifier, source=record['source'], sourceSha256=hashlib.sha256(path.read_bytes()).hexdigest(),
                 sourceSize=[width, height], size=[target_width, target_height], textureSize=[texture_width, texture_height],
-                frames=(movie.count+source_step-1)//source_step, fps=movie.fps/source_step, sourceFrameStep=source_step, fpsNumerator=fps_numerator, fpsDenominator=fps_denominator,
+                frames=movie.count, fps=movie.fps, sourceFrameStep=1, fpsNumerator=fps_numerator, fpsDenominator=fps_denominator,
                 frameBytes=texture_width*texture_height//2, regions=regions, path='movies/'+identifier+'.gmv')
 
 
@@ -125,19 +125,42 @@ def write_header(specs):
     (ROOT/'include/mkw/menu_movie_assets.hpp').write_text('\n'.join(lines)+'\n')
 
 
-def encode(spec, quality, force):
+def pakpack():
+    """tools/pakpack.c built for this machine (it writes GMV2)."""
+    exe = ROOT/'build/host-tools'/('pakpack.exe' if os.name == 'nt' else 'pakpack')
+    source = ROOT/'tools/pakpack.c'
+    if not exe.is_file() or exe.stat().st_mtime < source.stat().st_mtime:
+        exe.parent.mkdir(parents=True, exist_ok=True)
+        compiler = os.environ.get('CXX') or shutil.which('g++') or shutil.which('c++')
+        if not compiler: raise RuntimeError('No host C compiler for tools/pakpack.c')
+        subprocess.run([compiler, '-x', 'c', '-O2', '-o', str(exe), str(source)], check=True)
+    return exe
+
+
+def to_gmv2(packer, raw, destination):
+    """GMV1 (raw ETC1 frames) to GMV2 (LZ4 bands, lossless; pakpack checks every block)."""
+    partial = destination.with_suffix('.gmv2.partial')
+    subprocess.run([str(packer), '--gmv', str(raw), str(partial)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    partial.replace(destination)
+
+
+def encode(spec, quality, force, packer=None):
     start = time.monotonic()
+    packer = packer or pakpack()
     destination = OUT/spec['path']
     receipt = destination.with_suffix('.json')
     expected = 64+spec['frameBytes']*spec['frames']
     if not force and destination.exists() and receipt.exists():
         previous = json.loads(receipt.read_text())
-        if previous.get('sourceSha256') == spec['sourceSha256'] and previous.get('textureSize') == spec['textureSize'] and previous.get('quality') == quality and previous.get('sourceFrameStep',1)==spec.get('sourceFrameStep',1) and destination.stat().st_size == expected:
-            previous.update(spec)
-            if 'sha256' not in previous:
-                previous['sha256'] = digest_file(destination)
-            receipt.write_text(json.dumps(previous, indent=2)+'\n')
-            return {**previous, 'cached': True}
+        if previous.get('sourceSha256') == spec['sourceSha256'] and previous.get('textureSize') == spec['textureSize'] and previous.get('quality') == quality and previous.get('sourceFrameStep',1)==spec.get('sourceFrameStep',1):
+            if previous.get('container') != 'GMV2' and destination.stat().st_size == expected:
+                # The same frames cooked as GMV1: only the container changes.
+                to_gmv2(packer, destination, destination)
+                previous.update(container='GMV2', bytes=destination.stat().st_size, rawBytes=expected, sha256=digest_file(destination))
+            if previous.get('container') == 'GMV2' and destination.stat().st_size == previous.get('bytes'):
+                previous.update(spec)
+                receipt.write_text(json.dumps(previous, indent=2)+'\n')
+                return {**previous, 'cached': True}
     destination.parent.mkdir(parents=True, exist_ok=True)
     partial = destination.with_suffix('.gmv.partial')
     movie = ThpMovie(ROOT/spec['source'])
@@ -169,15 +192,18 @@ def encode(spec, quality, force):
             for encoded in chunks:
                 with encoded.open('rb') as source: shutil.copyfileobj(source, output)
     if partial.stat().st_size != expected: raise ValueError('Wrong GMV output length')
-    partial.replace(destination)
-    record = {**spec, 'quality': quality, 'format': 'GPU_ETC1', 'everySourceFrame': spec.get('sourceFrameStep',1)==1,
-              'sha256': digest_file(destination), 'bytes': expected, 'seconds': round(time.monotonic()-start, 2)}
+    to_gmv2(packer, partial, destination)
+    partial.unlink()
+    record = {**spec, 'quality': quality, 'format': 'GPU_ETC1', 'container': 'GMV2', 'everySourceFrame': spec.get('sourceFrameStep',1)==1,
+              'sha256': digest_file(destination), 'bytes': destination.stat().st_size, 'rawBytes': expected, 'seconds': round(time.monotonic()-start, 2)}
     receipt.write_text(json.dumps(record, indent=2)+'\n')
     return record
 
 
-def cook_audio(path, relative_destination='movies/title.wav'):
-    """Decode the THP's original Nintendo DSP ADPCM channels to PCM16 WAV."""
+def cook_audio(path, relative_destination='movies/title.adp'):
+    """The THP's original Nintendo DSP ADPCM packets as MADP
+    (include/mkw/dsp_adpcm.hpp), which the game decodes as it plays. They are
+    decoded here too, to check them and to record the PCM the game will play."""
     movie = ThpMovie(path)
     data = movie.data
     component = struct.unpack_from('>I', data, 0x20)[0]
@@ -187,42 +213,55 @@ def cook_audio(path, relative_destination='movies/title.wav'):
     if channels not in (1, 2) or tracks != 1: raise ValueError('Unsupported THP audio layout')
     destination = OUT/relative_destination
     destination.parent.mkdir(parents=True, exist_ok=True)
-    partial = destination.with_suffix('.wav.partial')
-    written = 0
-    with wave.open(str(partial), 'wb') as output:
-        output.setnchannels(channels);output.setsampwidth(2);output.setframerate(rate)
-        for offset in movie.offsets:
-            image_bytes, audio_bytes = struct.unpack_from('>2I', data, offset+8)
-            start = offset+8+movie.components*4+image_bytes
-            audio = data[start:start+audio_bytes]
-            channel_bytes, count = struct.unpack_from('>2I', audio)
-            if 80+channel_bytes*channels > len(audio): raise ValueError('Truncated THP audio packet')
-            decoded = []
-            for channel in range(channels):
-                coefficients = struct.unpack_from('>16h', audio, 8+channel*32)
-                previous, previous2 = struct.unpack_from('>2h', audio, 72+channel*4)
-                block = audio[80+channel*channel_bytes:80+(channel+1)*channel_bytes]
-                values = []
-                for position in range(0, len(block), 8):
-                    control = block[position];predictor = control >> 4;scale = 1 << (control & 15)
-                    if predictor >= 8: raise ValueError('Invalid DSP predictor')
-                    c1, c2 = coefficients[predictor*2:predictor*2+2]
-                    for packed in block[position+1:position+8]:
-                        for nibble in (packed >> 4, packed & 15):
-                            signed = nibble-16 if nibble >= 8 else nibble
-                            sample = ((signed*scale << 11)+c1*previous+c2*previous2+1024) >> 11
-                            sample = max(-32768, min(32767, sample))
-                            previous2, previous = previous, sample
-                            values.append(sample)
-                if len(values) < count: raise ValueError('Truncated DSP sample count')
-                decoded.append(values[:count])
-            count = min(count, samples-written)
-            interleaved = array.array('h', (decoded[channel][i] for i in range(count) for channel in range(channels)))
-            if sys.byteorder != 'little': interleaved.byteswap()
-            output.writeframesraw(interleaved.tobytes());written += count
+    partial = destination.with_suffix('.adp.partial')
+    written = 0;packets = [];pcm = hashlib.sha256()
+    for offset in movie.offsets:
+        image_bytes, audio_bytes = struct.unpack_from('>2I', data, offset+8)
+        start = offset+8+movie.components*4+image_bytes
+        audio = data[start:start+audio_bytes]
+        channel_bytes, count = struct.unpack_from('>2I', audio)
+        if 80+channel_bytes*channels > len(audio): raise ValueError('Truncated THP audio packet')
+        decoded = []
+        for channel in range(channels):
+            coefficients = struct.unpack_from('>16h', audio, 8+channel*32)
+            previous, previous2 = struct.unpack_from('>2h', audio, 72+channel*4)
+            block = audio[80+channel*channel_bytes:80+(channel+1)*channel_bytes]
+            values = []
+            for position in range(0, len(block), 8):
+                control = block[position];predictor = control >> 4;scale = 1 << (control & 15)
+                if predictor >= 8: raise ValueError('Invalid DSP predictor')
+                c1, c2 = coefficients[predictor*2:predictor*2+2]
+                for packed in block[position+1:position+8]:
+                    for nibble in (packed >> 4, packed & 15):
+                        signed = nibble-16 if nibble >= 8 else nibble
+                        sample = ((signed*scale << 11)+c1*previous+c2*previous2+1024) >> 11
+                        sample = max(-32768, min(32767, sample))
+                        previous2, previous = previous, sample
+                        values.append(sample)
+            if len(values) < count: raise ValueError('Truncated DSP sample count')
+            decoded.append(values[:count])
+        count = min(count, samples-written)
+        if count <= 0: continue
+        interleaved = array.array('h', (decoded[channel][i] for i in range(count) for channel in range(channels)))
+        if sys.byteorder != 'little': interleaved.byteswap()
+        pcm.update(interleaved.tobytes());written += count
+        # The packet as stored: what decoding count samples reads.
+        used = (count+13)//14*8
+        if used > channel_bytes or count > 4096: raise ValueError('Unexpected THP audio packet')
+        packet = [struct.pack('<HH', count, used)]
+        for channel in range(channels):
+            packet.append(struct.pack('<16h', *struct.unpack_from('>16h', audio, 8+channel*32)))
+            packet.append(struct.pack('<2h', *struct.unpack_from('>2h', audio, 72+channel*4)))
+        for channel in range(channels):
+            packet.append(audio[80+channel*channel_bytes:80+channel*channel_bytes+used])
+        packets.append(b''.join(packet))
     if written != samples: raise ValueError(f'THP sample count mismatch {written} != {samples}')
+    with partial.open('wb') as output:
+        output.write(struct.pack('<4sIHHIIIII', b'MADP', 1, channels, 0, rate, samples, len(packets), 32, 0))
+        for packet in packets: output.write(packet)
     partial.replace(destination)
-    receipt = dict(source=path.relative_to(ROOT).as_posix(), sourceSha256=hashlib.sha256(data).hexdigest(), path=relative_destination, channels=channels, sampleRate=rate, samples=samples, seconds=samples/rate, codec='retail Nintendo DSP ADPCM decoded to PCM16', sha256=digest_file(destination))
+    receipt = dict(source=path.relative_to(ROOT).as_posix(), sourceSha256=hashlib.sha256(data).hexdigest(), path=relative_destination, channels=channels, sampleRate=rate, samples=samples, seconds=samples/rate,
+                   codec='retail Nintendo DSP ADPCM (THP audio packets) in MADP, decoded by the game to PCM16', pcmSha256=pcm.hexdigest(), sha256=digest_file(destination))
     destination.with_suffix('.audio.json').write_text(json.dumps(receipt, indent=2)+'\n')
     print(f'Original intro audio ready: {channels}ch {rate}Hz, {written} samples, {samples/rate:.3f}s', flush=True)
     return receipt
@@ -253,8 +292,9 @@ def main():
     chosen = [spec for spec in specs if not args.only or spec['name'] in args.only]
     print(f'Encoding {sum(spec["frames"] for spec in chosen)} complete source frames in {len(chosen)} streams with {args.jobs} workers', flush=True)
     results = []
+    packer = pakpack()
     with ProcessPoolExecutor(max_workers=args.jobs) as pool:
-        futures = {pool.submit(encode, spec, args.quality, args.force): spec['name'] for spec in chosen}
+        futures = {pool.submit(encode, spec, args.quality, args.force, packer): spec['name'] for spec in chosen}
         for future in as_completed(futures):
             result = future.result();results.append(result)
             print(f'{result["name"]}: ready {result["frames"]} frames, {result["bytes"]/1048576:.1f} MiB, {result["seconds"]:.1f}s'+(' (cached)' if result.get('cached') else ''), flush=True)
@@ -264,7 +304,7 @@ def main():
             record = json.loads(receipt.read_text())
             spec['sha256'] = record.get('sha256')
             spec['bytes'] = record['bytes']
-    manifest = dict(version=1, format='GMV1 / GPU_ETC1', everySourceFrame=all(s.get('sourceFrameStep',1)==1 for s in specs), streams=specs,
+    manifest = dict(version=1, format='GMV2 / GPU_ETC1', everySourceFrame=all(s.get('sourceFrameStep',1)==1 for s in specs), streams=specs,
                     introAudio=audio, limitations=[])
     (OUT/'models/menu-movies.json').write_text(json.dumps(manifest, indent=2)+'\n')
 

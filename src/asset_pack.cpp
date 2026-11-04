@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <atomic>
+#include <cerrno>
 #include <malloc.h>
 #include <memory>
 #include <new>
@@ -61,10 +62,14 @@ struct Prefetch {
  unsigned char* buffer=nullptr;Archive* archive=nullptr;
  std::uint32_t first=0,end=0;size_t got=0;int state=0;bool quit=false;
 };
-// Menu and race assets use the original two archives.
+// Menu and race assets use the original two archives; stream.pak holds the
+// files read as streams (movies, sound), stored and sector-aligned.
 struct Archives {
  LightLock lock;bool tried=false;
- std::array<Archive,2> list{{{"menu.pak"},{"race.pak"}}};
+ // Set by the first open(), after main() moves into the asset folder:
+ // openFile serves fopen from the packs only from then on.
+ bool rooted=false;
+ std::array<Archive,3> list{{{"menu.pak"},{"race.pak"},{"stream.pak"}}};
  unsigned char* staging=nullptr;bool sectorReads=true,readAhead=true;
  // The bytes in staging: [cachedFirst, cachedEnd) of cached's file.
  const Archive* cached=nullptr;std::uint32_t cachedFirst=0,cachedEnd=0;
@@ -307,7 +312,87 @@ bool readEntry(Archives& all,Archive& a,const Entry& e,void* destination){
  keep(all,a,e,packed.get());return true;
 }
 }
-void open(){auto& all=archives();LightLock_Lock(&all.lock);const Entry* e=nullptr;lookup(all,"",&e);LightLock_Unlock(&all.lock);}
+namespace {
+// openFile streams (funopen cookies).
+#ifdef __LARGE64_FILES
+using FilePosition=_fpos64_t;
+#else
+using FilePosition=fpos_t;
+#endif
+FilePosition seekWithin(std::uint32_t& at,std::uint32_t size,FilePosition offset,int whence){
+ const long long target=(whence==SEEK_SET?0:whence==SEEK_CUR?(long long)at:(long long)size)+offset;
+ if((whence!=SEEK_SET&&whence!=SEEK_CUR&&whence!=SEEK_END)||target<0||target>(long long)size){errno=EINVAL;return -1;}
+ at=std::uint32_t(target);return target;
+}
+// An entry read whole: small ones (one pack read, through the staging window
+// and the RAM cache) and compressed ones.
+struct MemoryFile {std::unique_ptr<unsigned char[]> data;std::uint32_t size=0,at=0;};
+int memoryRead(void* cookie,char* out,size_t n){
+ auto& f=*static_cast<MemoryFile*>(cookie);const size_t k=std::min<size_t>(n,f.size-f.at);
+ std::memcpy(out,f.data.get()+f.at,k);f.at+=std::uint32_t(k);return int(k);
+}
+FilePosition memorySeek(void* cookie,FilePosition offset,int whence){auto& f=*static_cast<MemoryFile*>(cookie);return seekWithin(f.at,f.size,offset,whence);}
+int memoryClose(void* cookie){delete static_cast<MemoryFile*>(cookie);return 0;}
+// A large stored entry (a movie, a sound stream, a course archive), read from
+// its pack on its own handle so it seeks independently of every other read.
+// Large reads go straight to the card; small ones (headers, records) come
+// from one window of whole sectors, so they don't each cost a request.
+constexpr std::uint32_t WholeEntryBytes=256u<<10,RangeWindow=4u<<10;
+struct RangeFile {std::FILE* file=nullptr;std::uint32_t base=0,size=0,at=0,windowFirst=0,windowEnd=0;unsigned char window[RangeWindow];};
+int rangeRead(void* cookie,char* out,size_t n){
+ auto& f=*static_cast<RangeFile*>(cookie);
+ const std::uint32_t bytes=std::uint32_t(std::min<size_t>(n,f.size-f.at)),from=f.base+f.at;
+ if(!bytes)return 0;
+ if(bytes>RangeWindow-sector){
+  if(std::fseek(f.file,long(from),SEEK_SET)!=0||std::fread(out,1,bytes,f.file)!=bytes)return -1;
+ }else{
+  if(from<f.windowFirst||from+bytes>f.windowEnd){
+   const std::uint32_t first=from&~(sector-1);f.windowFirst=f.windowEnd=0;
+   if(std::fseek(f.file,long(first),SEEK_SET)!=0)return -1;
+   // The last sector may run past the end of the file.
+   const size_t got=std::fread(f.window,1,RangeWindow,f.file);
+   if(first+got<from+bytes)return -1;
+   f.windowFirst=first;f.windowEnd=first+std::uint32_t(got);
+  }
+  std::memcpy(out,f.window+(from-f.windowFirst),bytes);
+ }
+ f.at+=bytes;return int(bytes);
+}
+FilePosition rangeSeek(void* cookie,FilePosition offset,int whence){auto& f=*static_cast<RangeFile*>(cookie);return seekWithin(f.at,f.size,offset,whence);}
+int rangeClose(void* cookie){auto* f=static_cast<RangeFile*>(cookie);if(f->file)std::fclose(f->file);delete f;return 0;}
+}
+bool decodeLz4(const unsigned char* in,size_t n,unsigned char* out,size_t size){return unlz4(in,n,out,size);}
+std::FILE* openFile(const char* path){
+ // The packs themselves open as files: no lookup, and no re-entry of the lock.
+ const size_t length=std::strlen(path);
+ if(length>=4&&!std::strcmp(path+length-4,".pak"))return nullptr;
+ auto& all=archives();LightLock_Lock(&all.lock);
+ const Entry* e=nullptr;Archive* a=all.rooted?lookup(all,path,&e):nullptr;
+ if(!a){LightLock_Unlock(&all.lock);return nullptr;}
+ std::FILE* result=nullptr;
+ if(e->stored!=e->size||e->size<=WholeEntryBytes){
+  const auto start=svcGetSystemTick();
+  auto* f=new(std::nothrow) MemoryFile;
+  if(f){f->size=e->size;f->data.reset(new(std::nothrow) unsigned char[e->size?e->size:1]);}
+  if(f&&f->data&&readEntry(all,*a,*e,f->data.get()))result=funopen(f,memoryRead,nullptr,memorySeek,memoryClose);
+  if(!result)delete f;
+  packReads.fetch_add(1,std::memory_order_relaxed);packReadBytes.fetch_add(e->size,std::memory_order_relaxed);packReadTicks.fetch_add(svcGetSystemTick()-start,std::memory_order_relaxed);
+  LightLock_Unlock(&all.lock);
+ }else{
+  const char* pack=a->path;const std::uint32_t base=e->offset,size=e->size;
+  LightLock_Unlock(&all.lock);
+  auto* f=new(std::nothrow) RangeFile;
+  if(f&&(f->file=std::fopen(pack,"rb"))){
+   std::setvbuf(f->file,nullptr,_IONBF,0);f->base=base;f->size=size;
+   result=funopen(f,rangeRead,nullptr,rangeSeek,rangeClose);
+  }
+  if(!result&&f){if(f->file)std::fclose(f->file);delete f;}
+ }
+ // Reads reach the callbacks whole; callers may still set their own buffer.
+ if(result)std::setvbuf(result,nullptr,_IONBF,0);
+ return result;
+}
+void open(){auto& all=archives();LightLock_Lock(&all.lock);all.rooted=true;const Entry* e=nullptr;lookup(all,"",&e);LightLock_Unlock(&all.lock);}
 void close(){
  auto& all=archives();LightLock_Lock(&all.lock);
  stopPrefetch(all);

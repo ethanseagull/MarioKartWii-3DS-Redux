@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <vector>
 
 namespace mkw {
@@ -9,12 +10,20 @@ namespace mkw {
 // open and close. Paths not in the archive report false; callers then use the
 // loose file. Thread-safe: the asset loader and main thread may both read.
 namespace pack {
-// Opens menu.pak/race.pak once per session.
+// Opens menu.pak, race.pak and stream.pak once per session. The first call
+// also lets openFile serve fopen: make it once the asset folder is current.
 void open();
 void close();
 bool contains(const char* path);
 // Reads the whole asset into out (resized). False if absent or unreadable.
 bool read(const char* path,std::vector<uint8_t>& out);
+// A packed file as a read-only FILE (fopen calls this first:
+// linear_lock.cpp __wrap_fopen), or null if no pack holds it. Small and
+// compressed entries are read whole into RAM; large stored ones read from
+// their pack on their own handle. Unbuffered: reads reach the pack whole.
+std::FILE* openFile(const char* path);
+// An LZ4 block (tools/pakpack.c) into exactly size bytes; false if malformed.
+bool decodeLz4(const unsigned char* in,size_t n,unsigned char* out,size_t size);
 // Size of an asset, or -1 if absent.
 long size(const char* path);
 // Reads exactly `bytes` (must equal size(path)) into destination.

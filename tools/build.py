@@ -837,24 +837,44 @@ class Builder:
         self.py('pack-mii', 'pack_mii_racers.py', '--base', stage / 'race-lod.pak', '--overlay', root / 'build/mii-racers', '--output', stage / 'race-mii.pak')
         self.py('pack-unlit', 'pack_unlit_banks.py', stage / 'race-mii.pak', stage / 'race.pak')
 
-        # Both packs as MPK2 (tools/pakpack.c): entries in the order the game
-        # reads them (tools/pak-order/, from DIAG pack traces), the rest by
-        # name stem, LZ4-compressed where that saves space (lossless), and the
-        # fire bar stream packed. race.pak drops from about 1.8 to 1 GB.
+        # Every file goes into a pack but the 3DSX; the game's fopen finds them
+        # there (src/asset_pack.cpp openFile). Files neither pack holds yet:
+        # streamed ones (movies, sound) into stream.pak, the Mii resources into
+        # menu.pak, the rest (course archives, model lists, collision, the fire
+        # bar stream) into race.pak.
+        held = set(mpk_index(menu)) | set(mpk_index(stage / 'race.pak'))
+        loose = {'menu': [], 'race': [], 'stream': []}
+        for name, source in sorted(listing.items()):
+            if name in held or name in ('menu.pak', 'race.pak', 'mkw-3ds.3dsx'):
+                continue
+            pack = 'stream' if name.startswith(('movies/', 'audio/')) else 'menu' if name.startswith('mii/') else 'race'
+            loose[pack].append(f'{name}={source}')
+
+        # The packs as MPK2 (tools/pakpack.c). menu.pak and race.pak: entries in
+        # the order the game reads them (tools/pak-order/, from DIAG pack traces),
+        # the rest by name stem, LZ4-compressed where that saves space
+        # (lossless); race.pak drops from about 1.8 to 1 GB. stream.pak: stored
+        # (its movies are LZ4 inside, its sound already compressed), each file
+        # on a 512-byte SD sector, so the game's stream reads stay whole sectors.
         pakpack = stage / ('pakpack.exe' if os.name == 'nt' else 'pakpack')
         self.run('pakpack-host', [self.cxx, '-x', 'c', '-O2', '-o', pakpack, 'tools/pakpack.c'])
-        fire = 'textures/firebar-indirect.ftan'
+        (stage / 'mpk2').mkdir(exist_ok=True)
         archives = []
-        for source, trace_id, loose in ((menu, '0', []), (stage / 'race.pak', '1', [f'{fire}={listing[fire]}'])):
-            name = source.stem
-            order = subprocess.run([self.python, 'tools/pak_order.py', source, trace_id, f'tools/pak-order/{name}.txt'],
-                                   cwd=root, env=self.env, capture_output=True, text=True, check=True).stdout
-            (stage / f'{name}-order.txt').write_text(order, encoding='utf-8')
-            (stage / 'mpk2').mkdir(exist_ok=True)
-            archives.append(stage / 'mpk2' / source.name)
-            self.run('pakpack-' + name, [pakpack, source, stage / f'{name}-order.txt', archives[-1], *loose])
+        for name in ('menu', 'race', 'stream'):
+            (stage / f'{name}-loose.txt').write_text(''.join(line + '\n' for line in loose[name]), encoding='utf-8')
+            archives.append(stage / 'mpk2' / f'{name}.pak')
+            if name == 'stream':
+                (stage / 'stream-order.txt').write_text('', encoding='utf-8')
+                args = ['--stored', '--align', '512', '-']
+            else:
+                source = menu if name == 'menu' else stage / 'race.pak'
+                order = subprocess.run([self.python, 'tools/pak_order.py', source, '0' if name == 'menu' else '1', f'tools/pak-order/{name}.txt'],
+                                       cwd=root, env=self.env, capture_output=True, text=True, check=True).stdout
+                (stage / f'{name}-order.txt').write_text(order, encoding='utf-8')
+                args = [source]
+            self.run('pakpack-' + name, [pakpack, *args, stage / f'{name}-order.txt', archives[-1], '@' + str(stage / f'{name}-loose.txt')])
 
-        # SD folder: both packs plus every loose file they don't hold.
+        # SD folder: the three packs and the 3DSX.
         sd = out / 'sd/3ds/mkw-3ds'
         if (out / 'sd').exists():
             shutil.rmtree(out / 'sd')
@@ -866,25 +886,18 @@ class Builder:
                 if name in packed:
                     raise BuildError(f'{name} is in two packs')
                 packed[name] = archive.name
-        # Packed entries stay out of models/: every loose file there slows the
-        # remaining loose opens on the console (docs/MANUAL-BUILD.md, section 3).
-        manifest = {}
-        for name, source in sorted(listing.items()):
-            if name in ('menu.pak', 'race.pak') or name in packed:
-                continue
-            target = sd / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
-            manifest[name] = {'storage': 'loose', 'bytes': target.stat().st_size, 'sha256': digest(target)}
-        for name, archive in packed.items():
-            manifest[name] = {'storage': 'packed', 'archive': archive}
-        for name in ('menu.pak', 'race.pak'):
+        unpacked = sorted(set(listing) - set(packed) - {'menu.pak', 'race.pak', 'mkw-3ds.3dsx'})
+        if unpacked:
+            raise BuildError('Files left out of the packs: ' + ', '.join(unpacked[:10]))
+        shutil.copy2(listing['mkw-3ds.3dsx'], sd / 'mkw-3ds.3dsx')
+        manifest = {name: {'storage': 'packed', 'archive': archive} for name, archive in packed.items()}
+        for name in ('menu.pak', 'race.pak', 'stream.pak', 'mkw-3ds.3dsx'):
             manifest[name] = {'storage': 'loose', 'bytes': (sd / name).stat().st_size, 'sha256': digest(sd / name)}
-        write_json(out / 'sd-manifest.json', manifest)
+        write_json(out / 'sd-manifest.json', dict(sorted(manifest.items())))
         self.py('slim-check', 'slim_sd_models.py', sd)
         report = (self.logs / 'slim-check.log').read_text()
         if not report.startswith('0 packed duplicates'):
-            raise BuildError('Loose copies of packed models remain in the SD folder: ' + report.splitlines()[0])
+            raise BuildError('Loose copies of packed files remain in the SD folder: ' + report.splitlines()[0])
         shutil.copy2(self.compile_dir / 'mkw-3ds.3dsx', out / 'mkw-3ds.3dsx')
         shutil.copy2(self.compile_dir / 'mkw-3ds.elf', out / 'mkw-3ds.elf')
         for name in ('LICENSE', 'NOTICE'):
@@ -929,8 +942,8 @@ class Builder:
             stages.append((name, action, outputs))
             self.uses[name] = (args, list(files))
 
-        def tool(name, args, *outputs):
-            add(name, lambda: self.py(name, *args), R(*outputs), ['tools/' + args[0], *args[1:]])
+        def tool(name, args, *outputs, files=()):
+            add(name, lambda: self.py(name, *args), R(*outputs), ['tools/' + args[0], *args[1:]], files)
 
         J, D = str(self.jobs), self.disc
         # The converters and pinned packages feed every later stage.
@@ -1014,10 +1027,11 @@ class Builder:
         tool('menu-styles', ['cook_menu_styles.py'], 'include/mkw/menu_text_styles.hpp')
         tool('menu-record-text', ['cook_menu_record_text.py'], 'include/mkw/menu_record_text.inc')
         tool('cup-icons', ['cook_cup_record_icons.py'], 'include/mkw/cup_record_icons.hpp')
-        tool('menu-movies', ['cook_menu_movies.py', '--jobs', J], 'sd-card/3ds/mkw-3ds/models/menu-movies.json')
+        tool('menu-movies', ['cook_menu_movies.py', '--jobs', J], 'sd-card/3ds/mkw-3ds/models/menu-movies.json', files=['tools/pakpack.c'])
         tool('menu-chapters', ['cook_menu_movie_chapters.py'], 'include/mkw/menu_movie_chapters.hpp')
         tool('menu-audio', ['cook_menu_audio.py'], 'include/mkw/menu_audio_assets.hpp')
-        tool('staff-movies', ['cook_staff_movies.py', '--output', 'build/staff'], 'build/staff/movies/staff_true.gmv', 'build/staff/movies/staff_normal.gmv')
+        tool('staff-movies', ['cook_staff_movies.py', '--output', 'build/staff'], 'build/staff/movies/staff_true.gmv', 'build/staff/movies/staff_normal.gmv',
+             files=['tools/pakpack.c'])
         tool('mii-racers', ['cook_mii_racers.py', D, 'build/mii-racers', '--jobs', J], 'build/mii-racers/models/mii-garage.json')
         tool('mii-finish', ['finish_mii_racers.py', D, 'build/mii-racers', '--jobs', J], 'build/mii-racers/models/mii-complete.json', 'include/mkw/mii_garage.hpp')
         tool('mii-awards', ['cook_mii_awards.py', 'build/mii-racers'], 'include/mkw/mii_award_materials.hpp')

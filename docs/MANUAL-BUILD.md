@@ -144,8 +144,9 @@ python tools/pack_unlit_banks.py race-mii.pak race.pak
 gcc -O2 -o pakpack tools/pakpack.c
 python tools/pak_order.py sd-card/3ds/mkw-3ds/menu.pak 0 tools/pak-order/menu.txt > menu-order.txt
 python tools/pak_order.py race.pak 1 tools/pak-order/race.txt > race-order.txt
-./pakpack sd-card/3ds/mkw-3ds/menu.pak menu-order.txt mpk2/menu.pak
-./pakpack race.pak race-order.txt mpk2/race.pak textures/firebar-indirect.ftan=build/course-water-feedback/textures/firebar-indirect.ftan
+./pakpack sd-card/3ds/mkw-3ds/menu.pak menu-order.txt mpk2/menu.pak @menu-loose.txt
+./pakpack race.pak race-order.txt mpk2/race.pak @race-loose.txt
+./pakpack --stored --align 512 - empty.txt mpk2/stream.pak @stream-loose.txt
 ```
 
 `resource_manifest.py` lists every runtime file with its source; it expects
@@ -156,15 +157,23 @@ unchanged, and the player and the award ceremony keep the full `.dskm`.
 `pakpack` rewrites both packs as MPK2: entries in the order the game reads
 them (`tools/pak-order/` holds the read order from DIAG pack traces; the rest
 follow by name, models beside their textures), LZ4-compressed where that saves
-space (lossless; every block is checked against its source). The fire bar
-stream goes into race.pak. race.pak drops from about 1.8 to 1 GB and loads read
-less. The game also reads the MPK1 packs, so this step can be skipped.
+space (lossless; every block is checked against its source). race.pak drops
+from about 1.8 to 1 GB and loads read less.
 
-The SD folder is the MPK2 `menu.pak` and `race.pak` and every file in the map that
-neither pack holds. Keep packed models out of `models/`: the game reads them
-from the packs, and every extra file in that folder slows the remaining
-loose opens on the console. `slim_sd_models.py <sd folder>` reports any that
-are left, and `--move-to DIR` moves them off an existing card.
+Every other file in the map goes into a pack too (the `*-loose.txt` lists hold
+`name=source` lines; `tools/build.py` writes them): movies and sound
+(`movies/`, `audio/`) into `stream.pak`, stored and each on a 512-byte SD
+sector; the Mii resources (`mii/`) into menu.pak; the rest (course archives,
+model lists, collision, the fire bar stream) into race.pak. The game's `fopen`
+looks in the packs first (`src/asset_pack.cpp`, `openFile`), so every reader
+finds them there. The cook receipts (`.json`) aren't shipped: the game reads
+none of them.
+
+The SD folder is `menu.pak`, `race.pak`, `stream.pak` and `mkw-3ds.3dsx`.
+The game still opens loose files that no pack holds, so an older SD folder
+keeps working. A folder copied over an older one keeps the older loose files,
+which slow every file lookup on the console: `slim_sd_models.py <sd folder>`
+reports loose copies of packed files, and `--move-to DIR` moves them off.
 
 ## 8. HOME banner and CIA
 

@@ -46,7 +46,7 @@ for name in ('winningrun_demo','ending_demo'):
 staff=ROOT/'build/staff'
 staff_receipt=staff/'models/staff-ui.json'
 if not staff_receipt.is_file():raise ValueError('Cook Staff UI and both movies into build/staff before packaging')
-for folder,suffix in (('textures','.t3x'),('models','.gmdl'),('movies','.gmv'),('movies','.wav')):
+for folder,suffix in (('textures','.t3x'),('models','.gmdl'),('movies','.gmv'),('movies','.adp')):
  for source in (staff/folder).glob('*'+suffix):files[source]=source.relative_to(staff)
 files[staff_receipt]=Path('models/staff-ui.json')
 for name in ('kartParam.bin','driverParam.bin'):
@@ -154,31 +154,28 @@ for movie in movie_manifest['streams']:
  relative=Path(movie['path']);source_relative=Path(movie['source']);source=ROOT/source_relative
  if relative.parent!=Path('movies') or relative.suffix!='.gmv' or '..' in source_relative.parts or not source_relative.as_posix().startswith('data/extracted/thp/'):raise ValueError('Invalid menu movie path')
  if digest_file(source)!=movie['sourceSha256']:raise ValueError('Menu movie source changed: '+str(source_relative))
- # Match make_spec: only the >30 Hz title movie is sampled at half rate.
+ # Match make_spec: every source frame, at the source rate (59.94 fps).
  # Verify against the source THP rather than trusting the conversion receipt.
  with source.open('rb') as stream:thp_header=stream.read(0x18)
  if thp_header[:4]!=b'THP\0':raise ValueError('Invalid source THP')
  source_fps,source_frames=struct.unpack_from('>fI',thp_header,0x10)
- step=2 if movie['name']=='title' and source_fps>30 else 1
- if movie.get('sourceFrameStep',1)!=step or movie['frames']!=(source_frames+step-1)//step or movie['fpsDenominator']!=100000 or movie['fpsNumerator']!=round(source_fps/step*100000):raise ValueError('Invalid menu movie source cadence: '+movie['name'])
+ if movie.get('sourceFrameStep',1)!=1 or movie['frames']!=source_frames or movie['fpsDenominator']!=100000 or movie['fpsNumerator']!=round(source_fps*100000):raise ValueError('Invalid menu movie source cadence: '+movie['name'])
  path=assets/relative
  with path.open('rb') as stream:header=stream.read(64)
  if len(header)!=64:raise ValueError('Truncated GMV header')
  magic,version,width,height,count,numerator,denominator,frame_bytes,offset=struct.unpack('<4sIHHIIIII32x',header)
- if magic!=b'GMV1' or version!=1 or [width,height]!=movie['textureSize'] or count!=movie['frames'] or numerator!=movie['fpsNumerator'] or denominator!=movie['fpsDenominator'] or frame_bytes!=width*height//2 or offset!=64 or path.stat().st_size!=64+count*frame_bytes:raise ValueError('Invalid GMV stream: '+str(relative))
+ if magic!=b'GMV2' or version!=2 or [width,height]!=movie['textureSize'] or count!=movie['frames'] or numerator!=movie['fpsNumerator'] or denominator!=movie['fpsDenominator'] or frame_bytes!=width*height//2 or offset!=64 or path.stat().st_size!=movie.get('bytes'):raise ValueError('Invalid GMV stream: '+str(relative))
  if digest_file(path)!=movie.get('sha256'):raise ValueError('Menu movie payload changed: '+str(relative))
  files[path]=relative
 intro_audio=movie_manifest['introAudio'];audio_relative=Path(intro_audio['path'])
-if audio_relative!=Path('movies/title.wav') or digest_file(assets/audio_relative)!=intro_audio['sha256']:raise ValueError('Opening movie audio changed')
+if audio_relative!=Path('movies/title.adp') or digest_file(assets/audio_relative)!=intro_audio['sha256']:raise ValueError('Opening movie audio changed')
 if digest_file(ROOT/intro_audio['source'])!=intro_audio['sourceSha256']:raise ValueError('Opening movie audio source changed')
 files[assets/audio_relative]=audio_relative
 menu_audio=json.loads((assets/'models/menu-audio.json').read_text())
 if menu_audio.get('version')!=1 or digest_file(ROOT/menu_audio['source'])!=menu_audio['sourceSha256']:raise ValueError('Title music source changed')
 files[assets/'models/menu-audio.json']=Path('models/menu-audio.json')
-for sound in menu_audio['waves']:
- relative=Path(sound['path'])
- if relative.parent!=Path('movies') or relative.suffix!='.wav' or digest_file(assets/relative)!=sound['sha256']:raise ValueError('Title music payload changed')
- files[assets/relative]=relative
+# The title music WAVs (cook_menu_audio.py) stay out: the sound engine plays
+# the title wave from the shipped sound archive.
 
 
 for sprite in menu_ui['sprites'].values():
@@ -514,4 +511,6 @@ missing_menu=compiled_menu_textures(ROOT)-{relative.as_posix() for relative in f
 if missing_menu:raise ValueError('Compiled menu textures missing from resource map: '+', '.join(sorted(missing_menu)))
 for archive in ('menu.pak','race.pak'):
  if (assets/archive).is_file():files[assets/archive]=Path(archive)
+# Cook receipts (.json) are build records: the game reads none of them.
+files={src:rel for src,rel in files.items() if rel.suffix!='.json'}
 print(json.dumps({rel.as_posix():str(src) for src,rel in files.items()},indent=2))

@@ -35,6 +35,7 @@ u32 __wrap_linearSpaceFree(void){Guard g;return __real_linearSpaceFree();}
 #include <cstring>
 #include <atomic>
 #include <string>
+#include <mkw/asset_pack.hpp>
 #include <mkw/diag.hpp>
 namespace mkw {std::atomic<unsigned> fileOpens{0};std::atomic<unsigned long long> fileOpenTicks{0};
 std::atomic<unsigned> packReads{0};std::atomic<unsigned long long> packReadBytes{0},packReadTicks{0};
@@ -94,6 +95,9 @@ FILE* __wrap_fopen(const char* path,const char* mode){
  const u64 start=svcGetSystemTick();FILE* file=nullptr;
  if(mkw::diag::deferring.load(std::memory_order_relaxed)&&path&&mode&&mode[0]=='a'&&
     !std::strncmp(path,"sdmc:/3ds/mkw-3ds/",18)&&std::strncmp(path+18,"perf-",5))file=mkw::diag::deferredOpen(path);
+ // Game files (relative paths, read-only) come from the packs first; a file
+ // no pack holds is opened loose, as are older SD folders' files.
+ if(!file&&path&&mode&&mode[0]=='r'&&!std::strchr(mode,'+')&&!std::strchr(path,':'))file=mkw::pack::openFile(path);
  if(!file)file=__real_fopen(path,mode);
  const u64 ticks=svcGetSystemTick()-start;
  mkw::fileOpens.fetch_add(1,std::memory_order_relaxed);mkw::fileOpenTicks.fetch_add(ticks,std::memory_order_relaxed);

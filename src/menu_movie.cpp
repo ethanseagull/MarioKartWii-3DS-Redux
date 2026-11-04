@@ -1,4 +1,5 @@
 #include <mkw/menu_movie.hpp>
+#include <mkw/asset_pack.hpp>
 #include <mkw/renderer.hpp>
 #include <mkw/render_metrics.hpp>
 #include <3ds.h>
@@ -18,6 +19,8 @@ bool powerOfTwo(unsigned n){return n>=8&&n<=1024&&(n&(n-1))==0;}
 // ETC1 data is stored in 8x8 texel tiles, one tile row after another from the
 // top image row (tex3ds layout). A run of tile rows is one contiguous span.
 constexpr unsigned TileSize=8;
+// GMV2 frames start on SD sectors; a read covers whole sectors.
+constexpr std::uint32_t Sector=512;
 }
 
 struct MenuMovie::Impl {
@@ -31,6 +34,12 @@ struct MenuMovie::Impl {
  std::FILE* file=nullptr;
  Texture image;
  std::uint32_t count=0,numerator=0,denominator=0,frameBytes=0,offset=0,width=0,height=0;
+ // GMV2 (tools/pakpack.c --gmv): each frame is bands of bandRows tile rows,
+ // each an LZ4 block or raw (stored size equal to its raw size); the index
+ // gives each frame's offset and its bands' stored sizes.
+ bool banded=false;unsigned bandRows=0,bands=0;
+ std::vector<std::uint32_t> frameOffsets;std::vector<std::uint16_t> bandSizes;
+ std::vector<unsigned char> packed;
  // Single staging buffer owned by the stream thread while Reading and by the
  // main thread while Ready.
  enum Stage {Free,Reading,Ready};
@@ -92,15 +101,63 @@ private:
   std::FILE* file=std::fopen(path.c_str(),"rb");if(!file)return false;
   std::setvbuf(file,nullptr,_IONBF,0);
   unsigned char header[64];
-  if(std::fread(header,1,sizeof header,file)!=sizeof header||std::memcmp(header,"GMV1",4)!=0||u32(header+4)!=1){std::fclose(file);return false;}
+  if(std::fread(header,1,sizeof header,file)!=sizeof header){std::fclose(file);return false;}
+  const bool banded=!std::memcmp(header,"GMV2",4)&&u32(header+4)==2;
+  if(!banded&&(std::memcmp(header,"GMV1",4)!=0||u32(header+4)!=1)){std::fclose(file);return false;}
   const unsigned width=u16(header+8),height=u16(header+10);
   const std::uint32_t count=u32(header+12),numerator=u32(header+16),denominator=u32(header+20),frameBytes=u32(header+24),offset=u32(header+28);
   const std::uint64_t total=std::uint64_t(offset)+std::uint64_t(frameBytes)*count;
   if(!powerOfTwo(width)||!powerOfTwo(height)||!count||count>50000||!numerator||!denominator||denominator>1000000||std::uint64_t(numerator)>std::uint64_t(denominator)*120||frameBytes!=width*height/2||offset!=64||total>std::uint64_t(std::numeric_limits<long>::max())){std::fclose(file);return false;}
-  if(std::fseek(file,0,SEEK_END)!=0||std::ftell(file)!=long(total)){std::fclose(file);return false;}
+  if(std::fseek(file,0,SEEK_END)!=0){std::fclose(file);return false;}
+  const long fileBytes=std::ftell(file);
+  if(banded?!readIndex(s,file,header,width,height,count,fileBytes):fileBytes!=long(total)){std::fclose(file);return false;}
   if(!s.image.initMovieEtc1(width,height)){std::fclose(file);return false;}
   s.staging.resize(frameBytes);
   s.file=file;s.width=width;s.height=height;s.count=count;s.numerator=numerator;s.denominator=denominator;s.frameBytes=frameBytes;s.offset=offset;
+  return true;
+ }
+ // GMV2: the band layout and the frame index, checked against the file.
+ static bool readIndex(MenuMovie::Impl& s,std::FILE* file,const unsigned char* header,unsigned width,unsigned height,std::uint32_t count,long fileBytes){
+  const unsigned bandRows=u16(header+32),bands=u16(header+34),rows=height/TileSize;
+  const std::uint32_t dataOffset=u32(header+36);
+  if(!bandRows||bands!=(rows+bandRows-1)/bandRows||fileBytes<0)return false;
+  const std::uint32_t record=4+2*bands,rowBytes=width/TileSize*32;
+  std::vector<unsigned char> index(size_t(count)*record);
+  if(dataOffset<64+index.size()||std::fseek(file,64,SEEK_SET)!=0||std::fread(index.data(),1,index.size(),file)!=index.size())return false;
+  s.frameOffsets.resize(count);s.bandSizes.resize(size_t(count)*bands);
+  std::uint32_t largest=0;
+  for(std::uint32_t frame=0;frame<count;++frame){
+   const unsigned char* r=&index[size_t(frame)*record];std::uint32_t stored=0;
+   s.frameOffsets[frame]=u32(r);
+   for(unsigned band=0;band<bands;++band){
+    const unsigned size=u16(r+4+band*2),raw=(std::min((band+1)*bandRows,rows)-band*bandRows)*rowBytes;
+    if(!size||size>raw)return false;
+    s.bandSizes[size_t(frame)*bands+band]=std::uint16_t(size);stored+=size;
+   }
+   if(s.frameOffsets[frame]<dataOffset||s.frameOffsets[frame]%Sector||std::uint64_t(s.frameOffsets[frame])+stored>std::uint64_t(fileBytes))return false;
+   largest=std::max(largest,stored);
+  }
+  s.packed.resize(largest+2*Sector);s.banded=true;s.bandRows=bandRows;s.bands=bands;
+  return true;
+ }
+ // GMV2: reads the bands covering tile rows [first, end) of frame (whole
+ // sectors, one request) and decodes them into staging. first is a band start.
+ static bool readBands(MenuMovie::Impl& s,std::uint32_t frame,unsigned first,unsigned end){
+  const unsigned rows=s.height/TileSize,rowBytes=s.rowBytes(),firstBand=first/s.bandRows,endBand=(end+s.bandRows-1)/s.bandRows;
+  const std::uint16_t* sizes=&s.bandSizes[size_t(frame)*s.bands];
+  std::uint32_t skip=0,span=0;
+  for(unsigned band=0;band<endBand;++band)(band<firstBand?skip:span)+=sizes[band];
+  const std::uint32_t at=s.frameOffsets[frame]+skip,from=at&~(Sector-1),to=(at+span+Sector-1)&~(Sector-1);
+  // The last sector may run past the end of the file.
+  if(std::fseek(s.file,long(from),SEEK_SET)!=0||std::fread(s.packed.data(),1,to-from,s.file)<at-from+span)return false;
+  const unsigned char* in=s.packed.data()+(at-from);
+  for(unsigned band=firstBand;band<endBand;++band){
+   const unsigned top=band*s.bandRows,raw=(std::min(top+s.bandRows,rows)-top)*rowBytes;
+   unsigned char* out=s.staging.data()+size_t(top-first)*rowBytes;
+   if(sizes[band]==raw)std::memcpy(out,in,raw);
+   else if(!pack::decodeLz4(in,sizes[band],out,raw))return false;
+   in+=sizes[band];
+  }
   return true;
  }
  // Returns true if it performed file work.
@@ -122,10 +179,12 @@ private:
   unsigned first=s.fullFrame?std::min(s.rowFirst,rows):0,end=s.fullFrame?std::min(s.rowEnd,rows):rows;
   if(first>=end){LightLock_Unlock(&s.lock);return false;}
   if(frame==s.lastFrame&&first>=s.lastFirst&&end<=s.lastEnd){LightLock_Unlock(&s.lock);return false;}
+  // GMV2 decodes whole bands.
+  if(s.banded){first=first/s.bandRows*s.bandRows;end=std::min((end+s.bandRows-1)/s.bandRows*s.bandRows,rows);}
   s.stage=MenuMovie::Impl::Reading;LightLock_Unlock(&s.lock);
   const unsigned rowBytes=s.rowBytes(),bytes=(end-first)*rowBytes;
   const long position=long(std::uint64_t(s.offset)+std::uint64_t(frame)*s.frameBytes+std::uint64_t(first)*rowBytes);
-  const bool ok=std::fseek(s.file,position,SEEK_SET)==0&&std::fread(s.staging.data(),1,bytes,s.file)==bytes;
+  const bool ok=s.banded?readBands(s,frame,first,end):std::fseek(s.file,position,SEEK_SET)==0&&std::fread(s.staging.data(),1,bytes,s.file)==bytes;
   LightLock_Lock(&s.lock);
   if(ok){s.stagedFrame=frame;s.stagedFirst=first;s.stagedRows=end-first;s.stage=MenuMovie::Impl::Ready;
    s.lastFrame=frame;s.lastFirst=first;s.lastEnd=end;s.fullFrame=true;}

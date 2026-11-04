@@ -23,7 +23,7 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.8.14.
 
 # Racing and visuals
 
-- GP, VS and Battle pause as on the Wii: the race stays frozen behind the menu without its HUD, with Continue Game and Quit Game. A controls diagram of the console shows above them when its photos were cooked (`tools/cook_pause_controls.py`; the photos aren't in the repository). Time Trials keeps its five buttons.
+- GP, VS and Battle pause as on the Wii: the race stays frozen behind the menu without its HUD, with Continue Game and Quit Game. A controls diagram of the console shows above them (`tools/cook_pause_controls.py`, with Old and New 3DS photos supplied by smol_bug). Time Trials keeps its five buttons.
 - CPU racers drift manually, as on the Wii, and after a fall their path restarts from their respawn point.
 - Course, sky and course object textures are cooked to a texel budget instead of a flat 256 cap, so long road strips, skies and baked shadow maps keep more of the Wii's detail. The Old 3DS loads the larger ones one mip level down.
 - New 3DS: every opponent keeps its full-detail kart, driver and wheels at any distance, and crowds and animated items run every tick, as in the Wii's single-player races.
@@ -36,6 +36,13 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.8.14.
 - The pause menu's textures load with the race and stay until it ends, so START reads nothing from the SD card.
 - The course preview camera is planned while the race sounds load.
 - `tools/build.py` repacks race.pak and menu.pak in the order the game reads them (`tools/pakpack.c`, `tools/pak-order/`), LZ4-compressed (lossless); race.pak drops from 1.78 GB to about 1 GB. The game reads both pack formats, so older SD folders keep working.
+- The SD folder is three packs and the 3DSX instead of about 1,800 loose files: movies and sound go into a new stream.pak, everything else into race.pak and menu.pak. The game's file opens look in the packs first, so no lookup scans a crowded folder. It still opens loose files, so older SD folders keep working.
+
+# Movies
+
+- The opening and both staff roll movies play every frame at 59.94 fps, as on the Wii (they were cooked at half rate).
+- Movie frames are stored LZ4-compressed (lossless): all movies together take 796 MB instead of 889 MB, even with the opening and staff rolls at twice the frames, and the opening reads slightly less from the SD card per second than it did at 30 fps.
+- The opening and staff roll sound is the movies' original DSP ADPCM, decoded as it plays, instead of decoded PCM: the same samples, about a third of the size.
 
 # Fixes
 
@@ -56,7 +63,7 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.8.14.
 - `tools/build.py` builds the CIA and SD folder from your disc in one command, downloading the pinned converters and tools it needs.
 - After a `git pull`, `tools/build.py` cooks again each stage whose tool or input files changed, and the stages after it, instead of keeping their old output.
 - The HOME banner plays the game's Starting Grid jingle.
-- The SD folder no longer holds loose copies of models that are already packed.
+- The SD folder no longer holds loose copies of models that are already packed, or the cook receipts (`.json`), which the game never reads.
 - Windows path, menu movie and menu texture fixes in the packaging tools.
 - A diagnostic build with per-race profiling and an unattended 32-course benchmark (`tools/diag`).
 

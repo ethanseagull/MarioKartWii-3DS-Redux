@@ -88,7 +88,6 @@
 #include <mkw/menu_renderer.hpp>
 #include <mkw/menu_models.hpp>
 #include <mkw/menu_movie_audio.hpp>
-#include <mkw/menu_audio_assets.hpp>
 #include <mkw/menu_sound.hpp>
 #include <mkw/race_sound.hpp>
 #include <mkw/sound_system.hpp>
@@ -145,7 +144,8 @@ extern "C" u32 __stacksize__=128u<<10; // Diagnostic build: QA locals grow main(
 namespace K = Kinoko;
 static constexpr const char* DATA = "sdmc:/3ds/mkw-3ds";
 namespace mkw {extern std::atomic<unsigned> fileOpens;extern std::atomic<unsigned long long> fileOpenTicks;}
-static bool exists(const char* p) { FILE* f=fopen(p,"rb"); if(!f)return false; fclose(f);return true; }
+// A packed file is found in the pack index without opening it.
+static bool exists(const char* p) { if(mkw::pack::contains(p))return true; FILE* f=fopen(p,"rb"); if(!f)return false; fclose(f);return true; }
 // Sky last saves its fill where the track hides most of the sky. Rainbow
 // Road's sky fills most of the screen, so there the depth test only adds
 // work (run 3, New 3DS: sky pass 1.52 -> 2.62 ms; other courses -0.14 to +0.03).
@@ -379,7 +379,10 @@ int main() {
     // CIA has embedded RomFS; the ordinary 3DSX uses its matching SD package.
     const char* assetRoot=assets.mounted?"romfs:/":DATA;
     report(assets.mounted?"assets: embedded RomFS":"assets: external SD package");
-    if(chdir(assetRoot)!=0||!exists("Race/Common.szs")){
+    const bool rooted=chdir(assetRoot)==0;
+    // From here fopen also finds the files inside the packs (asset_pack.hpp).
+    if(rooted)mkw::pack::open();
+    if(!rooted||!exists("Race/Common.szs")){
         report("FAIL asset directory or Race/Common.szs");
         return startupFailure("Game resources could not be found.");
     }
@@ -1108,18 +1111,16 @@ int main() {
                 if(revealed&&visual.page==mkw::UiPage::Pause)recordPauseStage("menu-shown");}
             menuProfile->mark(MenuStage::Textures);
             // The engine plays the title wave (W_BGM_TITLE) and every other menu sound;
-            // the THP opening keeps its own stream. The cooked title WAV remains the
-            // fallback when the sound archive is missing.
+            // the THP opening keeps its own stream (its original DSP ADPCM).
             const bool engineAudio=mkw::SoundSystem::instance().available();
             menuSound.frame(visual,revealed);
             // QA: sound engine health as profiler events (in memory; written at the end).
             if(menuProfile->enabled()&&engineAudio){static unsigned soundLog=0;if(++soundLog%300==0){const auto st=mkw::SoundSystem::instance().stats();
                 snprintf(line,sizeof line,"sound page=%u voices=%lu sounds=%lu dropped=%lu underruns=%lu missing=%lu failed=%lu audio_ms=%.3f peak_ms=%.3f waves=%lu linear_free=%lu",unsigned(visual.page),(unsigned long)st.voices,(unsigned long)st.sounds,(unsigned long)st.dropped,(unsigned long)st.underruns,(unsigned long)st.missing,(unsigned long)st.failed,st.audioMs,st.audioPeakMs,(unsigned long)mkw::SoundSystem::instance().residentWaveBytes(),(unsigned long)linearSpaceFree());menuProfile->event(line);}}
-            const int wantedAudio=!revealed?-1:visual.page==mkw::UiPage::Intro?0:visual.page==mkw::UiPage::Title&&!engineAudio?1:-1;
+            const int wantedAudio=!revealed?-1:visual.page==mkw::UiPage::Intro?0:-1;
             if(wantedAudio!=activeAudio){
                 menuAudio.close();activeAudio=wantedAudio;
-                if(activeAudio==0)menuAudio.open("movies/title.wav");
-                if(activeAudio==1){menuAudio.open(mkw::UiTitleMusicPath,true,mkw::UiTitleMusicLoopSample);menuAudio.setVolume(mkw::UiTitleMusicVolume);}
+                if(activeAudio==0)menuAudio.open("movies/title.adp");
                 last=svcGetSystemTick();pending=0;
             }
             menuProfile->mark(MenuStage::Audio);
