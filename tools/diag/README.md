@@ -77,7 +77,8 @@ stored instead of as whole 512-byte sectors (load times only).
 `no-read-ahead.txt` reads only the requested entry instead of the whole entries
 that follow it within 12 KB (128 KB among entries a repacked pack lays out in
 traced order). `no-race-cache.txt` turns off the New 3DS RAM cache that keeps
-the racers, items, effects and Lakitu read by one race load for the next.
+the racers, items, effects, Lakitu and pause menu textures read by one race
+load for the next.
 `no-pause-keep.txt` releases the racers' graphics on every pause, as before.
 `no-prefetch.txt` turns off the background thread that reads the next 128 KB
 of a repacked pack's traced entries while the game parses the last read.

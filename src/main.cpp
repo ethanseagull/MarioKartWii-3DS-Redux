@@ -2093,8 +2093,11 @@ int main() {
                 stage("sound cache ready");
                 // Everything above left pauseTextureReserve free; the pause
                 // textures take it now. Course objects then keep only their own reserve.
+                // The RAM cache keeps them for the set's later loads.
                 pauseQuads(pauseResident);
+                mkw::pack::cacheReads(true);
                 if(!menuRenderer.prepare(pauseResident)){menuRenderer.release(renderer);pauseResident.clear();}
+                mkw::pack::cacheReads(false);
                 renderer.preparePauseControls();
                 pausePinned=!pauseResident.empty();
                 courseObjects.setAllocationReserve(pausePinned?0:pauseTextureReserve());

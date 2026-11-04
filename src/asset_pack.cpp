@@ -44,7 +44,8 @@ constexpr std::uint32_t sector=512,stagedBytes=512u<<10;
 // the window is tracedReadAhead: nearly everything it takes is read next.
 constexpr std::uint32_t readAhead=12u<<10,tracedReadAhead=128u<<10;
 // Race-load RAM cache: the races of a VS set or Grand Prix re-read the same
-// racers, items, effects and Lakitu (about 23 MB). Whole race.pak entries
+// racers, items, effects and Lakitu (about 23 MB), and the pause menu's
+// menu.pak textures (442 KB in 44 reads, ~0.37 s on the console). Whole entries
 // read inside a cache scope are kept on the heap while it can spare them, and
 // later reads of them are copied from RAM. Raw bytes: loading still parses and
 // lights them for the new course. A race peaks near 54 MB of heap (Bowser's
@@ -67,8 +68,8 @@ struct Archives {
  unsigned char* staging=nullptr;bool sectorReads=true,readAhead=true;
  // The bytes in staging: [cachedFirst, cachedEnd) of cached's file.
  const Archive* cached=nullptr;std::uint32_t cachedFirst=0,cachedEnd=0;
- // RAM cache: keyed by entry offset in race.pak.
- std::unordered_map<std::uint32_t,Kept> kept;size_t keptBytes=0,keepLimit=0;bool caching=false;
+ // RAM cache: keyed by keptKey (archive and entry offset).
+ std::unordered_map<std::uint64_t,Kept> kept;size_t keptBytes=0,keepLimit=0;bool caching=false;
  // readRange of a compressed entry: the entry decoded whole, until its last byte is read.
  std::unique_ptr<unsigned char[]> decoded;const Archive* decodedArchive=nullptr;std::uint32_t decodedOffset=0;
  Prefetch ahead;bool prefetch=true;
@@ -142,21 +143,22 @@ Archive* lookup(Archives& all,const char* path,const Entry** entry){
  for(auto& a:all.list)if(a.file)if(const Entry* e=a.find(path)){*entry=e;return &a;}
  return nullptr;
 }
-// With the lock held: the kept copy of e, if a is race.pak.
+std::uint64_t keptKey(const Archives& all,const Archive& a,const Entry& e){return std::uint64_t(&a-all.list.data())<<32|e.offset;}
+// With the lock held: the kept copy of e, if any.
 Kept* keptEntry(Archives& all,const Archive& a,const Entry& e){
- if(&a!=&all.list[1]||all.kept.empty())return nullptr;
- auto it=all.kept.find(e.offset);if(it==all.kept.end())return nullptr;
+ if(all.kept.empty())return nullptr;
+ auto it=all.kept.find(keptKey(all,a,e));if(it==all.kept.end())return nullptr;
  it->second.used=true;return &it->second;
 }
 // With the lock held: keeps a copy of e's bytes while the heap can spare them.
 void keep(Archives& all,const Archive& a,const Entry& e,const void* bytes){
- if(!all.caching||&a!=&all.list[1]||all.keptBytes+e.stored>all.keepLimit||all.kept.count(e.offset))return;
+ if(!all.caching||all.keptBytes+e.stored>all.keepLimit||all.kept.count(keptKey(all,a,e)))return;
  const struct mallinfo m=mallinfo();
  const size_t free=envGetHeapSize()-m.arena+m.fordblks;
  if(free<size_t(e.stored)+KeepFree)return;
  std::unique_ptr<unsigned char[]> data(new(std::nothrow) unsigned char[e.stored?e.stored:1]);if(!data)return;
  std::memcpy(data.get(),bytes,e.stored);
- all.kept.emplace(e.offset,Kept{std::move(data),e.stored,true});all.keptBytes+=e.stored;
+ all.kept.emplace(keptKey(all,a,e),Kept{std::move(data),e.stored,true});all.keptBytes+=e.stored;
 }
 // With the lock held: bytes at offset in a's file, into destination.
 bool readAtUntraced(Archives& all,Archive& a,std::uint32_t offset,void* destination,size_t bytes);

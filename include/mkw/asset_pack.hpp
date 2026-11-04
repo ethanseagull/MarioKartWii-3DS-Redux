@@ -22,9 +22,9 @@ bool readInto(const char* path,void* destination,size_t bytes);
 // Reads `bytes` starting `offset` bytes into the asset; false past its end.
 bool readRange(const char* path,size_t offset,void* destination,size_t bytes);
 // Race-load RAM cache (asset_pack.cpp): the races of a VS set or Grand Prix
-// re-read the same racers, items and effects. enableCache sets the most it
+// re-read the same racers, items, effects and pause menu textures. enableCache sets the most it
 // may keep (0: off; cacheLimitFor gives it for a heap size). While
-// cacheReads(true), whole race.pak entries read are kept; kept entries are
+// cacheReads(true), whole pack entries read are kept; kept entries are
 // always served from RAM. trimCache, after a load, drops entries that load
 // didn't read and returns the bytes kept; dropCache frees them all.
 void enableCache(size_t limit);

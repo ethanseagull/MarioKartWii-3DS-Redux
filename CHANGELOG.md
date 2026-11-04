@@ -22,7 +22,7 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.8.14.
 # Loading
 
 - Pack entries are read as whole 512-byte SD sectors, and each read also takes the small entries right after it.
-- Races after the first in a VS set or Grand Prix reuse the racers, items, effects and Lakitu read by the previous load (New 3DS, RAM cache).
+- Races after the first in a VS set or Grand Prix reuse the racers, items, effects, Lakitu and pause menu textures read by the previous load (New 3DS, RAM cache).
 - Pausing keeps the racers loaded when the pause menu fits, so resuming is immediate.
 - The pause menu's textures load with the race and stay until it ends, so START reads nothing from the SD card.
 - The course preview camera is planned while the race sounds load.
