@@ -247,7 +247,8 @@ public:
     // The pause screen's controls diagram for this console (Old or New 3DS),
     // screen rows 8-135 (tools/cook_pause_controls.py). Loaded with the race
     // (or at the latest with the race image) and kept until the race ends;
-    // absent when not cooked.
+    // absent when not cooked (its source photos aren't in the repository).
+    bool pauseControlsAvailable() const;
     void preparePauseControls();
     void drawPauseControls();
     void releasePauseControls();

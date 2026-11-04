@@ -23,6 +23,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <sys/stat.h>
 #include <map>
 #include <algorithm>
 #include <cstdlib>
@@ -2800,10 +2801,18 @@ bool Renderer::capturePausedTop(){
     preparePauseControls();
     return true;
 }
+static const char* pauseControlsPath(){
+    bool new3ds=false;APT_CheckNew3DS(&new3ds);
+    return new3ds?"textures/pause_controls_new3ds.t3x":"textures/pause_controls_old3ds.t3x";
+}
+bool Renderer::pauseControlsAvailable() const{
+    // stat, not fopen: a missing diagram isn't a missing asset (DIAG missing-opens.txt).
+    struct stat st;
+    return pack::size(pauseControlsPath())>0||stat(pauseControlsPath(),&st)==0;
+}
 void Renderer::preparePauseControls(){
     if(pauseControls_.ready)return;
-    bool new3ds=false;APT_CheckNew3DS(&new3ds);
-    pauseControls_.load(new3ds?"textures/pause_controls_new3ds.t3x":"textures/pause_controls_old3ds.t3x");
+    pauseControls_.load(pauseControlsPath());
 }
 void Renderer::releasePauseControls(){
     if(pauseControls_.ready)waitForGpu();

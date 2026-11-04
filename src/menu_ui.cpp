@@ -1231,7 +1231,7 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
  case UiPage::Pause:{
   // The Wii's PauseMenu: no title bar or Back button over the race.
   if(s.selection.mode==UiMode::TimeTrials)c.chrome("Pause");
-  else c.pauseControls();
+  else if(race.pauseControls)c.pauseControls();
   for(unsigned i=0;i<s.pauseCount();++i){
    auto p=control(uiPauseMenuControl(s),s.pauseVariant(i));
    // GP/VS/BT keep the authored Continue Game/Quit Game rows (y -75/-150).

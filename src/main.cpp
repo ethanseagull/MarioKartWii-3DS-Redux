@@ -678,6 +678,7 @@ int main() {
     };
     // The pause page and Quit's confirmation, as composed for this mode.
     auto pauseQuads=[&](std::vector<mkw::UiQuad>& paused){
+        uiRace.pauseControls=renderer.pauseControlsAvailable();
         auto state=menu;state.enter(mkw::UiPage::Pause);
         std::vector<mkw::UiQuad> confirmation;
         residentQuads(state,nullptr,paused);
@@ -2400,7 +2401,7 @@ int main() {
                         driftEffects.reset();raceEffects.reset();resetKartFx();cameraShake.reset();shakeActionStarts=~0u;lightningFlash={};boostFov=0;driverPose={};wasTricking=false;wasBoosting=false;trickModel.reset();++restarts;
                         loadRequiredRace();
                     }
-                    raceResident=!trackLoadFailed;if(!trackLoadFailed)menu.raceStarted();else menu.enter(mkw::UiPage::Error);uiRace={};
+                    raceResident=!trackLoadFailed;if(!trackLoadFailed)menu.raceStarted();else menu.enter(mkw::UiPage::Error);uiRace={};uiRace.pauseControls=renderer.pauseControlsAvailable();
                 }
                 accumulator=0;previous=svcGetSystemTick();lastRefresh=C3D_FrameCounter(0);presentation.reset();continue;
             }

@@ -155,7 +155,10 @@ struct UiMenuLayout {
 };
 struct UiQuad {unsigned sprite;float x,y,w,h,alpha=1;uint32_t tint=0xffffffff;bool bottom=false;float u0=0,v0=0,u1=1,v1=1;unsigned movie=~0u;std::array<uint32_t,4> corners{{0xffffffff,0xffffffff,0xffffffff,0xffffffff}};bool additive=false;unsigned vehicleIcon=~0u;uint32_t vehicleColor0=0,vehicleColor1=0xffffffff;bool fontRemap=false;uint32_t fontColor0=0,fontColor1=0xffffffff;bool affine=false;std::array<std::array<float,2>,4> positions{};UiMenuLayout menu{};float screenSlide=0;float titleTransfer=0;float previewFullAlpha=-1;unsigned licensePortrait=~0u;};
 struct UiRacer {unsigned driver=0,rank=1,lap=1;bool finished=false;float x=0,z=0;};
-struct UiRaceView {std::array<UiRacer,12> racers{};unsigned count=0;unsigned milliseconds=0;};
+// pauseControls: this SD card has the pause controls diagram
+// (Renderer::pauseControlsAvailable); without it the pause page leaves out
+// the diagram's labels.
+struct UiRaceView {std::array<UiRacer,12> racers{};unsigned count=0;unsigned milliseconds=0;bool pauseControls=true;};
 // The same command list is consumed by Citro3D and the host layout preview.
 struct UiTransitionView;
 void composeMenu(const MenuState&,const UiRaceView&,std::vector<UiQuad>&);
