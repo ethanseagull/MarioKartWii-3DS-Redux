@@ -123,6 +123,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <algorithm>
+#include <cmath>
+#include <unordered_map>
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -447,6 +449,8 @@ int main() {
     renderer.shadowRects=!exists("sdmc:/3ds/mkw-3ds/no-shadow-rect.txt");
     // The local racer's textures take VRAM before the course's (A/B: no-player-vram.txt).
     const bool playerTexturesVram=!exists("sdmc:/3ds/mkw-3ds/no-player-vram.txt");
+    // Course textures take VRAM by coverage, not file order (A/B: no-vram-priority.txt).
+    const bool vramPriority=!exists("sdmc:/3ds/mkw-3ds/no-vram-priority.txt");
     // Course objects past retail's draw distance are not drawn (A/B: no-draw-distance.txt).
     renderer.drawDistance=!exists("sdmc:/3ds/mkw-3ds/no-draw-distance.txt");
     renderer.spatialCourse=!exists("sdmc:/3ds/mkw-3ds/no-spatial-course.txt");
@@ -454,6 +458,7 @@ int main() {
     renderer.skyLast=!exists("sdmc:/3ds/mkw-3ds/no-sky-last.txt");
     renderer.plainUv=!exists("sdmc:/3ds/mkw-3ds/no-plain-uv.txt");
     renderer.fastVertex=!exists("sdmc:/3ds/mkw-3ds/no-fast-vertex.txt");
+    renderer.unitOneEtc1a4=!exists("sdmc:/3ds/mkw-3ds/no-unit1-vram.txt");
     mkw::diag::modelPixels=exists("sdmc:/3ds/mkw-3ds/model-pixels.txt");
     mkw::diag::menuFast=!exists("sdmc:/3ds/mkw-3ds/no-menu-fast.txt");mkw::diag::menuCheck=exists("sdmc:/3ds/mkw-3ds/menu-check.txt");mkw::diag::unlitBanks=!exists("sdmc:/3ds/mkw-3ds/no-unlit-banks.txt");mkw::diag::pauseKeep=!exists("sdmc:/3ds/mkw-3ds/no-pause-keep.txt");
     mkw::diag::loadCache=!exists("sdmc:/3ds/mkw-3ds/no-load-cache.txt");report(mkw::diag::loadCache?"load cache on":"load cache off");
@@ -1765,7 +1770,7 @@ int main() {
     auto moveCourseTexturesToVram=[&](){
         if(!mkw::renderQuality().vramCourseTextures)return;
         renderer.waitForGpu();
-        const auto reserve=mkw::RenderQuality::vramReserve;unsigned moved=0,playerMoved=0;
+        const auto reserve=mkw::RenderQuality::vramReserve;unsigned moved=0,playerMoved=0;mkw::Renderer::VramLeft courseLeft,objectsLeft;
         // The local racer first: large on screen in every frame, up to three
         // texture fetches per pixel (albedo and two light textures).
         const auto vramBefore=vramSpaceFree();
@@ -1776,9 +1781,42 @@ int main() {
             for(const auto& a:accessories)racer(a.get());
         }
         const auto playerBytes=vramBefore-vramSpaceFree();
-        for(auto* parts:{&track,&sky})for(auto& model:*parts)for(auto& t:model->textures)if(t)moved+=renderer.moveToVram(*t,reserve);
-        moved+=courseObjects.moveTexturesToVram(renderer,reserve);
+        if(vramPriority){
+            // VRAM rarely holds every course texture since the texel budgets.
+            // The sky goes first (it fills much of every frame), then track
+            // textures by the course surface they cover per byte, counting
+            // light textures too. What does not fit stays in LINEAR.
+            std::unordered_map<mkw::Texture*,float> area;std::vector<mkw::Texture*> loaded;
+            auto add=[&](mkw::Texture* t,float covered){if(area.try_emplace(t,0.f).second)loaded.push_back(t);area[t]+=covered;};
+            for(auto& model:sky)for(auto& t:model->textures)if(t)add(t.get(),INFINITY);
+            for(auto& model:track){
+                for(const auto& s:model->submeshes){
+                    float sum=0;
+                    for(uint32_t i=s.first;i+2<s.first+s.count;i+=3){
+                        const auto& a=model->vertices[model->indices[i]].position;const auto& b=model->vertices[model->indices[i+1]].position;
+                        const auto& c=model->vertices[model->indices[i+2]].position;
+                        const float ux=b.x-a.x,uy=b.y-a.y,uz=b.z-a.z,vx=c.x-a.x,vy=c.y-a.y,vz=c.z-a.z;
+                        const float cx=uy*vz-uz*vy,cy=uz*vx-ux*vz,cz=ux*vy-uy*vx;
+                        sum+=.5f*std::sqrt(cx*cx+cy*cy+cz*cz);
+                    }
+                    for(int index:{s.texture,s.secondary})
+                        if(index>=0&&std::size_t(index)<model->textures.size()&&model->textures[index])add(model->textures[index].get(),sum);
+                }
+                for(auto& t:model->textures)if(t)add(t.get(),0.f);
+            }
+            std::vector<std::pair<float,mkw::Texture*>> order;
+            for(auto* texture:loaded){
+                const auto& g=texture->gpu;
+                order.push_back({area[texture]/float(std::max<std::size_t>(1,C3D_TexCalcTotalSize(g.size,g.maxLevel))),texture});
+            }
+            std::stable_sort(order.begin(),order.end(),[](const auto& x,const auto& y){return x.first>y.first;});
+            for(auto [score,texture]:order)moved+=renderer.moveToVram(*texture,reserve,&courseLeft);
+        }else for(auto* parts:{&track,&sky})for(auto& model:*parts)for(auto& t:model->textures)if(t)moved+=renderer.moveToVram(*t,reserve,&courseLeft);
+        moved+=courseObjects.moveTexturesToVram(renderer,reserve,&objectsLeft);
         LOGF("course textures in VRAM moved=%u player_moved=%u player_bytes=%lu linear_free=%lu vram_free=%lu",moved,playerMoved,(unsigned long)playerBytes,(unsigned long)linearSpaceFree(),(unsigned long)vramSpaceFree());
+        // What stays in LINEAR (FCRAM): unit1 = 4-bit textures texture unit 1 samples, kept out by rule.
+        LOGF("course textures left in LINEAR track+sky=%u/%luKB unit1=%u/%luKB objects=%u/%luKB unit1=%u/%luKB",courseLeft.count,(unsigned long)(courseLeft.bytes>>10),
+            courseLeft.unitOne,(unsigned long)(courseLeft.unitOneBytes>>10),objectsLeft.count,(unsigned long)(objectsLeft.bytes>>10),objectsLeft.unitOne,(unsigned long)(objectsLeft.unitOneBytes>>10));
     };
     // Course meshes and their spatial indices are loaded for a race and kept
     // across pause. Only race teardown/course changes release this scenery.

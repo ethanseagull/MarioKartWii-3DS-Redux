@@ -52,6 +52,8 @@ public:
     // register's absolute alpha (tools/object_bank.ts), so material() marks
     // their alpha overrides SubmeshOverride::Alpha. Call once after loading.
     void markRegisterAlpha(const Model& model);
+    // Sets Texture::unitOne on the textures pattern clips swap into unit 1.
+    void markUnitOneTextures(const Model& model) const;
     // Rigid GPU skinning: rewrite the shared model to matrix-local vertices.
     bool makeRigid(Model& model);
     // GPU skinning: rewrite the shared model to bone-local positions with

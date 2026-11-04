@@ -175,6 +175,7 @@ bool ObjectAssets::load(int course){
                 std::fprintf(stderr,"pakkun_f bank missing original joint callbacks\n");ok=false;break;
             }
             m->bank->markRegisterAlpha(*m->model);
+            m->bank->markUnitOneTextures(*m->model);
             Bounds animated;if(m->bank->animatedBounds(animated)){m->bounds.include(animated.minimum);m->bounds.include(animated.maximum);}
             if(m->bank->skinned()){
                 // One bone per triangle: share the mesh and skin on the GPU.
@@ -308,10 +309,10 @@ struct CourseObjects::Impl {
 CourseObjects::CourseObjects():impl_(std::make_unique<Impl>()){}
 CourseObjects::~CourseObjects()=default;
 unsigned CourseObjects::palmCount() const {return impl_->palms.size();}
-unsigned CourseObjects::moveTexturesToVram(Renderer& renderer,std::size_t reserve){
+unsigned CourseObjects::moveTexturesToVram(Renderer& renderer,std::size_t reserve,Renderer::VramLeft* left){
     unsigned moved=0;
     auto move=[&](const Model* model,int dynamic=-1){if(model)for(unsigned i=0;i<model->textures.size();++i)
-        if(int(i)!=dynamic&&model->textures[i])moved+=renderer.moveToVram(*model->textures[i],reserve);};
+        if(int(i)!=dynamic&&model->textures[i])moved+=renderer.moveToVram(*model->textures[i],reserve,left);};
     // Phase textures remain CPU-writable LINEAR; uploads are deferred until
     // the previous GPU frame has finished, unlike immutable course textures.
     for(const auto& m:impl_->assets.models)move(m->model.get(),m->fireTexture);

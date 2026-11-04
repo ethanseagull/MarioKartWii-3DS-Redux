@@ -443,6 +443,11 @@ return false;}
         }
         textures.push_back(std::move(t));
     }
+    // Texture unit 1 samples the second map; projected water swaps its primary there.
+    for(const auto& s:submeshes){
+        if(s.secondary>=0)textures[s.secondary]->unitOne=true;
+        if((s.menuReflection==11||s.menuReflection==22)&&s.texture>=0)textures[s.texture]->unitOne=true;
+    }
     vertices=static_cast<Vertex*>(linearAlloc(vertexCount*sizeof(Vertex)));
     indices=static_cast<uint16_t*>(linearAlloc(indexCount*sizeof(uint16_t)));
     if(!vertices||!indices||!f.read(vertices,vertexCount*sizeof(Vertex))||!f.read(indices,indexCount*sizeof(uint16_t)))return false;
@@ -708,20 +713,46 @@ bool Renderer::loadVramTexture(Texture& texture,const char* path,GPU_TEXTURE_WRA
     texture.ready=true;
     return true;
 }
-bool Renderer::moveToVram(Texture& texture,std::size_t reserve){
+bool Renderer::moveToVram(Texture& texture,std::size_t reserve,VramLeft* left){
     auto& t=texture.gpu;
     const u32 at=reinterpret_cast<u32>(t.data);
     if(!texture.ready||!t.data||(at>=OS_VRAM_VADDR&&at<OS_VRAM_VADDR+OS_VRAM_SIZE))return false;
     const std::size_t bytes=C3D_TexCalcTotalSize(t.size,t.maxLevel);
-    if(vramSpaceFree()<bytes+reserve)return false;
+    // A 4-bit texture in VRAM bound to unit 1 can freeze the PICA and corrupt
+    // later output, even in other software (3dbrew GPU/Pitfalls). Race loads
+    // froze on the console once VRAM priority moved such textures first.
+    // A unit-1 ETC1 texture (the baked shadow maps, 512x512 on most courses)
+    // can go as ETC1A4 with every alpha 0xF instead: 8 bits a texel, the same
+    // colour and sampled alpha (ETC1 reads as opaque), twice the bytes.
+    const bool unitOneFourBit=texture.unitOne&&(t.fmt==GPU_ETC1||t.fmt==GPU_L4||t.fmt==GPU_A4);
+    const bool widen=unitOneFourBit&&unitOneEtc1a4&&t.fmt==GPU_ETC1;
+    if(unitOneFourBit&&!widen){
+        if(left){++left->count;left->bytes+=bytes;++left->unitOne;left->unitOneBytes+=bytes;}
+        return false;
+    }
+    const std::size_t vramBytes=widen?2*bytes:bytes;
     C3D_Tex moved{};
     // Keep the full mip chain in VRAM too. Refusing mipmapped textures
     // would undo the Old 3DS LINEAR-memory optimization for world assets.
-    const C3D_TexInitParams params{t.width,t.height,t.maxLevel,t.fmt,GPU_TEX_2D,true};
-    if(!C3D_TexInitWithParams(&moved,nullptr,params))return false;
+    const C3D_TexInitParams params{t.width,t.height,t.maxLevel,widen?GPU_ETC1A4:t.fmt,GPU_TEX_2D,true};
+    if(vramSpaceFree()<vramBytes+reserve||!C3D_TexInitWithParams(&moved,nullptr,params)){
+        if(left){++left->count;left->bytes+=bytes;if(unitOneFourBit){++left->unitOne;left->unitOneBytes+=bytes;}}
+        return false;
+    }
+    if(widen){
+        // Every 8-byte ETC1 block (all levels run on block by block) becomes
+        // 8 bytes of alpha then the same block.
+        auto* wide=static_cast<uint8_t*>(linearAlloc(vramBytes));
+        if(!wide){C3D_TexDelete(&moved);if(left){++left->count;left->bytes+=bytes;++left->unitOne;left->unitOneBytes+=bytes;}return false;}
+        const auto* block=static_cast<const uint8_t*>(t.data);
+        for(std::size_t i=0;i<bytes;i+=8){std::memset(wide+2*i,0xff,8);std::memcpy(wide+2*i+8,block+i,8);}
+        GSPGPU_FlushDataCache(wide,u32(vramBytes));
+        C3D_SyncTextureCopy(reinterpret_cast<u32*>(wide),0,static_cast<u32*>(moved.data),0,u32(vramBytes),8);
+        linearFree(wide);
+    }
     // The LINEAR copy was flushed when it was loaded; the copy engine reads it.
-    C3D_SyncTextureCopy(static_cast<u32*>(t.data),0,static_cast<u32*>(moved.data),0,u32(bytes),8);
-    moved.param=t.param;moved.border=t.border;moved.lodParam=t.lodParam;
+    else C3D_SyncTextureCopy(static_cast<u32*>(t.data),0,static_cast<u32*>(moved.data),0,u32(bytes),8);
+    moved.param=widen?t.param&~GPU_TEXTURE_ETC1_PARAM:t.param;moved.border=t.border;moved.lodParam=t.lodParam;
     C3D_TexDelete(&t);t=moved;
     return true;
 }

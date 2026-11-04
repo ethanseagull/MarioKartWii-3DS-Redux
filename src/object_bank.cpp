@@ -287,6 +287,18 @@ void ObjectBank::markRegisterAlpha(const Model& model){
         registerAlpha_[i]=zero;
     }
 }
+void ObjectBank::markUnitOneTextures(const Model& model) const {
+    if(model.submeshes.size()!=shapes_)return;
+    auto mark=[&](int32_t index){if(index>=0&&size_t(index)<model.textures.size()&&model.textures[index])model.textures[index]->unitOne=true;};
+    for(const auto& c:pat_)for(size_t f=0;f<c.frames;++f){
+        const int32_t* row=c.data+f*shapes_*2;
+        for(unsigned i=0;i<shapes_;++i){
+            mark(row[i*2+1]);
+            const auto reflection=model.submeshes[i].menuReflection;
+            if(reflection==11||reflection==22)mark(row[i*2]);
+        }
+    }
+}
 bool ObjectBank::makeRigid(Model& model){
     if(morphing())return false;
     if(!ready()||rigid()||!vertices_||vertices_!=model.vertexCount)return false;

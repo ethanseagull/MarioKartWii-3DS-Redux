@@ -66,6 +66,10 @@ class Texture {
 public:
     C3D_Tex gpu{};
     bool ready=false;
+    // Some draw may bind it to texture unit 1 (a material's second map,
+    // projected water, a pattern swap). Renderer::moveToVram keeps such 4-bit
+    // textures in LINEAR: 3dbrew GPU/Pitfalls, TEXUNIT1 instability.
+    bool unitOne=false;
     C3D_Tex noMipSampler{}; // diagnostic view; never owns/frees its data
     std::array<C3D_Tex,3> materialSamplers{}; // one view per texture unit
     C3D_Tex* sampledGpu();
@@ -258,7 +262,9 @@ public:
     // its LINEAR block is freed), unless that would leave under `reserve`
     // bytes of VRAM free. False leaves it untouched in LINEAR. Main thread;
     // call waitForGpu() first: no recorded frame may still sample it.
-    bool moveToVram(Texture& texture,std::size_t reserve);
+    // `left`, when given, tallies the textures that stay in LINEAR.
+    struct VramLeft {unsigned count=0,unitOne=0;std::size_t bytes=0,unitOneBytes=0;};
+    bool moveToVram(Texture& texture,std::size_t reserve,VramLeft* left=nullptr);
     void clearUnusedTextureCache();
     // Index of the frame being recorded: storage a deferred frame references
     // in place alternates on its parity (two frames are in flight).
@@ -496,6 +502,9 @@ public:
     // textures or shadow passes take the shader's short path (fastPath; the
     // same values). A/B: no-fast-vertex.txt.
     bool fastVertex=false;
+    // moveToVram widens texture-unit-1 ETC1 textures to ETC1A4 (opaque
+    // alpha) instead of leaving them in LINEAR. A/B: no-unit1-vram.txt.
+    bool unitOneEtc1a4=false;
     void setSkyBehind(bool on){skyBehind_=on;}
     uint32_t animationFrame=0;
     // RRGGBB00 added after the model's material colour, preserving texture alpha.

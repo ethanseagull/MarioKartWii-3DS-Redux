@@ -42,7 +42,7 @@ public:
     bool resumeGraphics();
     // Renderer::moveToVram for every object model's textures; returns the
     // number moved. GPU idle (Renderer::waitForGpu).
-    unsigned moveTexturesToVram(Renderer& renderer,std::size_t reserve);
+    unsigned moveTexturesToVram(Renderer& renderer,std::size_t reserve,Renderer::VramLeft* left=nullptr);
     unsigned palmCount() const;
     unsigned modelCount() const;
     // QA review: one placement per object type, with its live world bounds.
