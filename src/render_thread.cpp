@@ -476,7 +476,9 @@ void Renderer::previousFrameDone(){
     auto& list=*pipelineList_;
     diag::passSample(diagPreviousSkip,diagPreviousActive,stats_.previousGpuMs);diagPreviousSkip=list.diagTag();diagPreviousActive=list.diagActive;
     gpuDone_.store(list.frame,std::memory_order_release);
+    const auto writesStart=svcGetSystemTick();
     runWrites(list);
+    stats_.hookMs+=float((svcGetSystemTick()-writesStart)*1000.0/SYSCLOCK_ARM11);
     if(endingFrame_)notePresented();
 }
 void Renderer::retireShared(std::shared_ptr<void> object){
@@ -623,7 +625,7 @@ void Renderer::end(){
     if(!recording()){
         endNow();gpuIdle_=false;
         triangles=stats_.triangles;drawCalls=stats_.drawCalls;culledTriangles=stats_.culledTriangles;culledSubmeshes=stats_.culledSubmeshes;
-        previousGpuMs=stats_.previousGpuMs;beginWaitMs=stats_.beginWaitMs;commandUsage=stats_.commandUsage;renderThreadMs=0;
+        previousGpuMs=stats_.previousGpuMs;beginWaitMs=stats_.beginWaitMs;commandUsage=stats_.commandUsage;renderThreadMs=0;hookMs=gpuGapMs=0;
         return;
     }
     command<EndCommand>();
@@ -631,7 +633,7 @@ void Renderer::end(){
     // The last frame the render thread finished (one frame behind).
     LightLock_Lock(&publishLock_);const Stats s=published_;LightLock_Unlock(&publishLock_);
     triangles=s.triangles;drawCalls=s.drawCalls;culledTriangles=s.culledTriangles;culledSubmeshes=s.culledSubmeshes;
-    previousGpuMs=s.previousGpuMs;beginWaitMs=s.beginWaitMs;commandUsage=s.commandUsage;renderThreadMs=s.renderMs;
+    previousGpuMs=s.previousGpuMs;beginWaitMs=s.beginWaitMs;commandUsage=s.commandUsage;renderThreadMs=s.renderMs;hookMs=s.hookMs;gpuGapMs=s.gpuGapMs;
     renderMetrics.flushCalls+=s.metrics.flushCalls;renderMetrics.flushBytes+=s.metrics.flushBytes;
     renderMetrics.skinnedVertices+=s.metrics.skinnedVertices;
     renderMetrics.contactDraws=s.metrics.contactDraws;renderMetrics.contactTriangles=s.metrics.contactTriangles;
@@ -644,7 +646,7 @@ void Renderer::endLocal(){
     execute(*localList_);
     localReplay_=false;gpuIdle_=false;
     triangles=stats_.triangles;drawCalls=stats_.drawCalls;culledTriangles=stats_.culledTriangles;culledSubmeshes=stats_.culledSubmeshes;
-    previousGpuMs=stats_.previousGpuMs;beginWaitMs=stats_.beginWaitMs;commandUsage=stats_.commandUsage;renderThreadMs=0;
+    previousGpuMs=stats_.previousGpuMs;beginWaitMs=stats_.beginWaitMs;commandUsage=stats_.commandUsage;renderThreadMs=0;hookMs=gpuGapMs=0;
 }
 void Renderer::beginBottom(){
     // The target exists only between a race's load and its release (main thread).

@@ -471,6 +471,10 @@ public:
     // Render thread time for the last drawn frame (excluding its FrameBegin
     // wait, beginWaitMs) and this thread's wait for a free command list.
     float renderThreadMs=0,recordWaitMs=0;
+    // Pipelined frames: the previous-frame hook's deferred writes, and how
+    // long the GPU sat idle between the previous frame and this one (the
+    // hook, the replay and any lateness of this frame's commands).
+    float hookMs=0,gpuGapMs=0;
     // Menus/QA synchronize here. Racing waits for VBlank before polling input.
     bool loadingFrame=false; // first race renders complete under the loading cover
     bool frameSync=true;
@@ -515,7 +519,7 @@ private:
     // Recording (src/render_thread.cpp).
     struct FrameList;
     // pixels (DIAG): screen area of 2D quads (sprites, text, fades), clipped to the screen.
-    struct Stats {uint32_t triangles=0,drawCalls=0,culledTriangles=0,culledSubmeshes=0;uint64_t pixels=0;float previousGpuMs=0,beginWaitMs=0,commandUsage=0,renderMs=0;RenderMetrics metrics{};};
+    struct Stats {uint32_t triangles=0,drawCalls=0,culledTriangles=0,culledSubmeshes=0;uint64_t pixels=0;float previousGpuMs=0,beginWaitMs=0,commandUsage=0,renderMs=0,hookMs=0,gpuGapMs=0;RenderMetrics metrics{};};
     bool recording() const;
     // The 3D slider's position (0..1), or its QA override.
     float slider() const;
@@ -539,6 +543,8 @@ private:
     FrameList* pipelineList_=nullptr;
     bool execPipelined_=false,previousFrameDone_=false,endingFrame_=false;
     uint64_t frameEndTick_=0;
+    // When the last pipelined frame's commands were queued (after its FrameEnd).
+    uint64_t queueStartTick_=0;
     static void pipelineHook(void* self);
     void previousFrameDone();
     void notePresented();

@@ -59,7 +59,46 @@ to the HOME Menu (about 100 minutes).
 Create an empty file in `sd:/3ds/mkw-3ds/` to turn one change off:
 `no-pipeline.txt`, `no-bloom-merge.txt`, `no-bottom-cover.txt`,
 `no-shadow-rect.txt`, `no-player-vram.txt`, `no-draw-distance.txt`,
-`no-spatial-course.txt`, `no-hud-shrink.txt`, `no-sky-last.txt`,
-`no-load-cache.txt`. Each race's `perf-races.csv` row records which were on.
+`no-spatial-course.txt`, `no-hud-shrink.txt`, `no-sky-last.txt` (Rainbow
+Road always draws its sky first), `no-load-cache.txt`, `no-plain-uv.txt`,
+`no-fast-vertex.txt` (model draws without environment maps, projected
+textures, light textures or shadow passes go back to the vertex shader's
+general path; the `fast_vertex` column), `no-vram-priority.txt` (course and
+sky textures take VRAM in file order instead of sky first, then by covered
+surface per byte; the `vram_priority` column). Each race's `perf-races.csv` row
+records which were on. `no-sector-reads.txt` reads pack entries exactly as
+stored instead of as whole 512-byte sectors (load times only).
+`no-read-ahead.txt` reads only the requested entry instead of the whole entries
+that follow it within 12 KB (128 KB among entries a repacked pack lays out in
+traced order). `no-race-cache.txt` turns off the New 3DS RAM cache that keeps
+the racers, items, effects and Lakitu read by one race load for the next.
+`no-pause-keep.txt` releases the racers' graphics on every pause, as before.
+`no-prefetch.txt` turns off the background thread that reads the next 128 KB
+of a repacked pack's traced entries while the game parses the last read.
+`pack-trace.txt` writes every pack read to `pack-trace.csv` (archive, offset,
+size, ms, read-ahead hit, matches a direct read) for `tools/pak_order.py`.
+
+## Repacked packs
+
+`tools/pakpack.c` (build: `gcc -O2 -o pakpack tools/pakpack.c`) rewrites an
+MPK1 pack as MPK2: entries in the order `tools/pak_order.py` gives from pack
+traces, LZ4-compressed where that saves space (lossless; every block is
+checked against its source), loose files optionally added
+(`textures/firebar-indirect.ftan=...`). The game reads MPK1 and MPK2.
+
+Two files turn an Old 3DS reduction back on for a New 3DS comparison:
+`racer-lod.txt` (opponents switch to low-detail models with distance; the
+`racer_lod` column) and `animation-budget.txt` (crowds and animated items drop
+to 30/15 Hz when frames run slow). Without them every opponent keeps full
+detail and animations run every tick, as in the Wii's single-player races.
+
+The per-second and spike files also log `hook_ms` (the deferred writes run
+between two GPU frames) and `gpu_gap_ms` (how long the GPU sat idle before
+each frame's commands were queued). The per-second file adds `gpu_gap_min_ms`,
+the second's smallest gap: what a frame that was ready in time still waits.
+`no-unit1-vram.txt` keeps 4-bit textures that texture unit 1 samples (the
+baked shadow maps) in LINEAR; without it their ETC1 goes to VRAM as ETC1A4.
+`runtime.log` reports after each race load what stays in LINEAR (`course
+textures left in LINEAR track+sky=… unit1=… objects=…`, count/KB).
 `stereo-slider.txt` (a number from 0 to 1) pins the 3D slider for comparable
 runs.

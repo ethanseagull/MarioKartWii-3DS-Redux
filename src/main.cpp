@@ -401,6 +401,8 @@ int main() {
     // a second nonzero number also captures every presented frame from the
     // end-of-race menu's choice until the race is left (its fade to black).
     unsigned raceCaptureEvery=0,raceCaptured=~0u;bool raceCaptureLeave=false;
+    // Captures count races and steps from each intro's end, so builds pair frames on the race clock.
+    unsigned captureRace=0,captureBase=0;bool captureLive=false;
     if(autoplay)if(kQa)if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/race-capture.txt","r")){unsigned n=0,leave=0;const int got=fscanf(f,"%u %u",&n,&leave);raceCaptureEvery=got>=1&&n>1?n:20;raceCaptureLeave=got==2&&leave;fclose(f);}
     const bool raceCapture=raceCaptureEvery>0;
     auto menuProfile=std::make_unique<mkw::MenuProfile>();
@@ -417,7 +419,8 @@ int main() {
     if(benchmark)if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/benchmark-progress.txt","r")){unsigned n=0;if(fscanf(f,"%u",&n)==1&&n<32)benchmarkStart=n;fclose(f);}
     if(benchmark){char text[64];snprintf(text,sizeof text,"benchmark start course %u",benchmarkStart);report(text);}
     // GPU pass leave-out (mkw/diag.hpp): unattended runs, or gpu-passes.txt.
-    mkw::diag::passState.enabled=kQa&&(autoplay||exists("sdmc:/3ds/mkw-3ds/gpu-passes.txt"));
+    // no-gpu-passes.txt: no leave-out frames, so every racing frame draws every pass (cross-build comparisons).
+    mkw::diag::passState.enabled=kQa&&(autoplay||exists("sdmc:/3ds/mkw-3ds/gpu-passes.txt"))&&!exists("sdmc:/3ds/mkw-3ds/no-gpu-passes.txt");
     using MenuStage=mkw::MenuProfile::Stage;
     uint64_t raceLoadStart=0;
     // QA: race load stage timing with file-open counts.
@@ -488,7 +491,8 @@ int main() {
     menu.titleRandom=std::uint32_t(svcGetSystemTick())|1u;
     menu.cpuRandom.state=std::uint32_t(svcGetSystemTick());
     // QA captures compare builds frame for frame: the same CPU lineup every run.
-    if(raceCapture){menu.titleRandom=1u;menu.cpuRandom.state=0x4d4b5733u;}
+    // Captures and benchmark runs use fixed seeds (the same CPU lineups every run).
+    if(raceCapture||benchmark){menu.titleRandom=1u;menu.cpuRandom.state=0x4d4b5733u;}
     mkw::LicenseLoad loaded;
     {mkw::LoadingScope loading;loaded=mkw::loadLicenseSaves(LicenseDirectory,licenseSaves);
     for(unsigned slot=0;slot<4;++slot){
@@ -1235,7 +1239,12 @@ int main() {
         if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/menu-result.json","w")){fprintf(f,"{\"pass\":%s,\"pages\":%u,\"transition_frames\":%u,\"top_only\":false}\n",ok&&captured==expected?"true":"false",unsigned(std::size(pages)),motionFrames);fclose(f);}else ok=false;
         report(ok?"MENU SCREENSHOT PASS":"MENU SCREENSHOT FAIL");renderer.waitForGpu();menuModels.reset(renderer);menuIcons.reset(renderer);menuRenderer.release();mkw::shutdownLoadingScreen();renderer.shutdown();gfxExit();return ok?0:4;
     }
-    auto applySelection=[&](){selectedRoster=menu.cpuRoster;battleMode=menu.selection.mode==mkw::UiMode::Battle;coinRunnersMode=battleMode&&menu.selection.coinRunners;timeTrial=menu.selection.mode==mkw::UiMode::TimeTrials;activeLicense=menu.selection.license;activeRecords=licenseSaves[activeLicense].records;if(timeTrial)loadBestTimes();courseChoice=battleMode?32+menu.selection.battleStage:menu.selection.course;driverChoice=menu.selection.driver;vehicleChoice=menu.selection.vehicle;automaticDrift=menu.selection.automatic;
+    // Diagnostic overlay: benchmark races use one fixed setup, the same as the TPO comparison build:
+    // Mario, Standard Kart M, manual drift, 150cc, normal CPUs, all vehicles, basic items.
+    auto applySelection=[&](){if(benchmark){auto& s=menu.selection;s.driver=0;s.vehicle=0;s.automatic=false;s.miiSelected=false;s.vsClass=2;s.vsCpu=1;s.vsVehicles=2;s.vsItems=0;}
+        selectedRoster=menu.cpuRoster;
+        // ...and one fixed CPU lineup (driver*12+vehicle slot), the same table as the TPO build.
+        if(benchmark){static constexpr unsigned cpus[11]={15,25,40,48,77,86,210,103,128,141,238};for(unsigned i=1;i<12;++i)selectedRoster.choices[i]=cpus[i-1];selectedRoster.ready=true;}battleMode=menu.selection.mode==mkw::UiMode::Battle;coinRunnersMode=battleMode&&menu.selection.coinRunners;timeTrial=menu.selection.mode==mkw::UiMode::TimeTrials;activeLicense=menu.selection.license;activeRecords=licenseSaves[activeLicense].records;if(timeTrial)loadBestTimes();courseChoice=battleMode?32+menu.selection.battleStage:menu.selection.course;driverChoice=menu.selection.driver;vehicleChoice=menu.selection.vehicle;automaticDrift=menu.selection.automatic;
         selectedRaceMode=timeTrial?2:menu.selection.mode==mkw::UiMode::GrandPrix?0:menu.selection.mode==mkw::UiMode::Battle?3:1;
         const bool vs=menu.selection.mode==mkw::UiMode::VS;
         selectedTeams=battleMode||(vs&&menu.selection.teams);selectedHumanTeam=menu.selection.humanTeam;
@@ -1266,6 +1275,9 @@ int main() {
     // The grant retries until the slot is free; the hold window follows the grant.
     // QA (autoplay + cpu-log.txt): per-racer AI state every N steps in runtime.log.
     unsigned cpuLogEvery=0;if(kQa)if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/cpu-log.txt","r")){if(fscanf(f,"%u",&cpuLogEvery)!=1)cpuLogEvery=0;fclose(f);}
+    // QA close-up: "x z radius every" traces each racer near one spot; logs then go straight to the card.
+    struct {float x=0,z=0,radius=0;unsigned every=0;} cpuTrace;
+    if(kQa)if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/cpu-trace.txt","r")){if(fscanf(f,"%f %f %f %u",&cpuTrace.x,&cpuTrace.z,&cpuTrace.radius,&cpuTrace.every)!=4)cpuTrace.every=0;fclose(f);}
     struct QaGive{unsigned step=0,item=0,from=0,to=0,granted=0,player=0;};std::vector<QaGive> qaGives;
     if(kQa)if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/give-test.txt","r")){
         char row[192];while(fgets(row,sizeof row,f)){QaGive g{};
@@ -1333,6 +1345,8 @@ int main() {
         if(restart){vsSet.points=vsSet.roundStartPoints;vsSet.next=false;nextRaceQueued=false;return;}
         if(vsSet.next&&vsSet.race<raceCount()&&vsSet.driver==driverChoice){++vsSet.race;selectedStartPositions=vsSet.finishPositions;}
         else{vsSet=VsSet{};vsSet.race=1;vsSet.driver=driverChoice;selectedStartPositions.fill(0);}
+        // Diagnostic overlay: every benchmark race starts on the first-race grid (the player last), as the TPO comparison build does.
+        if(benchmark)selectedStartPositions.fill(0);
         vsSet.next=false;vsSet.roundStartPoints=vsSet.points;
     };
     vsSet.race=1;vsSet.driver=driverChoice; // the first race was chosen above
@@ -2196,6 +2210,9 @@ int main() {
          if(stage!=lastStage&&stage==int(K::System::RaceManager::Stage::Race)&&lastStage==int(K::System::RaceManager::Stage::Countdown)){reportIterations=4;reportLabel="race start (GO)";}
          lastStage=stage;
          if(reportIterations){char text[400];mkw::diag::describeIteration(text,sizeof text,reportLabel,now);report(text);--reportIterations;reportLabel="  next";}}
+        // The report above is an SD write (logs reach RAM only once the race
+        // profile starts): its own stage, so it isn't counted as "jobs".
+        mkw::diag::iterationMark("report");
         // Poll controls and advance source state once per top-screen refresh.
         // Submit once per presentation slot. FrameBegin below retires
         // the prior GPU queue without inserting a second VBlank wait.
@@ -2338,9 +2355,9 @@ int main() {
         // Logs held in RAM reach the card before the profiler writes its files.
         if(!profiled)mkw::diag::deferSdLogs(false);
         profiler->autoFrame(profiled);
-        if(profiled){mkw::diag::deferSdLogs(true);
+        if(profiled){if(!cpuTrace.every)mkw::diag::deferSdLogs(true);
             const auto* bloom=mkw::courseBloom(Courses[courseChoice].archive);const int id=int(Courses[courseChoice].id);
-            profiler->context(renderer.stereoWanted(),bloom&&bloom->enabled(),id==18||id==6||id==35,menu.selection.dynamicShadows,renderer.pipelineFrames,renderer.bloomMerge,renderer.shadowRects,playerTexturesVram,renderer.drawDistance,renderer.spatialCourse,mkw::shrinkHudTextures,renderer.skyLast);}
+            profiler->context(renderer.stereoWanted(),bloom&&bloom->enabled(),id==18||id==6||id==35,menu.selection.dynamicShadows,renderer.pipelineFrames,renderer.bloomMerge,renderer.shadowRects,playerTexturesVram,renderer.drawDistance,renderer.spatialCourse,mkw::shrinkHudTextures,skyDrawnLast(renderer,Courses[courseChoice].id),renderer.plainUv,renderer.fastVertex,vramPriority);}
         mkw::diag::passFrame(profiled);}
         mkw::diag::iterationMark("pre-begin");
         profiler->begin(unsigned(Courses[courseChoice].id),frames,physicsSteps,float(delta*1000));
@@ -2498,6 +2515,28 @@ int main() {
                                  move->slipstreamBoost()?2:move->slipstreamCharging()?1:0,int(hud.item),hud.deployed?int(hud.heldKind):-1,flags,
                                  raceGrid.ai().stuckState(i),raceGrid.ai().avoidState(i),raceGrid.ai().itemState(i));report(line);}
                 }
+                // QA: every fall or Lakitu pickup, so routes that send CPUs off the course show up per course.
+                if(autoplay&&cpuLogEvery&&fullRace){static std::array<bool,12> falling{};
+                    for(unsigned i=0;i<raceGrid.count();++i){auto* kart=K::Kart::KartObjectManager::Instance()->object(i);
+                        using St=K::Kart::eStatus;const bool fall=kart->status().onBit(St::TriggerRespawn,St::BeforeRespawn);
+                        if(fall&&!falling[i]){auto p=vec(kart->pos());const auto& body=kart->collisionData();
+                            snprintf(line,sizeof line,"QA cpu fall step=%u racer=%u lap=%u completion=%.3f point=%u pos=%.0f,%.0f,%.0f speed=%.1f wall=%d ground=%d ai=%d%d%d",
+                                     physicsSteps,i,raceGrid.lap(i),K::System::RaceManager::Instance()->player(i).raceCompletion(),raceGrid.ai().routePoint(i),
+                                     p.x,p.y,p.z,kart->move()->speed(),int(body.bWall||body.bWall3),int(kart->status().onBit(St::TouchingGround)),
+                                     raceGrid.ai().stuckState(i),raceGrid.ai().avoidState(i),raceGrid.ai().itemState(i));report(line);}
+                        falling[i]=fall;}
+                }
+                if(autoplay&&cpuTrace.every&&fullRace&&physicsSteps%cpuTrace.every==0)
+                    for(unsigned i=0;i<raceGrid.count();++i){auto* kart=K::Kart::KartObjectManager::Instance()->object(i);auto p=vec(kart->pos());
+                        if((p.x-cpuTrace.x)*(p.x-cpuTrace.x)+(p.z-cpuTrace.z)*(p.z-cpuTrace.z)>cpuTrace.radius*cpuTrace.radius)continue;
+                        using St=K::Kart::eStatus;const auto& st=kart->status();const auto& body=kart->collisionData();const auto* move=kart->move();
+                        const auto& in=kart->inputs()->currentState();const auto& hud=raceItems->hud(i);
+                        snprintf(line,sizeof line,"QA cpu trace step=%u racer=%u lap=%u point=%u pos=%.0f,%.0f,%.0f speed=%.1f base=%.1f soft=%.1f stick=%.2f btn=%u ground=%d wall=%d off=%d boost=%d drift=%d action=%d item=%d mroute=%d ai=%d%d%d pad=%.2f hop=%d hsx=%d din=%d auto=%d",
+                                 physicsSteps,i,raceGrid.lap(i),raceGrid.ai().routePoint(i),p.x,p.y,p.z,move->speed(),raceGrid.ai().baseSpeed(i),move->softSpeedLimit(),
+                                 move->cpuSteer()?move->cpuStick():in.stick.x,unsigned(in.buttons),int(st.onBit(St::TouchingGround)),int(body.bWall||body.bWall3),int(st.onBit(St::CollidingOffroad)),
+                                 int(st.onBit(St::Boost)),int(st.onBit(St::DriftManual,St::DriftAuto)),int(kart->action()->currentAction()),int(hud.item),
+                                 int(raceGrid.ai().mushroomRoute(i)),raceGrid.ai().stuckState(i),raceGrid.ai().avoidState(i),raceGrid.ai().itemState(i),
+                                 in.stick.x,int(st.onBit(St::Hop)),int(move->hopStickX()),int(st.onBit(St::DriftInput)),int(st.onBit(St::AutoDrift)));report(line);}
                 // QA: a fall boundary (variant 0) activation, so the retail SetCamera hold applies.
                 if(autoplay&&lakituRespawnStep&&physicsSteps==lakituRespawnStep){auto* qaCollide=K::Kart::KartObjectManager::Instance()->object(0)->collide();qaCollide->setOobCameraPending(uint16_t(lakituRequest));qaCollide->activateOob(false,nullptr,false,false);}
                 scenes.calc();
@@ -3163,7 +3202,8 @@ int main() {
                 // QA captures: present exactly on each capture tick (the remaining
                 // accumulator runs next iteration), so builds compare frame for frame.
                 if(autoplay&&!benchmark&&intro.active()&&introTick%90==0)break;
-                if(raceCapture&&menu.simulates()&&!intro.active()&&physicsSteps%raceCaptureEvery==0)break;
+                if(raceCapture){const bool live=menu.simulates()&&!intro.active();if(live&&!captureLive){++captureRace;captureBase=physicsSteps;raceCaptured=~0u;}captureLive=live;}
+                if(raceCapture&&captureLive&&(physicsSteps-captureBase)%raceCaptureEvery==0)break;
             }
             physicsMs=(svcGetSystemTick()-start)*1000.0/SYSCLOCK_ARM11;maxPhysics=std::max(maxPhysics,physicsMs);
             profiler->mark(Profile::Simulation);
@@ -3536,12 +3576,12 @@ int main() {
             if(renderer.captureBottom(lower.data()))if(FILE* f=fopen(lowerPath.c_str(),"wb")){fprintf(f,"P6\n320 240\n255\n");fwrite(lower.data(),1,lower.size(),f);fclose(f);}
         }
         // QA (autoplay + race-capture.txt): sample race frames for review.
-        if(raceCapture&&menu.simulates()&&!intro.active()&&(physicsSteps/raceCaptureEvery!=raceCaptured||(raceCaptureLeave&&results.phase()>=mkw::RaceFlowPhase::Chosen))){raceCaptured=physicsSteps/raceCaptureEvery;
-            std::vector<uint8_t> pixels(400*240*3);char path[64];snprintf(path,sizeof path,"sdmc:/3ds/mkw-3ds/race-%05u.ppm",physicsSteps);
+        if(raceCapture&&captureLive&&((physicsSteps-captureBase)/raceCaptureEvery!=raceCaptured||(raceCaptureLeave&&results.phase()>=mkw::RaceFlowPhase::Chosen))){raceCaptured=(physicsSteps-captureBase)/raceCaptureEvery;
+            std::vector<uint8_t> pixels(400*240*3);char path[64];snprintf(path,sizeof path,"sdmc:/3ds/mkw-3ds/race-r%02u-%05u.ppm",captureRace,physicsSteps-captureBase);
             if(renderer.captureTop(pixels.data()))if(FILE* f=fopen(path,"wb")){fprintf(f,"P6\n400 240\n255\n");fwrite(pixels.data(),1,pixels.size(),f);fclose(f);}
             saveRightEye(renderer,path);
             // The lower LCD's frame beside it (name-bottom.ppm, 320x240).
-            if(bottomScreen.active()&&renderer.captureBottom(pixels.data())){snprintf(path,sizeof path,"sdmc:/3ds/mkw-3ds/race-%05u-bottom.ppm",physicsSteps);
+            if(bottomScreen.active()&&renderer.captureBottom(pixels.data())){snprintf(path,sizeof path,"sdmc:/3ds/mkw-3ds/race-r%02u-%05u-bottom.ppm",captureRace,physicsSteps-captureBase);
                 if(FILE* f=fopen(path,"wb")){fprintf(f,"P6\n320 240\n255\n");fwrite(pixels.data(),1,320*240*3,f);fclose(f);}}
         }
         if(replay&&!capturedBlue&&driftEffects.blueFrames>=25){

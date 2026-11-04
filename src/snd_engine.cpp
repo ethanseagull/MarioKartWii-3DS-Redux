@@ -1302,7 +1302,7 @@ struct Engine::Impl::Sounds {
   if (!st.prepared) {
    const int state = st.feed ? st.feed->state() : -1;
    if (state < 0) { ++e.stats.missingData; strmStop(s); }
-   else if (state > 0 && !strmSetup(s)) { ++e.stats.startsFailed; strmStop(s); }
+   else if (state > 0 && !strmSetup(s)) { ++e.stats.startsFailed; ++e.stats.failStream; e.stats.lastFailedSound = s.id; strmStop(s); }
    return;
   }
   if (!st.started) return;
@@ -1333,7 +1333,7 @@ struct Engine::Impl::Sounds {
   u16 n = 0;
   for (u32 i = 0; i < r.count; ++i) n += !e.residency->ready(r.file, r.waves[i]);
   s.wavesPending = n;
-  if (n && ++s.waitFrames > WaveWaitFrames) { ++e.stats.startsFailed; shutdown(s); return false; }
+  if (n && ++s.waitFrames > WaveWaitFrames) { ++e.stats.startsFailed; ++e.stats.failWaves; e.stats.lastFailedSound = s.id; shutdown(s); return false; }
   return true;
  }
  void basicUpdate(SoundBase& s, bool advanceHold) {
@@ -1392,12 +1392,12 @@ struct Engine::Impl::Sounds {
  // ================================================ start
  bool setup(Handle& h, u32 id, bool hold, const StartInfo* si, const Ambient* amb, SoundBase** out) {
   const SoundEntry* info = e.archive ? e.archive->sound(id) : nullptr;
-  if (!info || info->type == TypeInvalid) { ++e.stats.startsFailed; return false; }
+  if (!info || info->type == TypeInvalid) { ++e.stats.startsFailed; ++e.stats.failNoInfo; e.stats.lastFailedSound = id; return false; }
   u32 playerId = info->playerId; int playerPriority = info->playerPriority;
   if (si) { if (si->playerId >= 0) playerId = u32(si->playerId); if (si->playerPriority >= 0) playerPriority = si->playerPriority; }
   const int startPriority = amb && amb->distancePriority >= 0 ? amb->distancePriority : (hold ? playerPriority - 1 : playerPriority) + (amb ? amb->priority : 0);
   SoundBase* s = alloc(info->type, playerId, playerPriority, startPriority,id,amb && amb->distancePriority >= 0);
-  if (!s) { ++e.stats.startsFailed; return false; }
+  if (!s) { ++e.stats.startsFailed; ++e.stats.failNoSlot; e.stats.lastFailedSound = id; return false; }
   s->id = id;
   if (amb) { s->ambient = *amb; s->hasAmbient = true; }
   bool ok = false;
@@ -1441,7 +1441,7 @@ struct Engine::Impl::Sounds {
    s->strm.p.panMode = info->panMode; s->strm.p.panCurve = info->panCurve; s->strm.p.id = id;
    ok = strmPrepare(*s, *info, si);
   }
-  if (!ok) { ++e.stats.startsFailed; shutdown(*s); return false; }
+  if (!ok) { ++e.stats.startsFailed; ++e.stats.failSetup; e.stats.lastFailedSound = id; shutdown(*s); return false; }
   if (e.residency && (info->type == TypeSeq || info->type == TypeWave)) {
    const WaveReach r = e.archive->reach(id);
    for (u32 i = 0; i < r.count; ++i) if (!e.residency->acquire(r.file, r.waves[i])) ++s->wavesPending;

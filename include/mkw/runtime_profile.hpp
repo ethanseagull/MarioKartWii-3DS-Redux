@@ -43,8 +43,8 @@ public:
   active_=false;
  }
  // What this race draws: stereo frames are counted, the rest are per race.
- void context(bool stereo,bool bloom,bool stadium,bool dynamicShadows,bool pipelined,bool bloomMerge,bool shadowRect,bool playerVram,bool drawDistance,bool spatialCourse,bool hudShrink,bool skyLast){
-  if(!active_)return;stereoFrames_+=stereo;bloom_=bloom;stadium_=stadium;dynamicShadows_=dynamicShadows;pipelined_=pipelined;bloomMerge_=bloomMerge;shadowRect_=shadowRect;playerVram_=playerVram;drawDistance_=drawDistance;spatialCourse_=spatialCourse;hudShrink_=hudShrink;skyLast_=skyLast;
+ void context(bool stereo,bool bloom,bool stadium,bool dynamicShadows,bool pipelined,bool bloomMerge,bool shadowRect,bool playerVram,bool drawDistance,bool spatialCourse,bool hudShrink,bool skyLast,bool plainUv,bool fastVertex,bool vramPriority){
+  if(!active_)return;stereoFrames_+=stereo;bloom_=bloom;stadium_=stadium;dynamicShadows_=dynamicShadows;pipelined_=pipelined;bloomMerge_=bloomMerge;shadowRect_=shadowRect;playerVram_=playerVram;drawDistance_=drawDistance;spatialCourse_=spatialCourse;hudShrink_=hudShrink;skyLast_=skyLast;plainUv_=plainUv;fastVertex_=fastVertex;vramPriority_=vramPriority;
  }
  void begin(unsigned course,unsigned frame,unsigned ticks,float interval){
   if(!active_)return;
@@ -65,15 +65,16 @@ public:
   r.opens=fileOpens.load(std::memory_order_relaxed)-opensAt_;r.openMs=float((fileOpenTicks.load(std::memory_order_relaxed)-openTicksAt_)*1000.0/SYSCLOCK_ARM11);
   if(rendered){r.gpu=renderer.previousGpuMs;r.draws=renderer.drawCalls;r.triangles=renderer.triangles;
    r.culledTriangles=renderer.culledTriangles;r.culledSubmeshes=renderer.culledSubmeshes;r.metrics=renderMetrics;
-   r.command=renderer.commandUsage;r.renderThread=renderer.renderThreadMs;r.renderWait=renderer.beginWaitMs;r.recordWait=renderer.recordWaitMs;}
+   r.command=renderer.commandUsage;r.renderThread=renderer.renderThreadMs;r.renderWait=renderer.beginWaitMs;r.recordWait=renderer.recordWaitMs;
+   r.hook=renderer.hookMs;r.gpuGap=renderer.gpuGapMs;}
   accumulate(r);
  }
  // Pause: save what exists so far; the race continues in the same files.
  void finish(){if(frames_)write(false);skip_=true;}
 private:
- struct Row {float time=0;unsigned course=0,frame=0,ticks=0,rendered=0;float interval=0;std::array<float,StageCount> ms{};float gpu=0;unsigned draws=0,triangles=0,culledTriangles=0,culledSubmeshes=0;RenderMetrics metrics{};float command=0,renderThread=0,renderWait=0,recordWait=0;unsigned passSkip=0,opens=0;float openMs=0;};
+ struct Row {float time=0;unsigned course=0,frame=0,ticks=0,rendered=0;float interval=0;std::array<float,StageCount> ms{};float gpu=0;unsigned draws=0,triangles=0,culledTriangles=0,culledSubmeshes=0;RenderMetrics metrics{};float command=0,renderThread=0,renderWait=0,recordWait=0,hook=0,gpuGap=0;unsigned passSkip=0,opens=0;float openMs=0;};
  struct Second {unsigned loops=0,rendered=0,late1=0,late2=0,ticks=0,draws=0,triangles=0,culledTriangles=0,flushBytes=0,skinned=0,linearFree=0,opens=0,leaveOuts=0;
-  float duration=0,intervalMax=0,gpu=0,gpuMax=0,command=0,renderThread=0,renderWait=0,recordWait=0,worker=0,contact=0,shadowSupport=0,openMs=0;
+  float duration=0,intervalMax=0,gpu=0,gpuMax=0,command=0,renderThread=0,renderWait=0,recordWait=0,worker=0,contact=0,shadowSupport=0,openMs=0,hook=0,hookMax=0,gpuGap=0,gpuGapMax=0,gpuGapMin=0;
   std::array<float,StageCount> ms{},msMax{};};
  static constexpr unsigned MaxSeconds=480,SpikeCount=32,Buckets=200; // 0.5 ms histogram buckets to 100 ms
  static constexpr float Refresh=1000.f/59.83f;
@@ -89,7 +90,10 @@ private:
   for(unsigned i=0;i<StageCount;++i){s.ms[i]+=r.ms[i];s.msMax[i]=std::max(s.msMax[i],r.ms[i]);}
   if(r.rendered){++s.rendered;s.gpu+=r.gpu;s.gpuMax=std::max(s.gpuMax,r.gpu);s.draws+=r.draws;s.triangles+=r.triangles;s.culledTriangles+=r.culledTriangles;
    s.flushBytes+=r.metrics.flushBytes;s.skinned+=r.metrics.skinnedVertices;s.command=std::max(s.command,r.command);
-   s.renderThread+=r.renderThread;s.renderWait+=r.renderWait;s.recordWait+=r.recordWait;s.worker+=r.metrics.workerMs;s.contact+=r.metrics.contactMs;s.shadowSupport+=r.metrics.shadowSupportMs;}
+   s.renderThread+=r.renderThread;s.renderWait+=r.renderWait;s.recordWait+=r.recordWait;s.worker+=r.metrics.workerMs;s.contact+=r.metrics.contactMs;s.shadowSupport+=r.metrics.shadowSupportMs;
+   s.hook+=r.hook;s.hookMax=std::max(s.hookMax,r.hook);s.gpuGap+=r.gpuGap;s.gpuGapMax=std::max(s.gpuGapMax,r.gpuGap);
+   // Least gap of the second (0 = unmeasured, e.g. unpipelined frames): what a frame ready in time still pays.
+   if(r.gpuGap>0)s.gpuGapMin=s.gpuGapMin>0?std::min(s.gpuGapMin,r.gpuGap):r.gpuGap;}
   // Keep the slowest frames; replace the fastest kept one.
   if(spikes_<SpikeCount)spike_[spikes_++]=r;
   else{unsigned low=0;for(unsigned i=1;i<SpikeCount;++i)if(spike_[i].interval<spike_[low].interval)low=i;if(r.interval>spike_[low].interval)spike_[low]=r;}
@@ -122,13 +126,13 @@ private:
    std::fputs("second,loops,rendered,late_frames,very_late_frames,max_interval_ms,physics_ticks",f);
    for(auto* n:StageNames)std::fprintf(f,",%s_ms",n);
    for(auto* n:StageNames)std::fprintf(f,",%s_max_ms",n);
-   std::fputs(",gpu_ms,gpu_max_ms,draws,triangles,culled_triangles,flush_kb,skinned_vertices,command_usage_max,render_thread_ms,render_begin_wait_ms,record_wait_ms,worker_ms,contact_ms,shadow_support_ms,linear_free_kb,file_opens,file_open_ms,leave_out_frames\n",f);
+   std::fputs(",gpu_ms,gpu_max_ms,draws,triangles,culled_triangles,flush_kb,skinned_vertices,command_usage_max,render_thread_ms,render_begin_wait_ms,record_wait_ms,worker_ms,contact_ms,shadow_support_ms,linear_free_kb,file_opens,file_open_ms,leave_out_frames,hook_ms,hook_max_ms,gpu_gap_ms,gpu_gap_max_ms,gpu_gap_min_ms\n",f);
    for(unsigned i=0;i<seconds_;++i){const auto& s=second_[i];const float n=float(std::max(1u,s.rendered));
     std::fprintf(f,"%u,%u,%u,%u,%u,%.3f,%u",i,s.loops,s.rendered,s.late1,s.late2,s.intervalMax,s.ticks);
     for(float v:s.ms)std::fprintf(f,",%.3f",v/n);
     for(float v:s.msMax)std::fprintf(f,",%.3f",v);
-    std::fprintf(f,",%.3f,%.3f,%.1f,%.0f,%.0f,%.1f,%.0f,%.4f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%u,%u,%.3f,%u\n",s.gpu/n,s.gpuMax,s.draws/n,s.triangles/n,s.culledTriangles/n,s.flushBytes/n/1024.f,s.skinned/n,
-     s.command,s.renderThread/n,s.renderWait/n,s.recordWait/n,s.worker/n,s.contact/n,s.shadowSupport/n,s.linearFree/1024,s.opens,s.openMs,s.leaveOuts);
+    std::fprintf(f,",%.3f,%.3f,%.1f,%.0f,%.0f,%.1f,%.0f,%.4f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%u,%u,%.3f,%u,%.3f,%.3f,%.3f,%.3f,%.3f\n",s.gpu/n,s.gpuMax,s.draws/n,s.triangles/n,s.culledTriangles/n,s.flushBytes/n/1024.f,s.skinned/n,
+     s.command,s.renderThread/n,s.renderWait/n,s.recordWait/n,s.worker/n,s.contact/n,s.shadowSupport/n,s.linearFree/1024,s.opens,s.openMs,s.leaveOuts,s.hook/n,s.hookMax,s.gpuGap/n,s.gpuGapMax,s.gpuGapMin);
    }
    std::fclose(f);
   }
@@ -136,28 +140,28 @@ private:
   if(FILE* f=std::fopen(path,"w")){
    std::fputs("race_time_s,frame,rendered,interval_ms,physics_ticks",f);
    for(auto* n:StageNames)std::fprintf(f,",%s_ms",n);
-   std::fputs(",gpu_ms,draws,triangles,culled_triangles,culled_submeshes,flush_calls,flush_bytes,pose_evaluations,pose_reuses,skinned_vertices,command_usage,render_thread_ms,render_begin_wait_ms,record_wait_ms,worker_ms,contact_draws,contact_triangles,contact_ms,shadow_support_ms,animation_holds,scene_pose_samples,scene_pose_reuses,file_opens,file_open_ms,leave_out_pass\n",f);
+   std::fputs(",gpu_ms,draws,triangles,culled_triangles,culled_submeshes,flush_calls,flush_bytes,pose_evaluations,pose_reuses,skinned_vertices,command_usage,render_thread_ms,render_begin_wait_ms,record_wait_ms,worker_ms,contact_draws,contact_triangles,contact_ms,shadow_support_ms,animation_holds,scene_pose_samples,scene_pose_reuses,file_opens,file_open_ms,leave_out_pass,hook_ms,gpu_gap_ms\n",f);
    std::array<unsigned,SpikeCount> order{};for(unsigned i=0;i<spikes_;++i)order[i]=i;
    std::sort(order.begin(),order.begin()+spikes_,[&](unsigned a,unsigned b){return spike_[a].interval>spike_[b].interval;});
    for(unsigned k=0;k<spikes_;++k){const auto& r=spike_[order[k]];
     std::fprintf(f,"%.2f,%u,%u,%.3f,%u",r.time/1000.f,r.frame,r.rendered,r.interval,r.ticks);
     for(float v:r.ms)std::fprintf(f,",%.3f",v);
-    std::fprintf(f,",%.3f,%u,%u,%u,%u,%u,%u,%u,%u,%u,%.4f,%.3f,%.3f,%.3f,%.3f,%u,%u,%.3f,%.3f,%u,%u,%u,%u,%.3f,%s\n",r.gpu,r.draws,r.triangles,r.culledTriangles,r.culledSubmeshes,
+    std::fprintf(f,",%.3f,%u,%u,%u,%u,%u,%u,%u,%u,%u,%.4f,%.3f,%.3f,%.3f,%.3f,%u,%u,%.3f,%.3f,%u,%u,%u,%u,%.3f,%s,%.3f,%.3f\n",r.gpu,r.draws,r.triangles,r.culledTriangles,r.culledSubmeshes,
      r.metrics.flushCalls,r.metrics.flushBytes,r.metrics.poseEvaluations,r.metrics.poseReuses,r.metrics.skinnedVertices,r.command,r.renderThread,r.renderWait,r.recordWait,
-     r.metrics.workerMs,r.metrics.contactDraws,r.metrics.contactTriangles,r.metrics.contactMs,r.metrics.shadowSupportMs,r.metrics.animationHolds,r.metrics.scenePoseSamples,r.metrics.scenePoseReuses,r.opens,r.openMs,diag::PassNames[r.passSkip<diag::PassCount?r.passSkip:0]);
+     r.metrics.workerMs,r.metrics.contactDraws,r.metrics.contactTriangles,r.metrics.contactMs,r.metrics.shadowSupportMs,r.metrics.animationHolds,r.metrics.scenePoseSamples,r.metrics.scenePoseReuses,r.opens,r.openMs,diag::PassNames[r.passSkip<diag::PassCount?r.passSkip:0],r.hook,r.gpuGap);
    }
    std::fclose(f);
   }
   if(final){
    bool fresh=true;
-   if(FILE* f=std::fopen("sdmc:/3ds/mkw-3ds/perf-races.csv","r")){char head[1024]{};const bool v9=std::fgets(head,sizeof head,f)&&std::strstr(head,"sky_last");std::fclose(f);
-    // Rows without the sky_last column move aside (v8: draw_distance, v7: player_vram, v6: shadow_rect, v5: bottom_cover, v4: bloom_merge (never filled in),
+   if(FILE* f=std::fopen("sdmc:/3ds/mkw-3ds/perf-races.csv","r")){char head[1024]{};const bool v13=std::fgets(head,sizeof head,f)&&std::strstr(head,"vram_priority");std::fclose(f);
+    // Rows without the vram_priority column move aside (v12: fast_vertex, v11: racer_lod, v10: plain_uv, v9: sky_last, v8: draw_distance, v7: player_vram, v6: shadow_rect, v5: bottom_cover, v4: bloom_merge (never filled in),
     // v3: pipelined, v2: earlier diagnostic builds).
-    fresh=!v9;if(!v9)std::rename("sdmc:/3ds/mkw-3ds/perf-races.csv",std::strstr(head,"draw_distance")?"sdmc:/3ds/mkw-3ds/perf-races-v8.csv":std::strstr(head,"player_vram")?"sdmc:/3ds/mkw-3ds/perf-races-v7.csv":std::strstr(head,"shadow_rect")?"sdmc:/3ds/mkw-3ds/perf-races-v6.csv":std::strstr(head,"bottom_cover")?"sdmc:/3ds/mkw-3ds/perf-races-v5.csv":std::strstr(head,"bloom_merge")?"sdmc:/3ds/mkw-3ds/perf-races-v4.csv":std::strstr(head,"pipelined")?"sdmc:/3ds/mkw-3ds/perf-races-v3.csv":std::strstr(head,"stereo_pct")?"sdmc:/3ds/mkw-3ds/perf-races-v2.csv":"sdmc:/3ds/mkw-3ds/perf-races-v1.csv");}
+    fresh=!v13;if(!v13)std::rename("sdmc:/3ds/mkw-3ds/perf-races.csv",std::strstr(head,"fast_vertex")?"sdmc:/3ds/mkw-3ds/perf-races-v12.csv":std::strstr(head,"racer_lod")?"sdmc:/3ds/mkw-3ds/perf-races-v11.csv":std::strstr(head,"plain_uv")?"sdmc:/3ds/mkw-3ds/perf-races-v10.csv":std::strstr(head,"sky_last")?"sdmc:/3ds/mkw-3ds/perf-races-v9.csv":std::strstr(head,"draw_distance")?"sdmc:/3ds/mkw-3ds/perf-races-v8.csv":std::strstr(head,"player_vram")?"sdmc:/3ds/mkw-3ds/perf-races-v7.csv":std::strstr(head,"shadow_rect")?"sdmc:/3ds/mkw-3ds/perf-races-v6.csv":std::strstr(head,"bottom_cover")?"sdmc:/3ds/mkw-3ds/perf-races-v5.csv":std::strstr(head,"bloom_merge")?"sdmc:/3ds/mkw-3ds/perf-races-v4.csv":std::strstr(head,"pipelined")?"sdmc:/3ds/mkw-3ds/perf-races-v3.csv":std::strstr(head,"stereo_pct")?"sdmc:/3ds/mkw-3ds/perf-races-v2.csv":"sdmc:/3ds/mkw-3ds/perf-races-v1.csv");}
    if(FILE* f=std::fopen("sdmc:/3ds/mkw-3ds/perf-races.csv","a")){
     if(fresh){std::fputs("race,course,new3ds,reduced_quality,seconds,loops,rendered,avg_fps,late_frames,very_late_frames,p50_ms,p90_ms,p99_ms,max_ms",f);
      for(auto* n:StageNames)std::fprintf(f,",%s_ms",n);
-     std::fputs(",gpu_ms,draws,triangles,min_linear_free_kb,stereo_pct,bloom,stadium,dynamic_shadows,shadow_volumes,pass_profiling,file_opens,file_open_ms,pipelined,bloom_merge,bottom_cover,shadow_rect,player_vram,draw_distance,spatial_course,hud_shrink,sky_last\n",f);}
+     std::fputs(",gpu_ms,draws,triangles,min_linear_free_kb,stereo_pct,bloom,stadium,dynamic_shadows,shadow_volumes,pass_profiling,file_opens,file_open_ms,pipelined,bloom_merge,bottom_cover,shadow_rect,player_vram,draw_distance,spatial_course,hud_shrink,sky_last,plain_uv,racer_lod,fast_vertex,vram_priority\n",f);}
     std::array<double,StageCount> ms{};double gpu=0,draws=0,triangles=0;unsigned rendered=0,loops=0,late1=0,late2=0;
     for(unsigned i=0;i<seconds_;++i){const auto& s=second_[i];rendered+=s.rendered;loops+=s.loops;late1+=s.late1;late2+=s.late2;
      for(unsigned j=0;j<StageCount;++j)ms[j]+=s.ms[j];gpu+=s.gpu;draws+=s.draws;triangles+=s.triangles;}
@@ -165,8 +169,8 @@ private:
     std::fprintf(f,"%d,%u,%u,%u,%.1f,%u,%u,%.2f,%u,%u,%.1f,%.1f,%.1f,%.2f",index_,course_,unsigned(n3ds),unsigned(renderQuality().reduced),elapsed_/1000.f,loops,rendered,
      elapsed_>0?rendered*1000.0/elapsed_:0.0,late1,late2,percentile(.5f),percentile(.9f),percentile(.99f),intervalMax_);
     for(double v:ms)std::fprintf(f,",%.3f",v/n);
-    std::fprintf(f,",%.3f,%.1f,%.0f,%u,%.1f,%u,%u,%u,%u,%u,%u,%.1f,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",gpu/n,draws/n,triangles/n,linearMin_==~0u?0u:linearMin_/1024,
-     frames_?100.0*stereoFrames_/frames_:0.0,unsigned(bloom_),unsigned(stadium_),unsigned(dynamicShadows_),unsigned(renderQuality().shadowVolumes),unsigned(diag::passState.enabled),opens_,openMs_,unsigned(pipelined_),unsigned(bloomMerge_),unsigned(RaceBottomScreen::skipCoveredFill),unsigned(shadowRect_),unsigned(playerVram_),unsigned(drawDistance_),unsigned(spatialCourse_),unsigned(hudShrink_),unsigned(skyLast_));
+    std::fprintf(f,",%.3f,%.1f,%.0f,%u,%.1f,%u,%u,%u,%u,%u,%u,%.1f,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",gpu/n,draws/n,triangles/n,linearMin_==~0u?0u:linearMin_/1024,
+     frames_?100.0*stereoFrames_/frames_:0.0,unsigned(bloom_),unsigned(stadium_),unsigned(dynamicShadows_),unsigned(renderQuality().shadowVolumes),unsigned(diag::passState.enabled),opens_,openMs_,unsigned(pipelined_),unsigned(bloomMerge_),unsigned(RaceBottomScreen::skipCoveredFill),unsigned(shadowRect_),unsigned(playerVram_),unsigned(drawDistance_),unsigned(spatialCourse_),unsigned(hudShrink_),unsigned(skyLast_),unsigned(plainUv_),unsigned(renderQuality().racerLod),unsigned(fastVertex_),unsigned(vramPriority_));
     std::fclose(f);
    }
    diag::passWrite(index_,course_);diag::passReset();diag::skinWrite(index_);diag::skinReset();diag::drawWrite(index_);diag::drawReset();
@@ -176,7 +180,7 @@ private:
  void reset(){frames_=0;seconds_=0;spikes_=0;elapsed_=0;intervalMax_=0;linearMin_=~0u;current_={};histogram_={};index_=-1;stereoFrames_=0;opens_=0;openMs_=0;}
  bool active_=false,skip_=false;int index_=-1;
  unsigned frames_=0,seconds_=0,spikes_=0,startTicks_=0,course_=0,linearMin_=~0u;float elapsed_=0,intervalMax_=0;uint64_t stamp_=0;
- unsigned stereoFrames_=0,opens_=0,opensAt_=0;unsigned long long openTicksAt_=0;float openMs_=0;bool bloom_=false,stadium_=false,dynamicShadows_=false,pipelined_=false,bloomMerge_=false,shadowRect_=false,playerVram_=false,drawDistance_=false,spatialCourse_=false,hudShrink_=false,skyLast_=false;
+ unsigned stereoFrames_=0,opens_=0,opensAt_=0;unsigned long long openTicksAt_=0;float openMs_=0;bool bloom_=false,stadium_=false,dynamicShadows_=false,pipelined_=false,bloomMerge_=false,shadowRect_=false,playerVram_=false,drawDistance_=false,spatialCourse_=false,hudShrink_=false,skyLast_=false,plainUv_=false,fastVertex_=false,vramPriority_=false;
  Row row_{};Second current_{};
  std::array<Second,MaxSeconds> second_{};std::array<Row,SpikeCount> spike_{};std::array<unsigned,Buckets> histogram_{};
 };
@@ -194,7 +198,7 @@ public:
  void end(unsigned,const Renderer&,bool=true){}
  void finish(){}
  void autoFrame(bool){}
- void context(bool,bool,bool,bool,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false){}
+ void context(bool,bool,bool,bool,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false){}
 #else
  RuntimeProfile(){
 #ifndef MKW_FRAME_CAPTURE
@@ -209,7 +213,7 @@ public:
  }
  ~RuntimeProfile(){finish();}
  void autoFrame(bool){}
- void context(bool,bool,bool,bool,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false){}
+ void context(bool,bool,bool,bool,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false,bool=false){}
  void begin(unsigned course,unsigned frame,unsigned ticks,float interval){
   if(!on())return;
   row_={};row_.course=course;row_.frame=frame;startTicks_=ticks;row_.interval=interval;

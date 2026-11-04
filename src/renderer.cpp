@@ -844,10 +844,11 @@ void Renderer::beginNow(const C3D_Mtx& view,const C3D_Mtx& projection,bool sync,
         if(execPipelined_){
             // The GPU may still draw the previous frame: its time and this
             // frame's writes wait for previousFrameDone().
-            previousFrameDone_=false;frameEndTick_=0;swapFrameBuffers();
+            previousFrameDone_=false;frameEndTick_=0;stats_.hookMs=0;swapFrameBuffers();
         }else{
             // Every queued command list has completed: the GPU reads nothing of earlier frames.
             stats_.previousGpuMs=C3D_GetDrawingTime();
+            stats_.hookMs=stats_.gpuGapMs=0;queueStartTick_=0;
         }
         renderMetrics={};
     }
@@ -3064,6 +3065,12 @@ void Renderer::endNow(){
     if(execPipelined_){endingFrame_=true;frameEndTick_=svcGetSystemTick();}
     stats_.commandUsage=C3D_GetCmdBufUsage();C3D_FrameEnd(GX_CMDLIST_FLUSH);
     endingFrame_=false;
+    if(execPipelined_){
+        // The previous frame's commands ran from queueStartTick_ for previousGpuMs.
+        const auto now=svcGetSystemTick();
+        stats_.gpuGapMs=queueStartTick_?std::max(0.f,float((now-queueStartTick_)*1000.0/SYSCLOCK_ARM11)-stats_.previousGpuMs):0.f;
+        queueStartTick_=now;
+    }
     if(stadiumPending_){stadiumRead_^=1;stadiumPending_=false;}
 }
 void Renderer::notePresented(){

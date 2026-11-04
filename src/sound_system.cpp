@@ -976,6 +976,7 @@ struct SoundSystem::Impl {
     st.underruns = hw->underruns; st.audioMs = audioMs; st.audioPeakMs = audioPeak; st.frames = statFrames.load();
     st.cacheBytes = cache.arenaBytes; st.cacheUsed = cache.used(); st.cacheLoads = cache.loads; st.cacheEvictions = cache.evictions;
     st.lastMissingSound = es.lastMissingSound; st.lastMissingFile = es.lastMissingFile; st.lastMissingWave = es.lastMissingWave;
+    st.failNoInfo = es.failNoInfo; st.failNoSlot = es.failNoSlot; st.failSetup = es.failSetup; st.failWaves = es.failWaves; st.failStream = es.failStream; st.lastFailedSound = es.lastFailedSound;
     LightLock_Lock(&statLock); published = st; LightLock_Unlock(&statLock);
    }
    LightEvent_Signal(&ioEvent);

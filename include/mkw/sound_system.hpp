@@ -97,7 +97,8 @@ public:
 
  struct Stats { std::uint32_t voices = 0, sounds = 0, dropped = 0, underruns = 0, missing = 0, failed = 0; float audioMs = 0, audioPeakMs = 0; std::uint32_t frames = 0;
   std::uint32_t cacheBytes = 0, cacheUsed = 0, cacheLoads = 0, cacheEvictions = 0;
-  std::uint32_t lastMissingSound = 0xFFFFFFFFu, lastMissingFile = 0xFFFFFFFFu, lastMissingWave = 0xFFFFFFFFu; };
+  std::uint32_t lastMissingSound = 0xFFFFFFFFu, lastMissingFile = 0xFFFFFFFFu, lastMissingWave = 0xFFFFFFFFu;
+  std::uint32_t failNoInfo = 0, failNoSlot = 0, failSetup = 0, failWaves = 0, failStream = 0, lastFailedSound = 0xFFFFFFFFu; };
  Stats stats() const;
  struct Impl;
 private:

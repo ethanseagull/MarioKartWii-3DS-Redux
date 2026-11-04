@@ -201,7 +201,9 @@ struct StartInfo {
 struct Ambient { f32 volume = 1, pitch = 1, pan = 0, surroundPan = 0, fxSend = 0, lpf = 0; int priority = 0; int distancePriority = -1; };
 
 struct EngineStats { u32 voicesActive = 0, voicesDropped = 0, soundsActive = 0, startsFailed = 0, missingData = 0, streamUnderruns = 0;
- u32 lastMissingSound = InvalidId, lastMissingFile = InvalidId, lastMissingWave = InvalidId; };  // QA
+ u32 lastMissingSound = InvalidId, lastMissingFile = InvalidId, lastMissingWave = InvalidId;  // QA
+ // QA: startsFailed by cause (unknown id, no free sound, player setup, waves never cached, stream setup) and the last id.
+ u32 failNoInfo = 0, failNoSlot = 0, failSetup = 0, failWaves = 0, failStream = 0, lastFailedSound = InvalidId; };
 
 // The NW4R runtime: SoundArchivePlayer + SoundPlayers + sequencer + channels +
 // voices. Not thread safe; one audio thread owns it.

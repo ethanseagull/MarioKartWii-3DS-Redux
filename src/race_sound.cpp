@@ -493,10 +493,11 @@ void RaceSound::step(const Frame& f, RaceAudioFrame* actors) {
  if (tick_ == 300 || tick_ == 900 || tick_ == 1800) {
   const auto st = sys.stats();
   if (FILE* log = std::fopen("sdmc:/3ds/mkw-3ds/audio-race-status.txt", "a")) {
-   std::fprintf(log, "tick=%u course=%u ready=%d actor_frames=%lu actor_sounds=%lu voices=%lu missing=%lu failed=%lu last=%lu/%lu/%lu cache=%lu/%lu waves=%lu linear=%lu\n",
+   std::fprintf(log, "tick=%u course=%u ready=%d actor_frames=%lu actor_sounds=%lu voices=%lu missing=%lu failed=%lu (id %lu slot %lu setup %lu waves %lu stream %lu last %lu) last=%lu/%lu/%lu cache=%lu/%lu waves=%lu linear=%lu\n",
     tick_, setup_.course, int(sys.sceneReady()), (unsigned long)layer_.framesUsed.load(),
     (unsigned long)layer_.actorSounds.load(), (unsigned long)st.voices, (unsigned long)st.missing,
-    (unsigned long)st.failed, (unsigned long)st.lastMissingSound, (unsigned long)st.lastMissingFile,
+    (unsigned long)st.failed, (unsigned long)st.failNoInfo, (unsigned long)st.failNoSlot, (unsigned long)st.failSetup,
+    (unsigned long)st.failWaves, (unsigned long)st.failStream, (unsigned long)st.lastFailedSound, (unsigned long)st.lastMissingSound, (unsigned long)st.lastMissingFile,
     (unsigned long)st.lastMissingWave, (unsigned long)st.cacheUsed, (unsigned long)st.cacheBytes,
     (unsigned long)sys.residentWaveBytes(), (unsigned long)linearSpaceFree());
    std::fclose(log);
