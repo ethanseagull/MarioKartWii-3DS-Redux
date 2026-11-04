@@ -35,7 +35,7 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.8.14.
 - Pausing keeps the racers loaded when the pause menu fits, so resuming is immediate.
 - The pause menu's textures load with the race and stay until it ends, so START reads nothing from the SD card.
 - The course preview camera is planned while the race sounds load.
-- `tools/pakpack.c` can repack race.pak and menu.pak in the order the game reads them, LZ4-compressed (lossless); race.pak drops from 1.78 GB to about 1 GB. `tools/build.py` doesn't run it: it's a manual step (`tools/diag/README.md`), and the game reads both pack formats.
+- `tools/build.py` repacks race.pak and menu.pak in the order the game reads them (`tools/pakpack.c`, `tools/pak-order/`), LZ4-compressed (lossless); race.pak drops from 1.78 GB to about 1 GB. The game reads both pack formats, so older SD folders keep working.
 
 # Fixes
 

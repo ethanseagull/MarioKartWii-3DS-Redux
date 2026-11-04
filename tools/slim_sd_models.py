@@ -23,10 +23,10 @@ TYPES = ('.gmdl', '.dskm', '.dobj')
 def pack_names(path):
     with path.open('rb') as f:
         header = f.read(12)
-        if header[:4] != b'MPK1':
-            raise SystemExit(f'{path}: not an MPK1 archive')
+        if header[:4] not in (b'MPK1', b'MPK2'):
+            raise SystemExit(f'{path}: not an MPK1 or MPK2 archive')
         count, names_bytes = struct.unpack('<II', header[4:])
-        f.seek(12 + 12 * count)
+        f.seek(12 + (16 if header[:4] == b'MPK2' else 12) * count)
         blob = f.read(names_bytes)
     return {n.decode() for n in blob.split(b'\0') if n}
 

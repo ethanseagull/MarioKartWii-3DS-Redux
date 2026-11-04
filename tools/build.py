@@ -837,13 +837,30 @@ class Builder:
         self.py('pack-mii', 'pack_mii_racers.py', '--base', stage / 'race-lod.pak', '--overlay', root / 'build/mii-racers', '--output', stage / 'race-mii.pak')
         self.py('pack-unlit', 'pack_unlit_banks.py', stage / 'race-mii.pak', stage / 'race.pak')
 
+        # Both packs as MPK2 (tools/pakpack.c): entries in the order the game
+        # reads them (tools/pak-order/, from DIAG pack traces), the rest by
+        # name stem, LZ4-compressed where that saves space (lossless), and the
+        # fire bar stream packed. race.pak drops from about 1.8 to 1 GB.
+        pakpack = stage / ('pakpack.exe' if os.name == 'nt' else 'pakpack')
+        self.run('pakpack-host', [self.cxx, '-x', 'c', '-O2', '-o', pakpack, 'tools/pakpack.c'])
+        fire = 'textures/firebar-indirect.ftan'
+        archives = []
+        for source, trace_id, loose in ((menu, '0', []), (stage / 'race.pak', '1', [f'{fire}={listing[fire]}'])):
+            name = source.stem
+            order = subprocess.run([self.python, 'tools/pak_order.py', source, trace_id, f'tools/pak-order/{name}.txt'],
+                                   cwd=root, env=self.env, capture_output=True, text=True, check=True).stdout
+            (stage / f'{name}-order.txt').write_text(order, encoding='utf-8')
+            (stage / 'mpk2').mkdir(exist_ok=True)
+            archives.append(stage / 'mpk2' / source.name)
+            self.run('pakpack-' + name, [pakpack, source, stage / f'{name}-order.txt', archives[-1], *loose])
+
         # SD folder: both packs plus every loose file they don't hold.
         sd = out / 'sd/3ds/mkw-3ds'
         if (out / 'sd').exists():
             shutil.rmtree(out / 'sd')
         sd.mkdir(parents=True)
         packed = {}
-        for archive in (menu, stage / 'race.pak'):
+        for archive in archives:
             shutil.copy2(archive, sd / archive.name)
             for name, (at, length) in mpk_index(archive).items():
                 if name in packed:
@@ -1025,7 +1042,7 @@ class Builder:
         add('banner', self.banner, [self.banner_work / 'production/banner-startgrid.bnr', self.banner_work / 'production/icon.icn'])
         # Always rerun: both are incremental and pick up source changes.
         add('compile', self.compile, None)
-        add('package', self.package, None)
+        add('package', self.package, None, files=['tools/pak-order/*.txt'])
         return stages
 
     def method_source(self, method, seen):
@@ -1156,12 +1173,14 @@ def disc_identity(path, previous):
 
 
 def mpk_index(path):
-    """Entry name -> (offset, length) of an MPK1 pack (pack_menu_assets.py layout)."""
+    """Entry name -> (offset, length) of an MPK1 pack (pack_menu_assets.py layout)
+    or an MPK2 pack (tools/pakpack.c; length is the entry's unpacked size)."""
     with path.open('rb') as stream:
         magic, count, names_size = struct.unpack('<4sII', stream.read(12))
-        if magic != b'MPK1':
-            raise BuildError(f'{path} is not an MPK1 pack')
-        rows = [struct.unpack('<III', stream.read(12)) for _ in range(count)]
+        if magic not in (b'MPK1', b'MPK2'):
+            raise BuildError(f'{path} is not an MPK1 or MPK2 pack')
+        width = 16 if magic == b'MPK2' else 12
+        rows = [struct.unpack('<III', stream.read(width)[:12]) for _ in range(count)]
         names = stream.read(names_size)
     return {names[p:names.index(0, p)].decode(): (start, length) for p, start, length in rows}
 

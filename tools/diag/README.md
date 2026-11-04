@@ -92,6 +92,10 @@ MPK1 pack as MPK2: entries in the order `tools/pak_order.py` gives from pack
 traces, LZ4-compressed where that saves space (lossless; every block is
 checked against its source), loose files optionally added
 (`textures/firebar-indirect.ftan=...`). The game reads MPK1 and MPK2.
+`tools/build.py` does this for both packs with the read order saved in
+`tools/pak-order/` (the traced part of `pak_order.py`'s output: its first
+3,803 race.pak and 276 menu.pak lines). After new traces, regenerate the
+order and save its traced lines there.
 
 Two files turn an Old 3DS reduction back on for a New 3DS comparison:
 `racer-lod.txt` (opponents switch to low-detail models with distance; the

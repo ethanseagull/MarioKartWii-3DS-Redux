@@ -141,6 +141,11 @@ python tools/pack_race_assets.py runtime-files.json race-base.pak --exclude-menu
 python tools/pack_racer_lod.py --base race-base.pak --overlay build/racer-lod --output race-lod.pak
 python tools/pack_mii_racers.py --base race-lod.pak --overlay build/mii-racers --output race-mii.pak
 python tools/pack_unlit_banks.py race-mii.pak race.pak
+gcc -O2 -o pakpack tools/pakpack.c
+python tools/pak_order.py sd-card/3ds/mkw-3ds/menu.pak 0 tools/pak-order/menu.txt > menu-order.txt
+python tools/pak_order.py race.pak 1 tools/pak-order/race.txt > race-order.txt
+./pakpack sd-card/3ds/mkw-3ds/menu.pak menu-order.txt mpk2/menu.pak
+./pakpack race.pak race-order.txt mpk2/race.pak textures/firebar-indirect.ftan=build/course-water-feedback/textures/firebar-indirect.ftan
 ```
 
 `resource_manifest.py` lists every runtime file with its source; it expects
@@ -148,7 +153,14 @@ python tools/pack_unlit_banks.py race-mii.pak race.pak
 opponent animation banks (about 40% smaller). Every other entry is copied
 unchanged, and the player and the award ceremony keep the full `.dskm`.
 
-The SD folder is `menu.pak`, `race.pak` and every file in the map that
+`pakpack` rewrites both packs as MPK2: entries in the order the game reads
+them (`tools/pak-order/` holds the read order from DIAG pack traces; the rest
+follow by name, models beside their textures), LZ4-compressed where that saves
+space (lossless; every block is checked against its source). The fire bar
+stream goes into race.pak. race.pak drops from about 1.8 to 1 GB and loads read
+less. The game also reads the MPK1 packs, so this step can be skipped.
+
+The SD folder is the MPK2 `menu.pak` and `race.pak` and every file in the map that
 neither pack holds. Keep packed models out of `models/`: the game reads them
 from the packs, and every extra file in that folder slows the remaining
 loose opens on the console. `slim_sd_models.py <sd folder>` reports any that

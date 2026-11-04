@@ -5,9 +5,12 @@ Entries the traces read come first, in the order the game first read them;
 the rest follow by name without the models/ or textures/ prefix, which puts
 each model beside its textures. One name per line on stdout.
 
-usage: pak_order.py PACK.pak ARCHIVE TRACE.csv [TRACE.csv ...] > order.txt
+usage: pak_order.py PACK.pak ARCHIVE TRACE [TRACE ...] > order.txt
 ARCHIVE: 0 for menu.pak, 1 for race.pak (the trace's first column). The
 traces must come from the MPK1 pack given (offsets are matched to entries).
+A TRACE ending in .txt is a list of entry names already in read order, such
+as tools/pak-order/race.txt (the traced part of an earlier order.txt, which
+tools/build.py uses); names the pack doesn't hold are skipped.
 """
 import bisect, re, struct, sys
 
@@ -39,7 +42,14 @@ def main():
     archive = sys.argv[2]
     starts = [e[0] for e in entries]
     seen, order = set(), []
+    held = {e[2] for e in entries}
     for trace in sys.argv[3:]:
+        if trace.endswith('.txt'):
+            for name in open(trace).read().splitlines():
+                if name in held and name not in seen:
+                    seen.add(name)
+                    order.append(name)
+            continue
         for line in open(trace):
             parts = line.strip().split(',')
             if len(parts) < 3 or parts[0] != archive:
