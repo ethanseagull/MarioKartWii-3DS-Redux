@@ -383,8 +383,10 @@ int main() {
         report("FAIL asset directory or Race/Common.szs");
         return startupFailure("Game resources could not be found.");
     }
+#ifndef MKW_RELEASE
     // DIAG: SD read speed test (read-bench.txt), once.
     if(kQa&&exists("sdmc:/3ds/mkw-3ds/read-bench.txt")){int mode=1;if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/read-bench.txt","r")){if(fscanf(f,"%d",&mode)!=1)mode=1;fclose(f);}remove("sdmc:/3ds/mkw-3ds/read-bench.txt");mkw::pack::readBench("sdmc:/3ds/mkw-3ds/read-bench-result.txt",report,mode);}
+#endif
     // ARM11 VFP: round-to-nearest, flush denormals. Keep Kinoko's explicit Wii
     // arithmetic and disable compiler FP contraction; ghost trace is the oracle.
     unsigned fpscr;asm volatile("vmrs %0, fpscr":"=r"(fpscr));
