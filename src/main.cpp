@@ -1325,6 +1325,9 @@ int main() {
     // Course preview before every race. While it plays Kinoko keeps simulating
     // but holds its intro stage; its own 172 frames then lead into the countdown.
     mkw::RaceIntro intro;mkw::IntroClearancePath introClearance;unsigned introTick=0,introCaptured=~0u;
+    // The scene fader around the preview (mkw::DemoSection). `demoOk`: a new
+    // A press this frame; `demoSkip`: the autopilot's skip, held until taken.
+    mkw::DemoSection demo;bool demoOk=false,demoSkip=false;
     // Race camera director (src/race_camera.cpp): start pan, out-of-bounds
     // holds and wipe, respawn re-seat, goal and KMP TV cameras. It reads the
     // simulation after each step and never writes it.
@@ -1491,6 +1494,7 @@ int main() {
         if(intro.load(kmp,size))intro.start();
         LOGF("course preview %s: %u frames",intro.active()?"playing":"absent",intro.frames());
         introTick=0;introCaptured=~0u;
+        demo.enter(intro.active());demoOk=demoSkip=false;
         if(intro.active()&&!flowUi.loadIntro(introInfo()))LOGF("course preview labels failed to load");
         K::System::RaceManager::Instance()->setIntroHeld(intro.active());
         startCamera();
@@ -2298,7 +2302,7 @@ int main() {
                        menu.page==mkw::UiPage::Race&&!intro.active()&&!results.active());
         if(autoplay){
             auto* raceManager=K::System::RaceManager::Instance();
-            if(intro.active()){held=down=0;if(!raceWarmupFrames&&autopilot->introSkip())down=KEY_A;}
+            if(intro.active()){held=down=0;if(!raceWarmupFrames&&autopilot->introSkip())demoSkip=true;}
             else autopilot->race(held,down,physicsSteps,results.active(),endMenu,menu.cursor,raceManager?raceManager->player(0).raceCompletion():0.f,results.finalRace());
             // Diagnostic overlay: a stuck autopilot race is finished through Kinoko's
             // own finish path, so the results, next and the VS set carry on.
@@ -2319,7 +2323,9 @@ int main() {
         if(raceWarmupFrames)held=down=0;
         if(fullRace){
             // A or START skips the course preview; that press does nothing else.
-            if(intro.active()&&menu.page==mkw::UiPage::Race&&(down&(KEY_A|KEY_START))){endIntro();down&=~u32(KEY_A|KEY_START);}
+            // The preview has no RacePage: START doesn't pause, and A (from its
+            // 61st frame) skips it with a fade (DemoSection). Neither does anything else.
+            if(intro.active()&&menu.page==mkw::UiPage::Race){if(down&KEY_A)demoOk=true;down&=~u32(KEY_A|KEY_START);}
             if(results.active()){
                 // Result boards take A/B/START (Leaderboard, USA 0x8083A5E0);
                 // the end-of-race menu moves with the D-pad and confirms with A.
@@ -2583,7 +2589,13 @@ int main() {
                         jumpAction=trickModel.step(st.onBit(St::TouchingGround),st.onBit(St::InATrick),st.onBit(St::OverZipper),st.onBit(St::ZipperTrick),
                                                    unsigned(local->move()->jump()->variant()),local->isBike());}
                 }
-                if(intro.active()&&!raceWarmupFrames){intro.step();++introTick;if(!intro.active())endIntro();}
+                if(fullRace&&!raceWarmupFrames){
+                    // RaceInfo_update polls before the camera calc sets the director's done flag.
+                    const auto event=demo.step(intro.finished(),demoOk||demoSkip);demoOk=false;
+                    if(event==mkw::DemoSection::Event::Leave)raceSound.previewLeave();
+                    else if(event==mkw::DemoSection::Event::EnterRace)endIntro(); // PreviewEnd: the race section's audio starts
+                }
+                if(intro.active()&&!raceWarmupFrames){intro.step();++introTick;}
                 if(fullRace){
                     raceGrid.afterStep();raceItems->afterStepNative(raceGrid.count());
                     if(coinRunnersMode){
@@ -3572,9 +3584,12 @@ int main() {
             if(fullRace&&!pauseImageFrame&&menu.page!=mkw::UiPage::Race)menuRenderer.draw(renderer,raceQuads,false);
             // Leaving after the end-of-race menu: the scene fader covers everything.
             if(fullRace)renderer.drawScreenFade(results.leaveFade(),false);
+            // The preview's fade out and the race start's fade in, over everything too.
+            const float introFade=fullRace?demo.black():0.f;
+            if(fullRace&&introFade>0)renderer.drawScreenFade(introFade,false);
             if(fullRace&&bottomScreen.active()&&!intro.active()){
                 // The lower LCD: the race read, never written (src/race_bottom_screen.cpp).
-                mkw::fillBottomView(bottomView,raceGrid,*raceItems,intro.active(),physicsSteps,results.leaveFade());
+                mkw::fillBottomView(bottomView,raceGrid,*raceItems,intro.active(),physicsSteps,std::max(results.leaveFade(),introFade));
                 if(battleMode){
                     bottomView.battle=true;
                     bottomView.milliseconds=uint32_t(uint64_t(balloonBattle.durationTicks()-std::min(battleTicks,balloonBattle.durationTicks()))*1000/60);
@@ -3595,7 +3610,8 @@ int main() {
         renderer.end();profiler->mark(Profile::Submit);profiler->end(physicsSteps,renderer);frames++;
         if(raceWarmupFrames){
             renderer.waitForGpu();
-            if(!--raceWarmupFrames)K::System::RaceManager::Instance()->setIntroHeld(intro.active());
+            // The next frame is the race's first on screen: its music starts with it.
+            if(!--raceWarmupFrames){K::System::RaceManager::Instance()->setIntroHeld(intro.active());raceSound.sceneShown();}
             renderer.loadingFrame=false;
             accumulator=0;previous=svcGetSystemTick();lastRefresh=C3D_FrameCounter(0);presentation.reset();
         }

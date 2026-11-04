@@ -40,6 +40,7 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.8.14.
 - Held and trailing items follow the ground under the kart instead of its body, so a bike's lean, a wheelie or a trick no longer tips them into the road.
 - Up and down on the Circle Pad tilt the vehicle in the air, as on the Wii.
 - Circle Pad steering: a radial deadzone, full lock a little before the rim, and full lock on diagonals.
+- The course preview fades in and out as on the Wii. A skips it with a fade from its 61st frame; START no longer skips it. Its last shot holds until the fade ends, and the music starts with the first frame on screen instead of under the loading screen.
 
 # Building
 

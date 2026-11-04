@@ -180,7 +180,9 @@ void RaceSound::begin(const Setup& s) {
  for (int p = 0; p < 11; ++p) { players_[p].value = p < 2 ? 1.0f : 0.0f; players_[p].set(1.0f, p < 2 ? 0 : 0x78); postedPlayer_[p] = -1; }
  race_ = Track{};
  // RaceMgr::Init (80708f5c): the intro section's state (2), or the race
- // section's (3) when there is no course preview.
+ // section's (3) when there is no course preview. Its music starts with the
+ // first frame on screen (sceneShown), not under the loading screen.
+ musicHeld_ = true;
  setRaceState(s.preview ? 2 : 3);
  postVolumes(true);
  sys.setLayer(&layer_);
@@ -330,18 +332,15 @@ void RaceSound::setRaceState(int n) {
  switch (n) {
  case 2:
   rampPlayers();
-  bgm_.play(introFanfare(course), 0);
-  bgm_.prepare(startFanfare(setup_.mode));
+  if (musicHeld_) bgm_.prepare(introFanfare(course));
+  else startStateMusic(n);
   break;
  case 3:
   // The race section's groups are in (fn_1_1EF700): SoundTriggerMgr::Init.
   triggers_.init();
   rampPlayers();
-  bgm_.play(startFanfare(setup_.mode), 0);
-  if (stream != None) {
-   // Toad's Factory starts its course stream at sample 0x37955 (fn_1_1E8B24).
-   bgm_.prepare(stream, course == 4 ? 0x37955 : 0);
-  }
+  if (musicHeld_) bgm_.prepare(startFanfare(setup_.mode));
+  else startStateMusic(n);
   break;
  case 4:
   bgm_.playPrepared(0x24);
@@ -427,9 +426,46 @@ void RaceSound::rankHud(unsigned rank) {
  else if (rankAnim_ == 1 && rankFrame_ >= 11) { rankAnim_ = 2; rankFrame_ = 0; }
 }
 
+void RaceSound::startStateMusic(int n) {
+ const unsigned course = setup_.course;
+ const std::uint32_t stream = course < 0x2a ? CourseStream[course] : None;
+ if (n == 2) {
+  bgm_.play(introFanfare(course), 0);
+  bgm_.prepare(startFanfare(setup_.mode));
+ } else if (n == 3) {
+  bgm_.play(startFanfare(setup_.mode), 0);
+  if (stream != None) {
+   // Toad's Factory starts its course stream at sample 0x37955 (fn_1_1E8B24).
+   bgm_.prepare(stream, course == 4 ? 0x37955 : 0);
+  }
+ }
+}
+
+void RaceSound::sceneShown() {
+ if (!active_ || !musicHeld_) return;
+ musicHeld_ = false;
+ startStateMusic(state_);
+}
+
+void RaceSound::previewLeave() {
+ if (!active_ || state_ != 2) return;
+ // The Demo section's fade-out starts with RaceRSARPlayer::Stop (PAL 0x80715E64,
+ // as TPO has it): the intro fanfare over 20 frames, players 2-10 stopped and
+ // silenced over 20 (PlayersVolumeMgr::Stop) and the intro ambience over 20.
+ auto& sys = SoundSystem::instance();
+ bgm_.stop(0x14);
+ if (bgm_.prepared >= 0) { sys.stopSlot(bgm_.slot[bgm_.prepared], 0); bgm_.prepared = -1; }
+ race_ = Track{};
+ for (std::uint32_t p = 2; p < 11; ++p) { players_[p].set(0.0f, 0x14); post(SoundCommand::StopPlayer, 0, p, 0, 0x14); }
+ triggers_.ambience.push_back({AmbienceOp::GlobalStop, 0, 0x14, 0, -1});
+}
+
 void RaceSound::previewEnded() {
  if (!active_ || state_ != 2) return;
- // The race section starts: RaceRSARPlayer::Prepare -> RaceMgr::Init -> state 3.
+ // The race section starts: RaceRSARPlayer::Prepare -> RaceMgr::Init -> state 3,
+ // then OnLoad's PlayersVolumeMgr::Reset brings players 2-10 (silenced by
+ // previewLeave) from 0 to 1 over 120 frames.
+ for (std::uint32_t p = 2; p < 11; ++p) { players_[p].value = 0.0f; players_[p].set(1.0f, 0x78); }
  setRaceState(3);
 }
 
