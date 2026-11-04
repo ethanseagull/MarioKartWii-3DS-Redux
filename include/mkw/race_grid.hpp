@@ -43,6 +43,10 @@ public:
     void afterStep();
     void setBattleRanks(const std::array<unsigned,Capacity>& ranks){if(battleArena_)ranks_=ranks;}
     unsigned count() const{return count_;}
+    // Replayed ghosts (a Time Trials staff ghost) follow their recorded inputs:
+    // no AI, no item racer, ranked after every other racer. They come last.
+    bool ghost(unsigned player) const{return player<count_&&(ghosts_>>player&1);}
+    unsigned itemCount() const{unsigned n=count_;while(n>1&&ghost(n-1))--n;return n;}
     bool routeReady() const{return route_.size()!=0;}
     // Fixed sun reference from drivable paths, never decorative ocean/sky bounds.
     bool routeCenter(Vec3& center) const {
@@ -73,6 +77,6 @@ private:
     std::array<unsigned,Capacity> choices_{},ranks_{},laps_{};
     std::array<bool,Capacity> finished_{};
     CpuSpeedParam speedParam_{};bool speedParamReady_=false;float lapDistance_=0;
-    unsigned count_=1,engineClass_=2,difficulty_=1;bool battleArena_=false;
+    unsigned count_=1,engineClass_=2,difficulty_=1;bool battleArena_=false;uint32_t ghosts_=0;
 };
 }

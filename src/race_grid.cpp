@@ -173,7 +173,13 @@ bool RaceGrid::reset(){
     using namespace Kinoko;
     drivers_={};finished_={};laps_={};route_.clear();bulletRoute_.clear();
     auto* config=System::RaceConfig::Instance();if(!config)return false;
-    count_=config->raceScenario().playerCount;
+    count_=config->raceScenario().playerCount;ghosts_=0;
+    for(unsigned i=0;i<count_;++i){const auto& p=config->raceScenario().players[i];
+        if(p.type!=System::RaceConfig::Player::Type::Ghost)continue;
+        ghosts_|=1u<<i;
+        // The ghost file chose its machine (RaceConfig::initGhost): match the garage entry.
+        for(unsigned c=0;c<GarageChoices.size();++c)if(raceGarageChoice(c).character==unsigned(p.character)&&raceGarageChoice(c).vehicle==unsigned(p.vehicle)){choices_[i]=c;break;}
+    }
     auto* kartObjects=Kart::KartObjectManager::Instance();
     for(unsigned i=0;i<count_;++i){
         auto* kart=kartObjects->object(i);
@@ -250,7 +256,7 @@ void RaceGrid::beforeStep(uint16_t bulletPlayers){
     for(unsigned j=1;j<count_;++j)leaderCompletion=std::max(leaderCompletion,manager->player(j).raceCompletion());
     // Retail Enemy::AI drives every CPU outside a Bullet (and player zero for QA).
     uint32_t aiMask=0;
-    for(unsigned i=0;i<count_;++i)if(!(bulletPlayers&(1u<<i))&&(i||driveLocal))aiMask|=1u<<i;
+    for(unsigned i=0;i<count_;++i)if(!(bulletPlayers&(1u<<i))&&(i||driveLocal)&&!ghost(i))aiMask|=1u<<i;
     if(ai_.ready()){
         // CPUs run the retail stuck handler inside CpuAi; the QA autopilot keeps
         // the adapted recovery below.
@@ -258,6 +264,7 @@ void RaceGrid::beforeStep(uint16_t bulletPlayers){
         ai_.step(aiMask,ranks_,laps_,finished_,3);
     }
     for(unsigned i=0;i<count_;++i){
+        if(ghost(i))continue;
         const bool bullet=(bulletPlayers&(1u<<i))!=0;
         auto& d=drivers_[i];
         auto* kart=objects->object(i);
@@ -455,6 +462,7 @@ void RaceGrid::afterStep(){
     std::array<unsigned,Capacity> order{};for(unsigned i=0;i<count_;++i)order[i]=i;
     std::sort(order.begin(),order.begin()+count_,[&](unsigned a,unsigned b){
         const auto& x=manager->player(a);const auto& y=manager->player(b);
+        if(ghost(a)!=ghost(b))return ghost(b);
         if(x.finished()!=y.finished())return x.finished();
         if(x.finished())return x.finishOrder()<y.finishOrder();
         if(x.raceCompletion()!=y.raceCompletion())return x.raceCompletion()>y.raceCompletion();

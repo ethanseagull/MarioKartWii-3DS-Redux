@@ -484,6 +484,10 @@ public:
     // Zero outside Star racer draws; no model/texture mutation is involved.
     static constexpr uint32_t InkBlack=255u; // low byte: ink coverage, original alpha preserved
     uint32_t additiveColor=0;
+    // Ghost racers (a Time Trials staff ghost): pass 1 writes depth only; pass
+    // 2 blends colour at ghostAlpha where that depth is nearest, so only the
+    // ghost's front surface shows through. Zero for every other draw.
+    uint8_t ghostPass=0,ghostAlpha=0x80;
 private:
     // Recording (src/render_thread.cpp).
     struct FrameList;
@@ -633,7 +637,7 @@ private:
     unsigned recordSceneRegion_=3,execSceneRegion_=3;
     Stats stats_{};
     bool skyBehind_=false,execBehind_=false;
-    uint32_t execFrame_=0,execAdditive_=0;
+    uint32_t execFrame_=0,execAdditive_=0;uint8_t execGhostPass_=0,execGhostAlpha_=0;
     C3D_RenderTarget* target_=nullptr;
     // Right eye (VRAM, New 3DS with a 3D screen only; linked to GFX_RIGHT).
     C3D_RenderTarget* targetRight_=nullptr;

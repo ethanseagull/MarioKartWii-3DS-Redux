@@ -542,6 +542,23 @@ public:
    textSprite(indices[i],cell,p);x+=cell.w;
   }
  }
+ // A runtime caption (ghost names and times) in the native-font name glyphs.
+ void glyphText(const char* value,const char* base,Pose p,const char* name="text"){
+  if(transition&&transition->preload)value="Staff Ghost Expert 0123456789:.";
+  const auto* original=pane(base,name);if(!original)return;
+  unsigned indices[48]{},count=0;float widths[48]{},total=0;
+  for(const unsigned char* ch=reinterpret_cast<const unsigned char*>(value);*ch&&count<48;++ch){
+   char key[32];std::snprintf(key,sizeof key,"name_glyph_%04x",unsigned(*ch));
+   const auto index=lookup().find(key);if(index>=std::size(UiSprites))continue;
+   const auto& glyph=UiSprites[index];indices[count]=index;
+   widths[count]=glyph.w*original->fontH/UiFontCells[0][1]*YScale/XScale;total+=widths[count++];
+  }
+  if(total<=0)return;
+  const float fit=std::min(1.f,original->w/total);
+  float x=original->x+(original->w-total*fit)*.5f;
+  for(unsigned i=0;i<count;++i){auto cell=*original;cell.x=x;cell.w=widths[i]*fit;cell.fontW*=fit;cell.fontH*=fit;cell.textAlign=0;
+   textSprite(indices[i],cell,p);x+=cell.w;}
+ }
  void icon(const char* prefix,unsigned i,const char* base,const char* name,Pose p={},float a=1,uint32_t tint=0xffffffff){diag::ComposeTimer diagTimer_(13);char key[64];std::snprintf(key,sizeof key,"%s%u",prefix,i);const auto first=out.size();inPane(key,base,name,p,a);for(auto at=first;at<out.size();++at){out[at].menu.preserveAspect=true;out[at].tint=tint;}}
  void licenseTrophies(const char* base,Pose p,unsigned slot){diag::ComposeTimer diagTimer_(14);
   const auto& flags=state.licenseUnlocks[slot];
@@ -1155,11 +1172,20 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
   c.chrome(pick?"Cups":"Stages");break;
  }
  case UiPage::Ghost:{
-  // No ghost enumeration yet: do not claim imported saves contain no ghosts.
-  // Keep the supported solo action; deferred race/replay actions stay hidden.
+  // The disc's staff ghosts for this course (the expert one once the staff
+  // ghost is beaten), then solo. Saved-ghost lists and replays are deferred.
   c.timeTrialBest();
-  auto solo=control("TimeAttackGhostList","Alone",0);solo.y=0;
-  c.group(UiMenuRole::Choice,0,solo,"ghost_free");c.button("ghost",0,solo,"Solo Time Trials");
+  const unsigned course=std::min(s.selection.course,31u);
+  for(unsigned slot=0;slot<3;++slot){
+   if(!s.choiceVisible(slot)&&!(transition&&transition->preload))continue;
+   auto p=control("TimeAttackGhostList","Alone",0);p.y=0;
+   c.group(UiMenuRole::Choice,slot,p,"ghost_free");
+   if(slot==2){c.button("ghost",slot,p,"Solo Time Trials");continue;}
+   c.button("ghost",slot,p);
+   const unsigned ms=s.staffGhostTimes[course][slot];char label[40];
+   std::snprintf(label,sizeof label,"%s %u:%02u.%03u",slot?"Expert Staff Ghost":"Staff Ghost",ms/60000,ms/1000%60,ms%1000);
+   const auto key=c.buttonState("ghost",slot);c.glyphText(label,key.c_str(),p);
+  }
   c.chrome("Time Trials");break;
  }
  case UiPage::DriftHelp:{
@@ -1347,7 +1373,11 @@ MenuRect menuChoiceRect(const UiQuad& q,const MenuState& state){
  case UiPage::TeamConfirm:return {52,95,216,48};
  case UiPage::Confirm:return {72,83,176,80};
  case UiPage::EraseLicense:return {35,65.f+75.f*i,250,52};
- case UiPage::Ghost:return {25,89,270,54};
+ case UiPage::Ghost:{
+  MenuState choices=state;choices.page=UiPage::Ghost;
+  const unsigned n=std::max(choices.visibleChoiceCount(),1u),k=choices.visibleChoiceIndex(i);
+  return {25,120.f-(54.f+58.f*float(n-1))*.5f+58.f*float(k),270,54};
+ }
  case UiPage::Unlock:return {96,190,128,30};
  case UiPage::Error:return {15,93,290,48};
  default:return {10,35.f+39.f*i,300,34};

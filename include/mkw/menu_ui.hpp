@@ -78,6 +78,15 @@ public:
  std::array<std::array<std::uint16_t,10>,4> licenseNames{};
  std::array<LicenseUnlockFlags,4> licenseUnlocks{};
  const LicenseUnlockFlags& unlocks()const{return licenseUnlocks[std::min(selection.license,3u)];}
+ // Time Trials staff ghosts: finish times (ms) of the disc's normal/expert
+ // ghost per course, 0 while not read or not on the SD card (main fills a
+ // cup's four courses before its Course page). Bit n: course n's staff ghost
+ // beaten, which unlocks its expert staff ghost (retail RKPD +0x0c).
+ std::array<std::array<std::uint32_t,2>,32> staffGhostTimes{};
+ std::array<std::uint32_t,4> licenseExpertGhosts{};
+ bool expertGhostUnlocked(unsigned course)const{return course<32&&(licenseExpertGhosts[std::min(selection.license,3u)]>>course&1);}
+ // Ghost page choice: 0 alone, 1 staff ghost, 2 expert staff ghost.
+ unsigned ghostChoice=0;
  int selectRaceMiiRequest=-1;unsigned selectedMiiVoice=0;
  void confirmRaceMii(unsigned weight,unsigned character);
  unsigned driverWeight()const{return selection.driver<24?UiCharacters[selection.driver].weight:std::min(selection.miiWeight,2u);}

@@ -36,8 +36,9 @@ void RaceConfig::initControllers() {
     for (size_t i = 0; i < m_raceScenario.playerCount; ++i) {
         switch (m_raceScenario.players[i].type) {
         case Player::Type::Ghost:
-            ASSERT(i == 0); // The trace/replay source has one ghost stream.
-            initGhost();
+            // One ghost stream: the trace/replay as player 0, or a Time Trials
+            // staff ghost beside the local racer (retail Scenario::initGhost).
+            initGhost(i);
             break;
         case Player::Type::Local:
         case Player::Type::CPU:
@@ -53,16 +54,19 @@ void RaceConfig::initControllers() {
 /// @addr{0x8052EEF0}
 /// @brief Initializes the ghost.
 /// @details This is normally scoped within RaceConfig::Scenario, but Kinoko doesn't support menus.
-void RaceConfig::initGhost() {
+void RaceConfig::initGhost(size_t index) {
     GhostFile ghost(m_ghost);
 
-    m_raceScenario.course = ghost.course();
-    Player &player = m_raceScenario.players[0];
+    // A replay picks the course; a raced ghost was loaded for the chosen one.
+    if (index == 0) {
+        m_raceScenario.course = ghost.course();
+    }
+    Player &player = m_raceScenario.players[index];
     player.character = ghost.character();
     player.vehicle = ghost.vehicle();
     player.driftIsAuto = ghost.driftIsAuto();
 
-    KPadDirector::Instance()->setGhostPad(ghost.inputs(), ghost.driftIsAuto());
+    KPadDirector::Instance()->setGhostPad(ghost.inputs(), ghost.driftIsAuto(), index);
 }
 
 /// @addr{0x8052FE58}

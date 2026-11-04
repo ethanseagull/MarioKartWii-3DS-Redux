@@ -14,6 +14,8 @@
 #include "game/field/ObjectCollisionKart.hh"
 #include "game/field/ObjectDirector.hh"
 
+#include "game/system/RaceConfig.hh"
+
 #include <egg/math/BoundBox.hh>
 #include <egg/math/Math.hh>
 
@@ -57,6 +59,10 @@ namespace {
 /// Retail PlayerSub18_checkPlayerCollision state gate: respawn, cannon, crushed
 /// (with state bit 81) and ghost racers never touch another racer.
 bool KartCollisionExempt(const KartObject *kart) {
+    const auto &scenario = System::RaceConfig::Instance()->raceScenario();
+    if (scenario.players[kart->param()->playerIdx()].type == System::RaceConfig::Player::Type::Ghost) {
+        return true;
+    }
     const auto &status = kart->status();
     return status.onBit(eStatus::TriggerRespawn, eStatus::InRespawn, eStatus::AfterRespawn,
             eStatus::CannonStart, eStatus::InCannon, eStatus::AfterCannon, eStatus::BattleHidden);

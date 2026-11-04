@@ -84,7 +84,7 @@ struct DrawCommand {
     static constexpr uint16_t Type=CmdDraw;
     const Model* model;const Vertex* vertices;C3D_Mtx transform;
     Renderer::MaterialBinder material;void* context;Renderer::ShapeVisible visible;
-    uint32_t frame,additive;bool backdrop,behind;
+    uint32_t frame,additive;bool backdrop,behind;uint8_t ghostPass,ghostAlpha;
 };
 struct DrawAtScreenCommand {
     static constexpr uint16_t Type=CmdDrawAtScreen;
@@ -365,9 +365,9 @@ void Renderer::execute(FrameList& list){
         case CmdBottom:bottom=true;if(!execDualScreenIntro_&&eye+1==eyes)beginBottom();break;
         case CmdDraw:{
             const auto& c=*static_cast<const DrawCommand*>(body);
-            execFrame_=c.frame;execAdditive_=c.additive;execBehind_=c.behind;
+            execFrame_=c.frame;execAdditive_=c.additive;execBehind_=c.behind;execGhostPass_=c.ghostPass;execGhostAlpha_=c.ghostAlpha;
             drawNow(*c.model,c.vertices,c.transform,c.backdrop,c.material,c.context,c.visible);
-            execBehind_=false;
+            execBehind_=false;execGhostPass_=0;
             if(probe&&pass==0&&diagRegion==list.diagProbe){
                 // Again, culled as before but every vertex at one point: the
                 // same vertex work and no pixels. The frame's counts exclude it.
@@ -668,16 +668,16 @@ void Renderer::applyBloom(){
 void Renderer::drawWith(const Model& model,const C3D_Mtx& transform,bool backdrop,MaterialBinder material,const void* context,std::size_t contextSize,ShapeVisible visible){
     if(!recording()){
         if(!renderThread){execFrame_=animationFrame;execAdditive_=additiveColor;}
-        execBehind_=backdrop&&skyBehind_;
+        execBehind_=backdrop&&skyBehind_;execGhostPass_=ghostPass;execGhostAlpha_=ghostAlpha;
         drawNow(model,model.vertices,transform,backdrop,material,const_cast<void*>(context),visible);
-        execBehind_=false;
+        execBehind_=false;execGhostPass_=0;
         return;
     }
     void* copied=nullptr;
     if(context&&contextSize){copied=data(contextSize);std::memcpy(copied,context,contextSize);}
     auto& c=command<DrawCommand>();
     c.model=&model;c.vertices=model.vertices;c.transform=transform;c.material=material;c.context=copied;c.visible=visible;
-    c.frame=animationFrame;c.additive=additiveColor;c.backdrop=backdrop;c.behind=backdrop&&skyBehind_;
+    c.frame=animationFrame;c.additive=additiveColor;c.backdrop=backdrop;c.behind=backdrop&&skyBehind_;c.ghostPass=ghostPass;c.ghostAlpha=ghostAlpha;
 }
 void Renderer::drawAtScreen(const Model& model,const C3D_Mtx& transform,float x,float y,float brightness,float scaleX,float scaleY){
     drawAtScreenWith(model,transform,x,y,brightness,scaleX,scaleY,nullptr,nullptr,0);

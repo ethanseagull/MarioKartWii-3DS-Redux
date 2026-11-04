@@ -250,10 +250,10 @@ void ObjectDirector::createObjects() {
     bool sun = false;
 
     // Retail (USA 0x80813378) builds no item boxes and no Bob-omb cars while ObjectDirector
-    // +0x55 is set, as in time trials. Kinoko's time trials replay a ghost as player 0.
+    // +0x55 is set, as in time trials: the Time Trials mode, or a replayed ghost as player 0.
     const auto &scenario = System::RaceConfig::Instance()->raceScenario();
-    const bool timeTrial = scenario.playerCount > 0 &&
-            scenario.players[0].type == System::RaceConfig::Player::Type::Ghost;
+    const bool timeTrial = scenario.gameMode == System::RaceConfig::Scenario::GameMode::Time_Trial ||
+            (scenario.playerCount > 0 && scenario.players[0].type == System::RaceConfig::Player::Type::Ghost);
 
     // The max pitch of the Chain Chomp only needs to be set once,
     // so we set it here instead of in the Chain Chomp constructor.

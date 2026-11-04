@@ -19,8 +19,13 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.8.14.
 - Opponents load compact animation banks (`.dsku`), about 40% smaller.
 - Sped up menu text animation by caching its results.
 
+# Time Trials
+
+- Staff ghosts: race the disc's Staff Ghost on every course, and its Expert Staff Ghost once you beat the Staff Ghost's time. The ghost is translucent, can't be bumped and uses its own Triple Mushroom. Beating staff ghosts counts towards the retail unlocks that need them, and ghost races count as Ghost Races in your records.
+
 # Fixes
 
+- Time Trials no longer place Moonview Highway's Bob-omb cars, as on the Wii.
 - Award ceremonies no longer fail at the driving scene: its effect bank is now cooked.
 - The select and controller sounds no longer play a semitone flat.
 - R tricks off boost ramps, half-pipes and zippers, not only trick surfaces.

@@ -38,7 +38,7 @@ public:
         return m_hostControllers[index];
     }
 
-    void setGhostPad(const u8 *inputs, bool driftIsAuto);
+    void setGhostPad(const u8 *inputs, bool driftIsAuto, size_t index = 0);
     void setHostPad(bool driftIsAuto, size_t index = 0);
     void setPlayerCount(size_t count) {
         ASSERT(count >= 1 && count <= m_playerInputs.size());

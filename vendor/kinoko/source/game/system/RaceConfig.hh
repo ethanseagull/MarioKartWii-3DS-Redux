@@ -77,7 +77,7 @@ public:
     void init();
     void initRace();
     void initControllers();
-    void initGhost();
+    void initGhost(size_t index = 0);
 
     [[nodiscard]] const Scenario &raceScenario() const {
         return m_raceScenario;

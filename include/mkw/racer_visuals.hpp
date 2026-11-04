@@ -22,6 +22,9 @@ public:
     // Original vehicle shadow volumes resolve on the world before racers draw.
     void draw(Renderer& renderer,const RaceItems& items,Vec3 viewer,unsigned tick,
               const Model* playerShadow=nullptr,const C3D_Mtx* playerTransform=nullptr);
+    // Replayed ghosts (RaceConfig Ghost players) are left out of draw(): call
+    // after the opaque world, player and its shadow. Translucent, no shadow volume.
+    void drawGhosts(Renderer& renderer);
     unsigned count() const;
 private:
     struct Impl;

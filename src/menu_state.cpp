@@ -106,7 +106,7 @@ unsigned MenuState::count()const{
  case UiPage::Cup:return 8;
  case UiPage::Course:return 4;
  case UiPage::BattleStage:return 5;
- case UiPage::Ghost:return 1;
+ case UiPage::Ghost:return 3;
  case UiPage::Pause:return pauseCount();
  default:return 1;
  }
@@ -119,6 +119,9 @@ bool MenuState::choiceVisible(unsigned slot)const{
  case UiPage::Vehicle:return vehicleUnlocked(vehicleChoice(slot))&&raceVehicle(vehicleChoice(slot));
  case UiPage::Cup:return cupUnlocked(slot);
  case UiPage::EngineClass:return engineUnlocked(slot)&&raceEngineClass(UiEngineClass(slot));
+ // Staff Ghost, Expert Staff Ghost (once unlocked), Solo Time Trials.
+ case UiPage::Ghost:{const unsigned course=std::min(selection.course,31u);
+  return slot==2||(staffGhostTimes[course][slot]&&(slot==0||expertGhostUnlocked(course)));}
  default:return true;
  }
 }
@@ -230,7 +233,7 @@ void MenuState::enter(UiPage next){
  case UiPage::Course:cursor=selection.course%4;break;
  case UiPage::BattleCup:cursor=selection.battleStage/5;break;
  case UiPage::BattleStage:cursor=selection.battleStage%5;break;
- case UiPage::Ghost:cursor=0;break; // Ghost racing/replays are deferred; solo remains usable.
+ case UiPage::Ghost:cursor=ghostChoice==1?0:ghostChoice==2?1:2;break; // Replays are deferred.
  case UiPage::EraseLicense:case UiPage::QuitConfirm:cursor=1;break;
  default:break;
  }
@@ -312,7 +315,7 @@ UiAction MenuState::input(UiInput key){
   const bool hasAuxiliary=auxiliary!=~0u;
   const bool topRow=page==UiPage::License?cursor<2:page==UiPage::MainMenu?cursor<4:cursor==0;
   const bool rightEdge=page==UiPage::License?cursor%2==1:page==UiPage::MainMenu?(cursor==3||cursor==6):true;
-  if(page==UiPage::Character||page==UiPage::Vehicle||page==UiPage::Cup||page==UiPage::EngineClass){
+  if(page==UiPage::Character||page==UiPage::Vehicle||page==UiPage::Cup||page==UiPage::EngineClass||page==UiPage::Ghost){
    std::array<unsigned,26> visible{};unsigned n=0,current=0;
    for(unsigned i=0;i<count()&&n<visible.size();++i)if(choiceVisible(i)){if(i==cursor)current=n;visible[n++]=i;}
    if(n){
@@ -403,7 +406,8 @@ UiAction MenuState::input(UiInput key){
   if(selection.course/4!=cursor||selection.mode==UiMode::GrandPrix)selection.course=cursor*4;
   enter(selection.mode==UiMode::GrandPrix?UiPage::Confirm:UiPage::Course);break;
  case UiPage::Course:selection.course=selection.course/4*4+cursor;enter(selection.mode==UiMode::TimeTrials?UiPage::Ghost:UiPage::Confirm);break;
- case UiPage::Ghost:enter(UiPage::Confirm);break;
+ case UiPage::Ghost:if(!choiceVisible(cursor)){unavailable=true;break;}
+  ghostChoice=cursor==0?1:cursor==1?2:0;enter(UiPage::Confirm);break;
  case UiPage::BattleCup:
   if(selection.battleStage/5!=cursor)selection.battleStage=cursor*5;
   enter(UiPage::BattleStage);break;
