@@ -1969,6 +1969,11 @@ int main() {
     bool new3ds=false;APT_CheckNew3DS(&new3ds);
     mkw::renderQuality().setReduced(!new3ds&&!(kQa&&exists("sdmc:/3ds/mkw-3ds/full-quality.txt")));
     mkw::renderQuality().mipmaps=!exists("sdmc:/3ds/mkw-3ds/diagnose-no-mipmaps.txt");
+    // New 3DS draws every opponent at full detail (A/B: racer-lod.txt brings back the distance LOD).
+    if(exists("sdmc:/3ds/mkw-3ds/racer-lod.txt"))mkw::renderQuality().racerLod=true;
+    // Crowds and animated item models drop to 30/15 Hz when frames run slow:
+    // Old 3DS only, the Wii never does (A/B: animation-budget.txt on New 3DS).
+    const bool animationBudgetOn=mkw::renderQuality().reduced||exists("sdmc:/3ds/mkw-3ds/animation-budget.txt");
     report(mkw::renderQuality().mipmaps?"HW13 authored material mip filters/LOD bias":"LOD0 fallback: full chain retained");
     report(mkw::renderQuality().reduced?"render quality reduced":"render quality full");
     if(dataReady){
@@ -3076,7 +3081,7 @@ int main() {
                 // the newest pose, inputs and original animation clocks.
                 if(!renderer.canRecordFrame()||!presentation.due(physicsSteps)){profiler->end(physicsSteps,renderer,false);continue;}
             }
-            animationBudget.present(physicsSteps,fullRace&&!intro.active()&&!results.active()&&!raceGrid.finished()&&!raceWarmupFrames);
+            animationBudget.present(physicsSteps,animationBudgetOn&&fullRace&&!intro.active()&&!results.active()&&!raceGrid.finished()&&!raceWarmupFrames);
             renderer.loadingFrame=raceWarmupFrames!=0;
             renderer.frameSync=!fullRace;
             auto* camera=K::Render::KartCamera::Instance();auto* cameraKart=K::Kart::KartObjectManager::Instance()->object(0);
@@ -3189,7 +3194,7 @@ int main() {
             courseObjects.prepare(renderer,physicsSteps,renderer.cameraPosition());
             // DIAG: perf-race-NNN-grid-draws.csv tallies the countdown's draws.
             mkw::diag::drawGrid.store(fullRace&&K::System::RaceManager::Instance()->stage()==K::System::RaceManager::Stage::Countdown,std::memory_order_relaxed);
-            if(fullRace)opponents.prepare(renderer,*raceItems,vec(cameraKart->pos()),physicsSteps,intro.active()||results.active()||raceGrid.finished());
+            if(fullRace)opponents.prepare(renderer,*raceItems,vec(cameraKart->pos()),physicsSteps,!mkw::renderQuality().racerLod||intro.active()||results.active()||raceGrid.finished());
             // Snapshot the original chassis transform before the player pose
             // worker reads VehicleAnimation's lazy matrices.
             const C3D_Mtx playerShadowTransform=vehicleAnimation.body();

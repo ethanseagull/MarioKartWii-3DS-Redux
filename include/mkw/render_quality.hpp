@@ -31,6 +31,10 @@ struct RenderQuality {
     // effects to the 3 nearest karts within 3,000 units, 2 to the 2 nearest
     // within 2,000 (retail's two-player split screen).
     unsigned kartEffectScreens=1;
+    // Opponents switch to the Wii's split-screen kart bodies, low-detail
+    // drivers and fewer wheels with camera distance (RacerLod). Off: every
+    // opponent keeps full detail, as in the Wii's single-player races.
+    bool racerLod=false;
     // CPU-skinned spectator crowds and animated item models (Bullet Bill,
     // Thundercloud, POW...) advance in steps of this many ticks (4: 15 Hz),
     // so their skinned pose repeats on alternate frames; 0 every tick.
@@ -43,7 +47,7 @@ struct RenderQuality {
         *this=RenderQuality{};
         if(!on)return;
         reduced=true;minScreenRatio=.015f;objectLowDistance=4000.f;
-        shadowVolumes=false;bloomBlurRounds=1;boxSparkleRatio=.04f;particleBudget=96;kartEffectScreens=2;animationStep=4;vramCourseTextures=true;
+        shadowVolumes=false;bloomBlurRounds=1;boxSparkleRatio=.04f;particleBudget=96;kartEffectScreens=2;racerLod=true;animationStep=4;vramCourseTextures=true;
     }
 #ifdef MKW_RENDER_QUALITY_C3D
     // True when bounds b placed by transform t are too small to draw from camera.
