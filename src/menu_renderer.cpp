@@ -208,7 +208,9 @@ void MenuRenderer::draw(Renderer& renderer,const std::vector<UiQuad>& quads,bool
    if(movie&&movie->texture())renderer.drawScreenSpriteRegion(*movie->texture(),q.x,q.y,q.w,q.h,r.u0+(r.u1-r.u0)*q.u0,r.v0+(r.v1-r.v0)*q.v0,r.u0+(r.u1-r.u0)*q.u1,r.v0+(r.v1-r.v0)*q.v1,q.alpha,q.tint,q.corners.data(),q.additive);
   }else if(q.sprite<impl_->slots.size()&&impl_->slots[q.sprite].texture){
    const auto& info=UiSprites[q.sprite];const auto& texture=*impl_->slots[q.sprite].texture;
-   if(!std::strcmp(info.key,"background")){
+   // The stripes: "background" (dark), "background_lines" (stripes alone,
+   // over the title picture) and "background_option" (the Settings page).
+   if(!std::strncmp(info.key,"background",10)){
     // One wall clock for upper/lower backgrounds and every menu page. Release
     // and page/section clocks must not restart this ambient scroll.
     static const auto origin=svcGetSystemTick();

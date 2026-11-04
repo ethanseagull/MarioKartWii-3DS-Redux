@@ -329,15 +329,21 @@ void KartMove::calcSlipstream() {
     }
     const u8 self = param()->playerIdx();
     const bool turn = System::RaceManager::Instance()->timer() % count == self;
+    // A Time Trials ghost neither drafts nor gives a draft: it replays the run
+    // it recorded alone, and racing it leaves the player's run unchanged.
+    const auto &players = System::RaceConfig::Instance()->raceScenario().players;
+    auto ghost = [&](size_t i) {
+        return players[i].type == System::RaceConfig::Player::Type::Ghost;
+    };
 
     if (turn && !m_slipstreamBoost && !m_bulletActive) {
         bool found = false;
-        if (status.offBit(eStatus::InAction) && speedRatioCapped() >= MIN_SPEED_RATIO) {
+        if (!ghost(self) && status.offBit(eStatus::InAction) && speedRatioCapped() >= MIN_SPEED_RATIO) {
             const EGG::Vector3f &me = pos();
             // Retail KartCollide +0x14: bounding radius * hitbox scale.
             const f32 reach = collide()->boundingRadius() + DISTANCE;
             for (size_t i = 0; i < count; ++i) {
-                if (i == self) {
+                if (i == self || ghost(i)) {
                     continue;
                 }
                 const KartObject *other = objects->object(i);

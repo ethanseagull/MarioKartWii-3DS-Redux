@@ -442,7 +442,7 @@ public:
  // Existing native-font name glyphs allow runtime option values without
  // adding texture assets or using a platform/system font.
  void optionText(const char* value,const UiPaneInfo& original,Pose p,bool fixed=false){
-  if(!fixed&&transition&&transition->preload)value="0123456789% Change Miis Erase License LED: Off Items + Events Drifts Dynamic Shadows On Brightness";
+  if(!fixed&&transition&&transition->preload)value="0123456789% Change Miis Erase License LED: Off Items + Events Drifts Brightness Texture Quality High Standard Dynamic Shadows On Bloom Opponent Detail Full Reduced";
   unsigned indices[128]{},count=0;float widths[128]{},total=0;
   for(const unsigned char* ch=reinterpret_cast<const unsigned char*>(value);*ch&&count<128;++ch){
    char key[32];std::snprintf(key,sizeof key,"name_glyph_%04x",unsigned(*ch));
@@ -504,7 +504,7 @@ public:
  }
  void text(const char* text,const char* base,Pose p={},uint32_t tint=0xffffffff,const char* name="text"){diag::ComposeTimer diagTimer_(9);
   const auto* r=pane(base,name);if(!r)return;
-  if(layout.page==UiPage::LicenseSettings&&layout.role==UiMenuRole::Choice){optionText(text,*r,p);return;}
+  if((layout.page==UiPage::LicenseSettings||layout.page==UiPage::Settings)&&layout.role==UiMenuRole::Choice){optionText(text,*r,p);return;}
   const auto* shadow=pane(base,"text_shadow");
   if(!shadow&&!std::strcmp(name,"text"))shadow=pane(base,"TextBox_sha");
   // Pause labels not baked by this menu cook ("Continue Game") use the
@@ -872,9 +872,10 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
  if(s.page!=UiPage::Confirm&&s.page!=UiPage::DriftHelp){
   char artwork[48];std::snprintf(artwork,sizeof artwork,"title_%s_%u",
       s.page==UiPage::MainMenu||s.page==UiPage::License?"blur_scene":"scene",std::min(s.titleArtwork,5u));
-  c.panel(s.page==UiPage::Title||s.page==UiPage::Intro||s.page==UiPage::MainMenu||s.page==UiPage::License?artwork:"background");
+  c.panel(s.page==UiPage::Title||s.page==UiPage::Intro||s.page==UiPage::MainMenu||s.page==UiPage::License?artwork:
+      s.page==UiPage::Settings?"background_option":"background");
  }
- if(s.page==UiPage::License||s.page==UiPage::MainMenu)c.panel("background");
+ if(s.page==UiPage::License||s.page==UiPage::MainMenu)c.panel("background_lines");
  c.group(UiMenuRole::Content);
  switch(s.page){
  case UiPage::Unlock:{
@@ -949,14 +950,13 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
  }
  case UiPage::LicenseSettings:{
   // Reuse the original control and game-font text, including the two port options.
-  const char* variants[]={"ChangeMii","Delete","ChangeMii","ChangeMii","ChangeMii"};
+  const char* variants[]={"ChangeMii","Delete","ChangeMii","ChangeMii"};
   const char* modes[]={"Off","Items","Items + Events","Items + Events + Drifts"};
-  char ledLabel[64],shadowLabel[64],brightnessLabel[48];
+  char ledLabel[64],brightnessLabel[48];
   std::snprintf(brightnessLabel,sizeof brightnessLabel,"LED Brightness: %u%%",s.selection.ledBrightness);
   std::snprintf(ledLabel,sizeof ledLabel,"LED: %s",modes[std::min(s.selection.ledMode,3u)]);
-  std::snprintf(shadowLabel,sizeof shadowLabel,"Dynamic Shadows: %s",s.selection.dynamicShadows?"On":"Off");
-  const char* labels[]={"Change Miis","Erase License",ledLabel,shadowLabel,brightnessLabel};
-  for(unsigned i=0;i<5;++i){const auto row=control("LicenseManagementButton",variants[i],i);
+  const char* labels[]={"Change Miis","Erase License",ledLabel,brightnessLabel};
+  for(unsigned i=0;i<4;++i){const auto row=control("LicenseManagementButton",variants[i],i);
    c.group(UiMenuRole::Choice,i,row,"license_management_free");c.button("license_management",i,row,labels[i]);}
   // The card displays this license's saved cups; its identity stays separate
   // from whichever driver is currently selected for the next race.
@@ -965,16 +965,37 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
   c.chrome("License Settings");break;
  }
  case UiPage::Settings:{
-  const char* variants[]={"Rumble","Network","ChannelInstall"};
-  const char* captions[]={"Nintendo GameCube Controller","Network Settings","Mario Kart Channel"};
-  for(unsigned i=0;i<3;++i){auto p=control("OptionTopButton",variants[i],i);c.group(UiMenuRole::Choice,i,p,"settings_button_free");c.button("settings_button",i,p,captions[i]);}
-  c.chrome("Settings");break;
+  // The Wii's Settings page (its buttons, background and music) with the
+  // port's whole-game options. A, left and right switch the chosen row.
+  const char* variants[]={"Rumble","Network","ChannelInstall","ChannelInstall"};
+  const auto& o=s.settings;char captions[4][40];
+  std::snprintf(captions[0],sizeof captions[0],"Texture Quality: %s",o.textureQuality?"Standard":"High");
+  std::snprintf(captions[1],sizeof captions[1],"Dynamic Shadows: %s",o.dynamicShadows?"On":"Off");
+  std::snprintf(captions[2],sizeof captions[2],"Bloom: %s",o.bloom?"On":"Off");
+  std::snprintf(captions[3],sizeof captions[3],"Opponent Detail: %s",o.opponentDetail?"Reduced":"Full");
+  for(unsigned i=0;i<4;++i){auto p=control("OptionTopButton",variants[i],i);c.group(UiMenuRole::Choice,i,p,"settings_button_free");c.button("settings_button",i,p,captions[i]);}
+  c.chrome("Settings");
+  // The upper screen explains the chosen row (all four while preloading,
+  // so every glyph is resident before the cursor moves).
+  static constexpr const char* help[4][3]={
+   {"High: every texture full size.","Standard: the largest ones at","half size. Faster, softer."},
+   {"Racers cast live shadows on","the course. Off saves the most","GPU time of any option."},
+   {"The Wii's glow around bright","light. Off saves GPU time.",""},
+   {"Full: every opponent at full","detail. Reduced: distant ones","use split-screen models."}};
+  c.group(UiMenuRole::Content);
+  for(unsigned row=0;row<4;++row){
+   if(row!=std::min(s.cursor,3u)&&!preload)continue;
+   for(unsigned line=0;line<3;++line)if(*help[row][line])c.screenText(help[row][line],200,92.f+26.f*line,18,0,0x404040ff);
+  }
+  c.screenText("Changes apply to the next race.",200,196,14,0,0x707070ff);
+  break;
  }
  case UiPage::License:{
   c.chrome("Select License");
   for(unsigned i=0;i<4;++i){char name[32];std::snprintf(name,sizeof name,"License%u",i);Pose p=control(i<2?"LicenseSelectT":"LicenseSelectB",name,i);const char* card=s.licenseOccupied[i]?(i<2?"license_top_used":"license_bottom_used"):(i<2?"license_top_empty":"license_bottom_empty");auto base=c.buttonState(card,i);c.group(UiMenuRole::Choice,i,p,(i<2?"license_top_empty_free":"license_bottom_empty_free"));c.panel(base.c_str(),p);if(s.licenseOccupied[i])c.licenseTrophies(base.c_str(),p,i);if(s.licenseOccupied[i])c.licenseName(base.c_str(),p,i);else c.text("NEW",base.c_str(),p,0xffffffff,"new");if(i==s.cursor)c.glow(card,p);
   }
-  // Wii-only Settings (GC rumble, WFC, Channel install) are hidden on 3DS.
+  // The Wii's corner Settings button opens the port's whole-game options.
+  {Pose option=control("LicenseSelectS","Option",4);c.group(UiMenuRole::Auxiliary,0,option,"option_free");auto optionBase=c.buttonState("option",4);c.panel(optionBase.c_str(),option);c.text("Settings",optionBase.c_str(),option);if(s.cursor==4)c.glow("option",option,"Settings");}
   break;
  }
  case UiPage::MainMenu:{
@@ -1224,17 +1245,17 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
  }
  case UiPage::Ghost:{
   // The disc's staff ghosts for this course (the expert one once the staff
-  // ghost is beaten), then solo. Saved-ghost lists and replays are deferred.
+  // ghost is beaten), the license's own ghost, then solo. Replays are deferred.
   c.timeTrialBest();
   const unsigned course=std::min(s.selection.course,31u);
-  for(unsigned slot=0;slot<3;++slot){
+  for(unsigned slot=0;slot<4;++slot){
    if(!s.choiceVisible(slot)&&!(transition&&transition->preload))continue;
    auto p=control("TimeAttackGhostList","Alone",0);p.y=0;
    c.group(UiMenuRole::Choice,slot,p,"ghost_free");
-   if(slot==2){c.button("ghost",slot,p,"Solo Time Trials");continue;}
+   if(slot==3){c.button("ghost",slot,p,"Solo Time Trials");continue;}
    c.button("ghost",slot,p);
-   const unsigned ms=s.staffGhostTimes[course][slot];char label[40];
-   std::snprintf(label,sizeof label,"%s %u:%02u.%03u",slot?"Expert Staff Ghost":"Staff Ghost",ms/60000,ms/1000%60,ms%1000);
+   const unsigned ms=slot==2?s.ownGhostTime(course):s.staffGhostTimes[course][slot];char label[40];
+   std::snprintf(label,sizeof label,"%s %u:%02u.%03u",slot==2?"Your Ghost":slot?"Expert Staff Ghost":"Staff Ghost",ms/60000,ms/1000%60,ms%1000);
    const auto key=c.buttonState("ghost",slot);c.glyphText(label,key.c_str(),p);
   }
   c.chrome("Time Trials");break;
@@ -1292,7 +1313,9 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
  // license preview rectangle. Incoming license controls animate around it.
  if(s.page==UiPage::Title||(s.page==UiPage::License&&transition&&transition->active&&((transition->entering&&transition->from==UiPage::Title)||(!transition->entering&&transition->to==UiPage::Title)))){
   if(s.page==UiPage::Title){
-   c.group(UiMenuRole::Background);c.panel("background");
+   // The lower screen under the title: the License page's backdrop.
+   char blurred[32];std::snprintf(blurred,sizeof blurred,"title_blur_scene_%u",std::min(s.titleArtwork,5u));
+   c.group(UiMenuRole::Background);c.panel(blurred);c.panel("background_lines");
    c.group(UiMenuRole::Header);c.panel("header",motionOnly("MenuObiTop","MenuObiTop"));
    c.group(UiMenuRole::Footer);c.panel("footer",control("MenuObiBottom","MenuObiBottom"));
   }
@@ -1420,15 +1443,17 @@ MenuRect menuChoiceRect(const UiQuad& q,const MenuState& state){
  case UiPage::BattleStage:return {12,34.f+35.f*i,296,30};
  case UiPage::VSRules:return {0,32.f+27.f*i,304,25};
  case UiPage::BattleRules:return {0,42.f+29.f*i,304,27};
- case UiPage::Settings:return {12,46.f+54.f*i,296,44};
- case UiPage::LicenseSettings:return {12,33.f+35.f*i,296,31};
+ case UiPage::Settings:return {12,34.f+45.f*i,296,38};
+ case UiPage::LicenseSettings:return {12,40.f+42.f*i,296,34};
  case UiPage::TeamConfirm:return {52,95,216,48};
  case UiPage::Confirm:return {72,83,176,80};
  case UiPage::EraseLicense:return {35,65.f+75.f*i,250,52};
  case UiPage::Ghost:{
   MenuState choices=state;choices.page=UiPage::Ghost;
   const unsigned n=std::max(choices.visibleChoiceCount(),1u),k=choices.visibleChoiceIndex(i);
-  return {25,120.f-(54.f+58.f*float(n-1))*.5f+58.f*float(k),270,54};
+  // Four entries (both staff ghosts, your ghost, solo) fit with less room each.
+  const float h=n>3?44.f:54.f,step=n>3?47.f:58.f;
+  return {25,124.f-(h+step*float(n-1))*.5f+step*float(k),270,h};
  }
  case UiPage::Unlock:return {96,190,128,30};
  case UiPage::Error:return {15,93,290,48};
@@ -1476,7 +1501,7 @@ void layoutMenuScreens(const MenuState& state,const std::vector<UiQuad>& source,
    break;
   }
   case UiMenuRole::Auxiliary:{
-   if(g.page==UiPage::MainMenu||g.page==UiPage::Drift||g.page==UiPage::VSMode||g.page==UiPage::BattleMode){
+   if(g.page==UiPage::MainMenu||g.page==UiPage::License||g.page==UiPage::Drift||g.page==UiPage::VSMode||g.page==UiPage::BattleMode){
     // Retail round panes are authored for the widescreen Wii canvas.
     // Restore its source X/Y ratio rather than stretching the group to a box.
     const float sy=50.f/g.h,sx=sy*(92.f/68.f)*YScale/XScale;
@@ -1550,7 +1575,7 @@ void layoutMenuScreens(const MenuState& state,const std::vector<UiQuad>& source,
    placeMenuQuad(q,{r.x-40,r.y-display::LowerOriginY,r.w,r.h},true,bottom);break;
   }
   case UiMenuRole::Content:
-   if(state.page==UiPage::Title){auto upper=q;upper.bottom=false;top.push_back(upper);break;}
+   if(state.page==UiPage::Title||state.page==UiPage::Settings){auto upper=q;upper.bottom=false;top.push_back(upper);break;}
    // Future untagged content remains visible, but does not move race UI.
    placeMenuQuad(q,{0,0,320,240},true,bottom);break;
   }

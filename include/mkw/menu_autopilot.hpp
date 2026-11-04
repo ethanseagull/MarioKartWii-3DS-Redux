@@ -111,6 +111,12 @@ public:
    route_=!token->compare(0,5,"auto:");
    const bool expired=simulationFrames-raceStart_>=unsigned(std::atoi(token->c_str()+5));
    if(finished||(expired&&!route_)){racing_=false;route_=false;++cursor_;return;}
+   // "race:N:items" also presses L (use item) at three fixed frames, for the
+   // Time Trials ghost sync check (ghost-test.txt).
+   if(!route_&&token->find(":items")!=std::string::npos){
+    const unsigned t=simulationFrames-raceStart_;
+    for(unsigned at:{360u,660u,960u})if(t>=at&&t<at+6)held|=KEY_L;
+   }
    if(!route_)return;
    if(progress>best_+StallProgress){best_=progress;bestAt_=simulationFrames;}
    const bool stalled=simulationFrames-bestAt_>=StallFrames;

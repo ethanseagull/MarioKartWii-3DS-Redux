@@ -15,6 +15,9 @@ namespace mkw {
 struct RenderQuality {
     bool reduced=false;
     bool mipmaps=true; // authored per-material filters/LOD bias; LOD0 fallback remains available
+    // Textures over 256x256 texels load from their first mip level
+    // (Texture::loadMemory): Old 3DS, or Texture Quality: Standard.
+    bool halfLargeTextures=false;
     // Objects whose bounding sphere spans less than this radius/distance
     // ratio (about 4 px of the 240 px screen at the race FOV) are not drawn.
     float minScreenRatio=.003f;
@@ -46,7 +49,7 @@ struct RenderQuality {
     void setReduced(bool on){
         *this=RenderQuality{};
         if(!on)return;
-        reduced=true;minScreenRatio=.015f;objectLowDistance=4000.f;
+        reduced=true;halfLargeTextures=true;minScreenRatio=.015f;objectLowDistance=4000.f;
         shadowVolumes=false;bloomBlurRounds=1;boxSparkleRatio=.04f;particleBudget=96;kartEffectScreens=2;racerLod=true;animationStep=4;vramCourseTextures=true;
     }
 #ifdef MKW_RENDER_QUALITY_C3D

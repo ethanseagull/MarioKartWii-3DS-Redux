@@ -211,6 +211,9 @@ public:
     unsigned successfulHits(unsigned player)const{return player<MaxRacers?successfulHits_[player]:0;}
     // Every Mushroom / Golden Mushroom use, for per-press boost presentation.
     uint16_t mushroomUses(unsigned player) const { return mushroomUses_[player<MaxRacers?player:0]; }
+    // Every KartMove::activateMushroom the items cause, per racer, whichever
+    // item it came from (the Time Trials ghost recorder times them).
+    static inline std::array<uint32_t,12> mushroomActivations{};
     unsigned rank(unsigned player) const;
     uint32_t frame() const { return frame_; }
     BlooperVisual blooperVisual(unsigned player,unsigned weight) const;

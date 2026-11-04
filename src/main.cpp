@@ -83,6 +83,8 @@
 #include <mkw/bike_drift_effects.hpp>
 #include <mkw/bike_scrape_effects.hpp>
 #include <mkw/menu_ui.hpp>
+#include <mkw/ghost_record.hpp>
+#include <ctime>
 #include <mkw/menu_transition.hpp>
 #include <mkw/menu_vehicle_icons.hpp>
 #include <mkw/menu_renderer.hpp>
@@ -162,17 +164,33 @@ static unsigned selectedCpu=1,selectedCpuVehicles=0,selectedItems=0;
 // Time Trials: one racer, no item boxes, a Triple Mushroom at the start, and
 // the best finish per course kept on the SD card (milliseconds, 0 = none).
 static bool timeTrial=false;
-// Time Trials staff ghost (MenuState::ghostChoice: 1 staff, 2 expert), raced
-// as player 1 from the disc's Race/TimeAttack/ghostN/ghostN_comp_NN.rkg.
-// Both ghosts' finish times decide the license's beaten flags (RKPD +0x0c/+0x10).
+// Time Trials ghost (MenuState::ghostChoice: 1 staff, 2 expert, 3 the
+// license's own), raced as player 1. Staff ghosts come from the disc's
+// Race/TimeAttack/ghostN/ghostN_comp_NN.rkg; both staff finish times decide
+// the license's beaten flags (RKPD +0x0c/+0x10).
 static unsigned staffGhost=0;
 static std::vector<K::u8> staffGhostFile;
 static std::array<uint32_t,2> staffGhostTimes{};
+static uint32_t raceGhostTime=0; // finish time of the ghost being raced
+// The player's ghosts: the inputs of each Time Trial, kept as the course's
+// ghost when it sets the license's best time (or the course has none yet).
+static mkw::GhostRecorder ghostRecorder;
+static uint32_t ghostMushrooms=0; // RaceItems::mushroomActivations[0] when the last ghost frame was recorded
+static void ownGhostPath(char* path,std::size_t size,unsigned slot,unsigned course){
+    std::snprintf(path,size,"sdmc:/3ds/mkw-3ds/ghosts/license-%u/%02u.rkg",slot,mkw::licenseSaveCourse(course));
+}
+static uint32_t readGhostFile(const char* path,unsigned course,std::vector<K::u8>* file);
 // Header check and finish time (ms) of one staff ghost; 0 when the SD card
 // has no such file or it is not a playable ghost of this course.
 static uint32_t readStaffGhost(unsigned course,unsigned kind,std::vector<K::u8>* file=nullptr){
     char path[64];const unsigned n=mkw::licenseSaveCourse(course);
     std::snprintf(path,sizeof path,"Race/TimeAttack/ghost%u/ghost%u_comp_%02u.rkg",kind+1,kind+1,n);
+    return readGhostFile(path,course,file);
+}
+static uint32_t readOwnGhost(unsigned slot,unsigned course,std::vector<K::u8>* file=nullptr){
+    char path[80];ownGhostPath(path,sizeof path,slot,course);return readGhostFile(path,course,file);
+}
+static uint32_t readGhostFile(const char* path,unsigned course,std::vector<K::u8>* file){
     FILE* f=fopen(path,"rb");if(!f)return 0;
     K::u8 head[0x10];bool ok=fread(head,1,sizeof head,f)==sizeof head;
     auto be=[&](unsigned at){return uint32_t(head[at])<<24|uint32_t(head[at+1])<<16|uint32_t(head[at+2])<<8|head[at+3];};
@@ -190,9 +208,12 @@ static uint32_t readStaffGhost(unsigned course,unsigned kind,std::vector<K::u8>*
 static uint32_t expertGhostCourses(const mkw::LicenseSave& save){uint32_t mask=0;for(unsigned i=0;i<32;++i)if(save.staffGhostBeaten(i))mask|=1u<<i;return mask;}
 // The ghost page lists a cup's staff ghosts: read their headers once, when its Course page opens.
 static void probeStaffGhosts(mkw::MenuState& menu){
-    static uint8_t probed=0;const unsigned cup=std::min(menu.selection.course/4,7u);
-    if(probed>>cup&1)return;probed|=uint8_t(1u<<cup);
-    for(unsigned c=cup*4;c<cup*4+4;++c)for(unsigned kind=0;kind<2;++kind)menu.staffGhostTimes[c][kind]=readStaffGhost(c,kind);
+    static uint8_t probed=0;static std::array<uint8_t,4> ownProbed{};
+    const unsigned cup=std::min(menu.selection.course/4,7u),slot=std::min(menu.selection.license,3u);
+    if(!(probed>>cup&1)){probed|=uint8_t(1u<<cup);
+        for(unsigned c=cup*4;c<cup*4+4;++c)for(unsigned kind=0;kind<2;++kind)menu.staffGhostTimes[c][kind]=readStaffGhost(c,kind);}
+    if(!(ownProbed[slot]>>cup&1)){ownProbed[slot]|=uint8_t(1u<<cup);
+        for(unsigned c=cup*4;c<cup*4+4;++c)menu.ownGhostTimes[slot][c]=readOwnGhost(slot,c);}
 }
 static bool battleMode=false,coinRunnersMode=false;
 static unsigned battleTicks=0;
@@ -207,6 +228,7 @@ static mkw::LicenseRecords activeRecords{};
 static std::array<mkw::LicenseSave,4> licenseSaves{};
 static std::array<bool,4> damagedLicenses{};
 static constexpr const char* LicenseDirectory="sdmc:/3ds/mkw-3ds";
+static constexpr const char* SettingsFile="sdmc:/3ds/mkw-3ds/settings.dat";
 struct LicenseSelectionSaveJob final:mkw::AssetJob {
     unsigned slot=0;mkw::LicenseSave value;bool ok=false;
     void run()override{ok=mkw::writeLicenseSave(LicenseDirectory,slot,value);}
@@ -505,6 +527,10 @@ int main() {
     auto& renderer=*rendererStorage;
     // Pipelined race frames (A/B: no-pipeline.txt turns them off).
     renderer.pipelineFrames=!exists("sdmc:/3ds/mkw-3ds/no-pipeline.txt");
+    // Menus record their frames for the render thread, as races do, so the
+    // next frame is built while the GPU draws this one (A/B: no-menu-pipeline.txt).
+    const bool menuDeferred=!exists("sdmc:/3ds/mkw-3ds/no-menu-pipeline.txt");
+    const bool ghostTest=kQa&&exists("sdmc:/3ds/mkw-3ds/ghost-test.txt");
     // Bottom screen: no background fill under the opaque map (A/B: no-bottom-cover.txt).
     mkw::RaceBottomScreen::skipCoveredFill=!exists("sdmc:/3ds/mkw-3ds/no-bottom-cover.txt");
     // Shadow volumes shade only their projected rectangle (A/B: no-shadow-rect.txt).
@@ -580,7 +606,12 @@ int main() {
      // Load the selected profile before any strap/title input can reach
      // the shared menu autosave path. Rules must never be replaced by UiSelection defaults.
      if(licenseSaves[last].occupied)menu.selection=licenseSaves[last].settings;
-     else menu.selection.license=last;}
+     else menu.selection.license=last;
+     // Whole-game settings (the Settings page). The first boot takes Dynamic
+     // Shadows from the last license, where it used to be stored.
+     if(!mkw::loadGameSettings(SettingsFile,menu.settings)&&licenseSaves[last].occupied)
+         menu.settings.dynamicShadows=licenseSaves[last].settings.dynamicShadows;}
+    mkw::UiSettings savedSettings=menu.settings;
     mkw::MenuRenderer menuRenderer;
     struct LicensePortraitCache {mkw::NativeMii identity{};bool checked=false;std::vector<std::uint8_t> rgba;};
     std::array<LicensePortraitCache,4> licensePortraits;
@@ -986,6 +1017,9 @@ int main() {
                     // Persist the empty slot as a tombstone: never reimport the
                     // older separate time/stat files after an explicit erase.
                     if(persistLicense(erased,empty)){
+                        // The erased license's ghosts go with it.
+                        for(unsigned c=0;c<32;++c){char path[80];ownGhostPath(path,sizeof path,erased,c);std::remove(path);}
+                        menu.ownGhostTimes[erased]={};
                         licenseSaves[erased]=empty;menu.licenseBestTimes[erased]={};damagedLicenses[erased]=false;menu.licenseOccupied[erased]=false;menu.licenseCups[erased]={};
                         menu.selection=empty.settings;menu.saveFailed=false;
                     }else menu.saveFailed=true;
@@ -1004,6 +1038,10 @@ int main() {
                         if(!menu.saveFailed)save=updated;
                     }
                 }
+            }
+            if(acceptedInput&&beforeInput.page==mkw::UiPage::Settings&&menu.page!=mkw::UiPage::Settings&&menu.settings!=savedSettings){
+                if(mkw::saveGameSettings(SettingsFile,menu.settings))savedSettings=menu.settings;
+                else menu.saveFailed=true;
             }
             if(acceptedInput&&menuProfile->enabled()&&svcGetSystemTick()-acceptStart>u64(SYSCLOCK_ARM11/200)){
                 snprintf(line,sizeof line,"license/save handling %.1f ms (page %u to %u)",double(svcGetSystemTick()-acceptStart)*1000.0/SYSCLOCK_ARM11,unsigned(beforeInput.page),unsigned(menu.page));
@@ -1180,10 +1218,14 @@ int main() {
                 menuProfile->mark(MenuStage::Begin);menuProfile->end(renderer,0);continue;
             }
             revealLoading.reset();
+            // The pause pages draw the kept race image directly (drawPausedTop),
+            // so they stay immediate; every other page is recorded.
+            renderer.setDeferred(menuDeferred&&visual.page!=mkw::UiPage::Pause&&visual.page!=mkw::UiPage::QuitConfirm);
             publishLicensePortraits(quads);
             menuModels.begin(renderer);
             menuProfile->mark(MenuStage::Begin);
-            // GPU idle: publish streamed movie frames for this frame.
+            // Publish streamed movie frames for this frame: at once when the GPU
+            // is idle (immediate frames), else as the frame's deferred writes.
             menuRenderer.uploadMovies();
             menuProfile->mark(MenuStage::Movies);
             // Pause pages show the race as it was (no HUD, not dimmed: the Wii's
@@ -1255,7 +1297,7 @@ int main() {
     if((kQa&&exists("sdmc:/3ds/mkw-3ds/menu-test.txt"))){
         struct Snapshot {const char* name;mkw::UiPage page;unsigned cursor;mkw::UiEngineClass engine=mkw::UiEngineClass::CC150;};
         const Snapshot pages[]={{"strap",mkw::UiPage::Strap,0},{"license",mkw::UiPage::License,0},{"class",mkw::UiPage::EngineClass,1},{"title",mkw::UiPage::Title,0},{"main",mkw::UiPage::MainMenu,0},{"single-player",mkw::UiPage::Mode,0},{"character",mkw::UiPage::Character,8},{"vehicle",mkw::UiPage::Vehicle,0},{"drift",mkw::UiPage::Drift,1},{"cup",mkw::UiPage::Cup,0},{"course",mkw::UiPage::Course,0},{"confirm",mkw::UiPage::Confirm,0},{"pause",mkw::UiPage::Pause,0},
-            {"vs-mode",mkw::UiPage::VSMode,0},{"vs-rules",mkw::UiPage::VSRules,0},{"battle-mode",mkw::UiPage::BattleMode,0},{"battle-cup",mkw::UiPage::BattleCup,0},{"battle-stage",mkw::UiPage::BattleStage,0},{"team-confirm",mkw::UiPage::TeamConfirm,0},{"drift-help",mkw::UiPage::DriftHelp,0},{"settings",mkw::UiPage::Settings,0},{"license-settings",mkw::UiPage::LicenseSettings,0},{"erase-license",mkw::UiPage::EraseLicense,1},{"quit-confirm",mkw::UiPage::QuitConfirm,1},
+            {"vs-mode",mkw::UiPage::VSMode,0},{"vs-rules",mkw::UiPage::VSRules,0},{"battle-mode",mkw::UiPage::BattleMode,0},{"battle-cup",mkw::UiPage::BattleCup,0},{"battle-stage",mkw::UiPage::BattleStage,0},{"team-confirm",mkw::UiPage::TeamConfirm,0},{"drift-help",mkw::UiPage::DriftHelp,0},{"settings",mkw::UiPage::Settings,0},{"settings-bloom",mkw::UiPage::Settings,2},{"license-option",mkw::UiPage::License,4},{"license-settings",mkw::UiPage::LicenseSettings,0},{"erase-license",mkw::UiPage::EraseLicense,1},{"quit-confirm",mkw::UiPage::QuitConfirm,1},
             {"vehicle-karts",mkw::UiPage::Vehicle,0,mkw::UiEngineClass::CC50},{"vehicle-bikes",mkw::UiPage::Vehicle,0,mkw::UiEngineClass::CC100}};
         bool snapshotsOnly=false;
         if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/menu-test.txt","r")){char mode[24]{};if(fscanf(f,"%23s",mode)==1)snapshotsOnly=!strcmp(mode,"snapshots");fclose(f);}
@@ -1328,9 +1370,11 @@ int main() {
         const unsigned cc=vs?menu.selection.vsClass:menu.selection.mode==mkw::UiMode::GrandPrix?unsigned(menu.selection.engineClass):2;
         selectedMirror=cc==3;selectedEngineClass=std::min(cc,2u);
         selectedCpu=battleMode?menu.selection.battleCpu:vs?menu.selection.vsCpu:(selectedRaceMode==0?std::min(selectedEngineClass,2u):1u);selectedCpuVehicles=battleMode?menu.selection.battleVehicles:vs?menu.selection.vsVehicles:0;selectedItems=battleMode?menu.selection.battleItems:vs?menu.selection.vsItems:0;
-        staffGhost=timeTrial&&courseChoice<32?std::min(menu.ghostChoice,2u):0;staffGhostTimes={};
+        staffGhost=timeTrial&&courseChoice<32?std::min(menu.ghostChoice,3u):0;staffGhostTimes={};raceGhostTime=0;
         if(timeTrial&&courseChoice<32)for(unsigned kind=0;kind<2;++kind)staffGhostTimes[kind]=readStaffGhost(courseChoice,kind,staffGhost==kind+1?&staffGhostFile:nullptr);
-        if(staffGhost&&!staffGhostTimes[staffGhost-1]){report("FAIL staff ghost file: racing alone");staffGhost=0;}
+        if(staffGhost==3)raceGhostTime=readOwnGhost(activeLicense,courseChoice,&staffGhostFile);
+        else if(staffGhost)raceGhostTime=staffGhostTimes[staffGhost-1];
+        if(staffGhost&&!raceGhostTime){report("FAIL ghost file: racing alone");staffGhost=0;}
     };
     if(fullRace){if(runMenu()!=mkw::UiAction::StartRace){finishAutoplay();renderer.waitForGpu();menuModels.reset(renderer);menuIcons.reset(renderer);menuRenderer.release();mkw::SoundSystem::instance().stop();mkw::MenuMovieAudio::shutdown();mkw::shutdownLoadingScreen();renderer.shutdown();gfxExit();return 0;}applySelection();menu.raceStarted();menuProfile->write("sdmc:/3ds/mkw-3ds/menu-performance.csv");raceLoadStart=svcGetSystemTick();}
     bool dataReady=exists("Race/Common.szs")&&courseAvailable(courseChoice);
@@ -1405,7 +1449,18 @@ int main() {
     mkw::AwardResults awardResults;
     bool awardPending=false;
     bool raceSavePending=false;
+    std::vector<uint8_t> pendingGhost;unsigned pendingGhostCourse=0,pendingGhostSlot=0;
     auto flushRaceSave=[&](){
+        if(!pendingGhost.empty()){
+            char path[80];ownGhostPath(path,sizeof path,pendingGhostSlot,pendingGhostCourse);
+            mkdir("sdmc:/3ds/mkw-3ds/ghosts",0777);
+            char folder[64];std::snprintf(folder,sizeof folder,"sdmc:/3ds/mkw-3ds/ghosts/license-%u",pendingGhostSlot);mkdir(folder,0777);
+            const std::string tmp=std::string(path)+".tmp";bool ok=false;
+            if(FILE* f=std::fopen(tmp.c_str(),"wb")){ok=std::fwrite(pendingGhost.data(),1,pendingGhost.size(),f)==pendingGhost.size();ok&=std::fclose(f)==0;}
+            if(ok){std::remove(path);ok=std::rename(tmp.c_str(),path)==0;}
+            if(!ok){std::remove(tmp.c_str());report("WARN ghost save failed");}
+            pendingGhost.clear();
+        }
         if(!raceSavePending)return;
         menu.saveFailed=!persistLicense(activeLicense,licenseSaves[activeLicense]);
         if(!menu.saveFailed)raceSavePending=false;
@@ -1857,7 +1912,7 @@ int main() {
     auto loadBottomScreen=[&](){
         const auto* bloom=mkw::courseBloom(Courses[courseChoice].archive);
         if(!effectsTest&&bloom&&bloom->enabled()&&!renderer.reserveBloom()){report("FAIL required bloom targets");return false;}
-        if(!effectsTest&&!renderer.configurePlayerShadow(menu.selection.dynamicShadows))report("WARN player shadow target unavailable; native volume retained");
+        if(!effectsTest&&!renderer.configurePlayerShadow(menu.settings.dynamicShadows))report("WARN player shadow target unavailable; native volume retained");
         if(!renderer.configureStadiumScreen(!effectsTest&&(int(Courses[courseChoice].id)==18||int(Courses[courseChoice].id)==6||int(Courses[courseChoice].id)==35))){report("FAIL stadium screen targets");return false;}
         if(!bottomScreen.load(renderer,courseChoice)){report("FAIL required bottom screen");return false;}
         if(driverChoice>=24&&!bottomScreen.setMiiPortrait(renderer,selectedRaceMii)){report("FAIL Mii map portrait");return false;}
@@ -2174,7 +2229,16 @@ int main() {
     mkw::renderQuality().setReduced(!new3ds&&!(kQa&&exists("sdmc:/3ds/mkw-3ds/full-quality.txt")));
     mkw::renderQuality().mipmaps=!exists("sdmc:/3ds/mkw-3ds/diagnose-no-mipmaps.txt");
     // New 3DS draws every opponent at full detail (A/B: racer-lod.txt brings back the distance LOD).
-    if(exists("sdmc:/3ds/mkw-3ds/racer-lod.txt"))mkw::renderQuality().racerLod=true;
+    const bool racerLodFile=exists("sdmc:/3ds/mkw-3ds/racer-lod.txt");
+    // The Settings page's options, applied at each race load (Old 3DS keeps
+    // its reductions whatever they say). A change reloads the course.
+    auto applyGameSettings=[&](){
+        auto& quality=mkw::renderQuality();
+        quality.halfLargeTextures=quality.reduced||menu.settings.textureQuality!=0;
+        quality.racerLod=quality.reduced||racerLodFile||menu.settings.opponentDetail!=0;
+        renderer.bloomEnabled=menu.settings.bloom;
+    };
+    applyGameSettings();mkw::UiSettings appliedSettings=menu.settings;
     // Crowds and animated item models drop to 30/15 Hz when frames run slow:
     // Old 3DS only, the Wii never does (A/B: animation-budget.txt on New 3DS).
     const bool animationBudgetOn=mkw::renderQuality().reduced||exists("sdmc:/3ds/mkw-3ds/animation-budget.txt");
@@ -2422,12 +2486,14 @@ int main() {
                     raceGraphicsSuspended=false;
                     raceLoadStart=svcGetSystemTick();
                     renderer.waitForGpu();menuRenderer.release();
-                    applySelection();startVsRace(action==mkw::UiAction::RestartRace);
+                    applySelection();startVsRace(action==mkw::UiAction::RestartRace);ghostRecorder.reset();
                     // A different or previously failed course reloads completely;
                     // restarting the same race keeps its scenery.
                     // The A/B's course textures are placed in VRAM again on every load.
                     alternateUnitOne();
-                    const bool reloadTrack=trackCourse!=int(courseChoice)||unitOneAlternate;
+                    const bool settingsChanged=menu.settings!=appliedSettings;
+                    if(settingsChanged){applyGameSettings();appliedSettings=menu.settings;}
+                    const bool reloadTrack=trackCourse!=int(courseChoice)||unitOneAlternate||settingsChanged;
                     if(reloadTrack){courseObjects.reset();track.clear();sky.clear();}
                     stage("start");
                     // Kinoko cannot recover from a missing course archive, so check first.
@@ -2463,7 +2529,7 @@ int main() {
         if(!pausing)profiler->autoFrame(profiled);
         if(profiled){if(!cpuTrace.every)mkw::diag::deferSdLogs(true);
             const auto* bloom=mkw::courseBloom(Courses[courseChoice].archive);const int id=int(Courses[courseChoice].id);
-            profiler->context(renderer.stereoWanted(),bloom&&bloom->enabled(),id==18||id==6||id==35,menu.selection.dynamicShadows,renderer.pipelineFrames,renderer.bloomMerge,renderer.shadowRects,playerTexturesVram,renderer.drawDistance,renderer.spatialCourse,mkw::shrinkHudTextures,skyDrawnLast(renderer,Courses[courseChoice].id),renderer.plainUv,renderer.fastVertex,vramPriority);}
+            profiler->context(renderer.stereoWanted(),bloom&&bloom->enabled()&&renderer.bloomEnabled,id==18||id==6||id==35,menu.settings.dynamicShadows,renderer.pipelineFrames,renderer.bloomMerge,renderer.shadowRects,playerTexturesVram,renderer.drawDistance,renderer.spatialCourse,mkw::shrinkHudTextures,skyDrawnLast(renderer,Courses[courseChoice].id),renderer.plainUv,renderer.fastVertex,vramPriority);}
         mkw::diag::passFrame(profiled);}
         mkw::diag::iterationMark("pre-begin");
         profiler->begin(unsigned(Courses[courseChoice].id),frames,physicsSteps,float(delta*1000));
@@ -2551,7 +2617,12 @@ int main() {
                     if(raceTrick==K::System::Trick::Left)raceTrick=K::System::Trick::Right;
                     else if(raceTrick==K::System::Trick::Right)raceTrick=K::System::Trick::Left;
                 }
-                controller->setInputsRawStick(buttons,(selectedMirror?-stick:stick)+7,stickY+7,raceTrick);
+                // Time Trials: nothing reaches the kart before the countdown, so the
+                // first held button is new on the countdown's first tick, as it is for
+                // a ghost replaying this run (its inputs start there).
+                if(fullRace&&timeTrial&&!replay&&!K::System::RaceManager::Instance()->isStageReached(K::System::RaceManager::Stage::Countdown))
+                    controller->setInputsRawStick(0,7,7,K::System::Trick::None);
+                else controller->setInputsRawStick(buttons,(selectedMirror?-stick:stick)+7,stickY+7,raceTrick);
                 if(fullRace){
                     // After the goal retail hands the player to its AI
                     // (AIEngine PostRaceDriving, USA 0x80728C28): the CPU
@@ -2586,7 +2657,11 @@ int main() {
                                 LOGF("QA held player=%u step=%u item=%d pow=%u local_pow=%u bombs=%u blasts=%u",g.player,physicsSteps,int(h.item),unsigned(h.pow),unsigned(raceItems->hud(0).pow),bombs,blasts);
                             }
                         }
+                    const uint32_t mushroomsBefore=mkw::RaceItems::mushroomActivations[0];
                     raceItems->beforeStepNative(inputs.data(),raceGrid.itemCount(),K::System::RaceManager::Instance()->isStageReached(K::System::RaceManager::Stage::Race),raceGrid.bulletNoEndPlayers());
+                    // Before the karts move: the ghost presses its item button on the
+                    // previous recorded tick (GhostRecorder::itemUsedThisTick).
+                    if(timeTrial&&mkw::RaceItems::mushroomActivations[0]!=mushroomsBefore){ghostRecorder.itemUsedThisTick();if(kQa&&ghostTest)LOGF("ghost test: frame=%u mushroom before the step",unsigned(ghostRecorder.frames()));}
                     for(unsigned i=0;i<raceGrid.count();++i){
                         const auto& h=raceItems->hud(i);const bool held=h.deployed&&h.heldCharges>0;
                         raceGrid.ai().setItemView(i,{uint8_t(h.item),uint8_t(held?h.heldCharges:0),h.roulette!=0,held,
@@ -2645,7 +2720,40 @@ int main() {
                                  in.stick.x,int(st.onBit(St::Hop)),int(move->hopStickX()),int(st.onBit(St::DriftInput)),int(st.onBit(St::AutoDrift)));report(line);}
                 // QA: a fall boundary (variant 0) activation, so the retail SetCamera hold applies.
                 if(autoplay&&lakituRespawnStep&&physicsSteps==lakituRespawnStep){auto* qaCollide=K::Kart::KartObjectManager::Instance()->object(0)->collide();qaCollide->setOobCameraPending(uint16_t(lakituRequest));qaCollide->activateOob(false,nullptr,false,false);}
+                const bool ghostTick=fullRace&&timeTrial&&!replay&&K::System::RaceManager::Instance()->isStageReached(K::System::RaceManager::Stage::Countdown)&&
+                    !K::System::RaceManager::Instance()->player(0).finished();
                 scenes.calc();
+                if(ghostTick){
+                    const auto& in=K::System::KPadDirector::Instance()->playerInput(0).currentState();
+                    auto raw=[](float v){return unsigned(std::clamp(int(std::lround(v*7.f))+7,0,14));};
+                    ghostRecorder.frame(in.buttons,raw(in.stick.x),raw(in.stick.y),unsigned(in.trick));
+                    ghostMushrooms=mkw::RaceItems::mushroomActivations[0];
+                    // DIAG (ghost-test.txt): a scripted Time Trial saves its first
+                    // 20 s as the course's ghost; racing that ghost with the same
+                    // script logs how far apart the two karts drift (0 = in sync).
+                    if(kQa&&ghostTest&&ghostRecorder.frames()==1200&&!replay){
+                        mkw::GhostRecorder::Info info{};
+                        info.course=unsigned(Courses[courseChoice].id);info.vehicle=selectedVehicle().vehicle;info.character=selectedVehicle().character;
+                        info.automatic=automaticDrift;info.finishMs=20000;info.laps=3;info.year=26;info.month=1;info.day=1;
+                        pendingGhost=ghostRecorder.build(info);pendingGhostCourse=courseChoice;pendingGhostSlot=std::min(activeLicense,3u);
+                        if(!pendingGhost.empty())menu.ownGhostTimes[pendingGhostSlot][courseChoice]=20000;
+                        LOGF("ghost test: saved %u bytes",unsigned(pendingGhost.size()));flushRaceSave();
+                    }
+                    if(kQa&&ghostTest&&ghostRecorder.frames()<=1200){
+                        // Mushroom timing: both karts' boost state and speed per frame
+                        // around each use (the player's comes from the port's items).
+                        using St=K::Kart::eStatus;auto* m=K::Kart::KartObjectManager::Instance();
+                        const bool two=staffGhost==3&&raceGrid.ghost(1);
+                        static bool lastBoost[2]{};
+                        for(unsigned k=0;k<(two?2u:1u);++k){const bool boost=m->object(k)->status().onBit(St::MushroomBoost);
+                            if(boost!=lastBoost[k])LOGF("ghost test: frame=%u kart=%u mushroom=%d speed=%.3f",unsigned(ghostRecorder.frames()),k,int(boost),m->object(k)->move()->speed());
+                            lastBoost[k]=boost;}
+                    }
+                    if(kQa&&ghostTest&&staffGhost==3&&raceGrid.ghost(1)&&ghostRecorder.frames()%60==0&&ghostRecorder.frames()<=1200){
+                        const auto a=vec(K::Kart::KartObjectManager::Instance()->object(0)->pos()),b=vec(K::Kart::KartObjectManager::Instance()->object(1)->pos());
+                        LOGF("ghost test: frame=%u distance=%.4f",unsigned(ghostRecorder.frames()),std::sqrt((a.x-b.x)*(a.x-b.x)+(a.y-b.y)*(a.y-b.y)+(a.z-b.z)*(a.z-b.z)));
+                    }
+                }
                 {
                     // The player's driver model after the kart step: its trick animation,
                     // sparkle and sound start together (trick_presentation.hpp).
@@ -2662,13 +2770,17 @@ int main() {
                 if(intro.active()&&!raceWarmupFrames){intro.step();++introTick;}
                 if(fullRace){
                     raceGrid.afterStep();raceItems->afterStepNative(raceGrid.itemCount());
+                    // After the karts moved, as Kinoko's KartItem fires a ghost's:
+                    // the ghost presses its item button on this recorded tick.
+                    if(ghostTick&&mkw::RaceItems::mushroomActivations[0]!=ghostMushrooms){ghostRecorder.itemUsedThisTick();ghostMushrooms=mkw::RaceItems::mushroomActivations[0];
+                        if(kQa&&ghostTest)LOGF("ghost test: frame=%u mushroom after the step",unsigned(ghostRecorder.frames()));}
                     if(kQa&&staffGhost&&raceGrid.ghost(1)){
                         // Sync check: the replayed ghost's finish against the time in its file.
                         static bool logged=false;const auto& ghost=K::System::RaceManager::Instance()->player(1);
                         if(!ghost.finished())logged=false;
                         else if(!logged){logged=true;const auto& t=ghost.raceTimer();const unsigned ms=unsigned(t.min)*60000u+unsigned(t.sec)*1000u+unsigned(t.mil);
-                            if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/staff-ghost-sync.txt","a")){fprintf(f,"course=%u ghost=%u record_ms=%u replay_ms=%u step=%u\n",courseChoice,staffGhost,unsigned(staffGhostTimes[staffGhost-1]),ms,physicsSteps);fclose(f);}
-                            LOGF("staff ghost finish course=%u record=%u replay=%u",courseChoice,unsigned(staffGhostTimes[staffGhost-1]),ms);}
+                            if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/staff-ghost-sync.txt","a")){fprintf(f,"course=%u ghost=%u record_ms=%u replay_ms=%u step=%u\n",courseChoice,staffGhost,unsigned(raceGhostTime),ms,physicsSteps);fclose(f);}
+                            LOGF("ghost finish course=%u record=%u replay=%u",courseChoice,unsigned(raceGhostTime),ms);}
                     }
                     if(coinRunnersMode){
                         const auto* race=K::System::RaceManager::Instance();
@@ -2760,8 +2872,23 @@ int main() {
                             auto& save=licenseSaves[activeLicense];
                             if(!qaMode&&!replay&&save.timeTrialFinish(courseChoice,ms,staffGhostTimes[0],staffGhostTimes[1]))raceSavePending=true;
                             if(!qaMode&&!replay&&staffGhost){
-                                ++(ms<staffGhostTimes[staffGhost-1]?activeRecords.ghostWins:activeRecords.ghostLosses);save.records=activeRecords;raceSavePending=true;
-                                LOGF("staff ghost %u: player %u ms, ghost %u ms (record), ghost finished=%d",staffGhost,unsigned(ms),unsigned(staffGhostTimes[staffGhost-1]),int(race->player(1).finished()));
+                                ++(ms<raceGhostTime?activeRecords.ghostWins:activeRecords.ghostLosses);save.records=activeRecords;raceSavePending=true;
+                                LOGF("ghost %u: player %u ms, ghost %u ms (record), ghost finished=%d",staffGhost,unsigned(ms),unsigned(raceGhostTime),int(race->player(1).finished()));
+                            }
+                            // The player's ghost: kept when this run is the course's best
+                            // time, or the course has no ghost yet. Mii racers aren't
+                            // saved: a ghost names a retail character.
+                            const bool bestRun=ms&&bestTimes[courseChoice]==ms;
+                            const unsigned ghostSlot=std::min(activeLicense,3u);
+                            if(!replay&&ms&&driverChoice<24&&(bestRun||!menu.ownGhostTimes[ghostSlot][courseChoice])&&(!qaMode||autoplay)){
+                                mkw::GhostRecorder::Info info{};
+                                info.course=unsigned(Courses[courseChoice].id);info.vehicle=selectedVehicle().vehicle;info.character=selectedVehicle().character;
+                                info.automatic=automaticDrift;info.finishMs=ms;info.laps=3;
+                                for(unsigned lap=0;lap<3;++lap){const auto t=race->player(0).getLapSplit(lap+1);info.lapMs[lap]=uint32_t(t.min)*60000u+uint32_t(t.sec)*1000u+uint32_t(t.mil);}
+                                const time_t now=time(nullptr);if(const tm* d=gmtime(&now)){info.year=unsigned(d->tm_year+1900-2000);info.month=unsigned(d->tm_mon+1);info.day=unsigned(d->tm_mday);}
+                                pendingGhost=ghostRecorder.build(info);pendingGhostCourse=courseChoice;pendingGhostSlot=ghostSlot;
+                                if(pendingGhost.empty())report("WARN ghost inputs exceed the ghost file: not saved");
+                                else{menu.ownGhostTimes[ghostSlot][courseChoice]=ms;LOGF("ghost recorded course=%u ms=%u frames=%u bytes=%u",courseChoice,ms,unsigned(ghostRecorder.frames()),unsigned(pendingGhost.size()));}
                             }
                         }
                     }
@@ -3481,7 +3608,7 @@ int main() {
             bool objectSupport=cameraKart->collisionData().bHasRoadVel;
             for(unsigned w=0;w<vehicleAnimation.wheelCount();++w)
                 objectSupport|=cameraKart->collisionData(w).bHasRoadVel;
-            const bool playerDynamicShadow=menu.selection.dynamicShadows&&renderer.playerShadowReady();
+            const bool playerDynamicShadow=menu.settings.dynamicShadows&&renderer.playerShadowReady();
             // Test fixtures count clips while posing: they pose on this thread.
             playerJobQueued=fullRace&&!animationTest&&!effectsTest&&mkw::jobWorker().running();
             if(playerJobQueued){playerJob.reset(&runJob<decltype(posePlayer)>,&posePlayer);mkw::jobWorker().submit(playerJob);}
@@ -3632,7 +3759,7 @@ int main() {
                 std::array<const mkw::Model*,256> receivers{};unsigned count=0;
                 for(const auto& model:track)if(count<receivers.size())receivers[count++]=model.get();
                 const auto& objects=courseObjects.shadowReceivers(lakitu.position(),2400.f);
-                lakitu.drawShadow(renderer,receivers.data(),count,playerShadowLight,menu.selection.dynamicShadows,
+                lakitu.drawShadow(renderer,receivers.data(),count,playerShadowLight,menu.settings.dynamicShadows,
                                   objects.data(),unsigned(objects.size()));
             }
             if(mergeJudgeShadow)renderer.setShadowUnion(false);

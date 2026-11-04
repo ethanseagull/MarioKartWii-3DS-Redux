@@ -73,7 +73,7 @@ public:
     }
     bool activateStar(unsigned player)override{return kart(player)->move()->activateStar();}
     void activateMega(unsigned player)override{kart(player)->move()->activateMega();}
-    void activateMushroom(unsigned player)override{kart(player)->move()->activateMushroom();}
+    void activateMushroom(unsigned player)override{kart(player)->move()->activateMushroom();if(player<RaceItems::mushroomActivations.size())++RaceItems::mushroomActivations[player];}
     bool lightning(unsigned player,uint16_t frames,bool spinShrink,bool cloud)override{
         return kart(player)->move()->applyLightningEffect(frames,spinShrink,cloud);
     }

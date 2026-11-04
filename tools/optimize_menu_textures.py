@@ -55,17 +55,33 @@ def encode(image, name):
     return target.stat().st_size
 
 
+# Stripe backgrounds drawn by menuStripeSlices; their PNGs are already wrapped
+# one row down (menu_background_texture.py), so content starts at row 1.
+STRIPES = ('background', 'background_lines', 'background_option')
+
+
 def fit_sprite(key, record, screen):
     source = ASSETS / record['path'].replace('.t3x', '.png')
     width, height = record.get('rasterWidth', record['width']), record.get('rasterHeight', record['height'])
     with Image.open(source) as padded:
-        content = padded.convert('RGBA').crop((0, 0, width, height))
+        top = 1 if key in STRIPES else 0
+        content = padded.convert('RGBA').crop((0, top, width, height + top))
     target = (width, height)
     if screen:
         target = (min(width, max(1, math.ceil(screen[0]))), min(height, max(1, math.ceil(screen[1]))))
     content = resample(content, target)
     canvas = Image.new('RGBA', (pow2(target[0]), pow2(target[1])))
-    canvas.paste(content, (0, 0))
+    if key in STRIPES and pow2(target[1] + 1) == canvas.height:
+        # The scrolling stripes (MenuRenderer: V + 1/texture height) wrap: one
+        # content row before the content and the rest of the padding filled
+        # periodically, as menu_background_texture.py cooks them, and across
+        # the padded width. Without it the wrap point samples empty texels.
+        for y in range(canvas.height):
+            row = content.crop((0, (y - 1) % target[1], target[0], (y - 1) % target[1] + 1))
+            for x in range(0, canvas.width, target[0]):
+                canvas.paste(row, (x, y))
+    else:
+        canvas.paste(content, (0, 0))
     size = encode(canvas, record['name'])
     return {'u': target[0] / canvas.width, 'v': target[1] / canvas.height, 'texture': list(canvas.size),
             'content': list(target), 'bytes': canvas.width * canvas.height * 4, 'file': size,

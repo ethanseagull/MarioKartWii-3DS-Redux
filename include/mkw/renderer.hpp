@@ -489,6 +489,8 @@ public:
     // Bloom's scene copy and composite as one full-screen pass, with no LCD
     // colour clear under it (applyBloomNow). Set before the race.
     bool bloomMerge=false;
+    // The Settings page's Bloom option: off, no bloom targets or passes.
+    bool bloomEnabled=true;
     // Shadow volumes shade only the screen rectangle their bounds project to,
     // not the whole screen (shadowVolumesNow). A/B: no-shadow-rect.txt.
     bool shadowRects=false;

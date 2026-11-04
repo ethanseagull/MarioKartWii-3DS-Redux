@@ -90,8 +90,8 @@ void MenuState::nextVsCourse(){selection.course=vsCourseDeck[++vsCourseIndex%32]
 unsigned MenuState::count()const{
  switch(page){
  case UiPage::License:return 4;
- case UiPage::Drift:case UiPage::VSMode:case UiPage::Settings:return 3;
- case UiPage::LicenseSettings:return 5;
+ case UiPage::Drift:case UiPage::VSMode:return 3;
+ case UiPage::Settings:case UiPage::LicenseSettings:return 4;
  case UiPage::VSRules:return 7;
  case UiPage::BattleRules:return 6;
  case UiPage::Mode:return 4;
@@ -106,7 +106,7 @@ unsigned MenuState::count()const{
  case UiPage::Cup:return 8;
  case UiPage::Course:return 4;
  case UiPage::BattleStage:return 5;
- case UiPage::Ghost:return 3;
+ case UiPage::Ghost:return 4;
  case UiPage::Pause:return pauseCount();
  default:return 1;
  }
@@ -121,7 +121,8 @@ bool MenuState::choiceVisible(unsigned slot)const{
  case UiPage::EngineClass:return engineUnlocked(slot)&&raceEngineClass(UiEngineClass(slot));
  // Staff Ghost, Expert Staff Ghost (once unlocked), Solo Time Trials.
  case UiPage::Ghost:{const unsigned course=std::min(selection.course,31u);
-  return slot==2||(staffGhostTimes[course][slot]&&(slot==0||expertGhostUnlocked(course)));}
+  // Staff ghost, expert staff ghost, the license's own ghost, solo.
+  return slot==3||(slot==2?ownGhostTime(course)!=0:staffGhostTimes[course][slot]&&(slot==0||expertGhostUnlocked(course)));}
  default:return true;
  }
 }
@@ -198,6 +199,15 @@ void MenuState::confirmRaceMii(unsigned weight,unsigned character){
  else enter(UiPage::Vehicle);
 }
 
+void MenuState::toggleSetting(unsigned row){
+ switch(row){
+ case 0:settings.textureQuality=settings.textureQuality?0:1;break;
+ case 1:settings.dynamicShadows=!settings.dynamicShadows;break;
+ case 2:settings.bloom=!settings.bloom;break;
+ case 3:settings.opponentDetail=settings.opponentDetail?0:1;break;
+ default:break;
+ }
+}
 void MenuState::advance(unsigned ticks){age+=ticks;focusAge+=ticks;uiFocusAdvance(*this,ticks);}
 
 void MenuState::enter(UiPage next){
@@ -233,7 +243,7 @@ void MenuState::enter(UiPage next){
  case UiPage::Course:cursor=selection.course%4;break;
  case UiPage::BattleCup:cursor=selection.battleStage/5;break;
  case UiPage::BattleStage:cursor=selection.battleStage%5;break;
- case UiPage::Ghost:cursor=ghostChoice==1?0:ghostChoice==2?1:2;break; // Replays are deferred.
+ case UiPage::Ghost:cursor=ghostChoice==1?0:ghostChoice==2?1:ghostChoice==3?2:3;break; // Replays are deferred.
  case UiPage::EraseLicense:case UiPage::QuitConfirm:cursor=1;break;
  default:break;
  }
@@ -252,7 +262,7 @@ UiAction MenuState::input(UiInput key){
   case UiPage::Intro:enter(UiPage::Title);break;
   case UiPage::License:titleLicense=cursor;enter(UiPage::Title);break;
   case UiPage::MainMenu:enter(UiPage::License);break;
-  case UiPage::Settings:enter(UiPage::License);break;
+  case UiPage::Settings:enter(UiPage::License);cursor=auxiliarySlot();uiFocusReset(*this);break;
   case UiPage::RecordsGeneral:case UiPage::RecordsFavorites:case UiPage::RecordsOther:enter(UiPage::LicenseSettings);break;
   case UiPage::EraseLicense:enter(UiPage::LicenseSettings);cursor=1;uiFocusReset(*this);break;
   case UiPage::LicenseSettings:enter(UiPage::MainMenu);cursor=7;uiFocusReset(*this);break;
@@ -285,12 +295,13 @@ UiAction MenuState::input(UiInput key){
   focusAge=0;unavailable=false;
   return UiAction::None;
  }
- if(page==UiPage::LicenseSettings&&cursor>=2&&cursor<5&&(key.left||key.right)){
+ if(page==UiPage::LicenseSettings&&cursor>=2&&cursor<4&&(key.left||key.right)){
   if(cursor==2)selection.ledMode=(selection.ledMode+(key.left?3:1))%4;
-  else if(cursor==3)selection.dynamicShadows=!selection.dynamicShadows;
   else selection.ledBrightness=unsigned(std::clamp(int(selection.ledBrightness)+(key.left?-10:10),50,100));
   focusAge=0;return UiAction::None;
  }
+ // Every Settings row is a two-way choice: left, right and A all switch it.
+ if(page==UiPage::Settings&&(key.left||key.right)){toggleSetting(cursor);focusAge=0;return UiAction::None;}
  if(rulePage()&&(key.left||key.right)&&cursor<ruleOkRow()){
   if(page==UiPage::BattleRules){
    if(cursor==4){unsigned i=0;while(i+1<std::size(UiBattleWinCounts)&&UiBattleWinCounts[i]!=selection.battleWins)++i;
@@ -344,6 +355,7 @@ UiAction MenuState::input(UiInput key){
  // a settings/help activation into a license choice or manual-drift selection.
  if(cursor==auxiliarySlot()){
   if(page==UiPage::MainMenu)enter(UiPage::LicenseSettings);
+  else if(page==UiPage::License)enter(UiPage::Settings);
   else if(page==UiPage::Drift)enter(UiPage::DriftHelp);
   else if(page==UiPage::VSMode||page==UiPage::BattleMode){rulesReturn=page;enter(page==UiPage::BattleMode?UiPage::BattleRules:UiPage::VSRules);}
   else unavailable=true;
@@ -354,9 +366,9 @@ UiAction MenuState::input(UiInput key){
  case UiPage::Intro:enter(UiPage::Title);break;
  case UiPage::Title:enter(UiPage::License);if(titleLicense<4)cursor=titleLicense;uiFocusReset(*this);break;
  case UiPage::License:selection.license=cursor;enter(UiPage::MainMenu);break;
- // Wii-only destinations remain explicit until their platform handling is
- // provided: GC rumble, WFC settings and Wii Channel installation.
- case UiPage::Settings:unavailable=true;break;
+ // The Wii's page held GameCube rumble, Wi-Fi and Channel installation;
+ // this one holds the port's whole-game options instead.
+ case UiPage::Settings:toggleSetting(cursor);break;
  case UiPage::RecordsGeneral:enter(UiPage::RecordsFavorites);break;
  case UiPage::RecordsFavorites:enter(UiPage::RecordsOther);break;
  case UiPage::RecordsOther:enter(UiPage::RecordsGeneral);break;
@@ -364,8 +376,7 @@ UiAction MenuState::input(UiInput key){
   if(cursor==0)editLicenseRequest=int(selection.license);
   else if(cursor==1)enter(UiPage::EraseLicense);
   else if(cursor==2)selection.ledMode=(selection.ledMode+1)%4;
-  else if(cursor==3)selection.dynamicShadows=!selection.dynamicShadows;
-  else if(cursor==4)selection.ledBrightness=selection.ledBrightness>=100?50:selection.ledBrightness+10;
+  else if(cursor==3)selection.ledBrightness=selection.ledBrightness>=100?50:selection.ledBrightness+10;
   break;
  case UiPage::EraseLicense:if(cursor==0){eraseLicenseRequest=int(selection.license);enter(UiPage::License);}else{enter(UiPage::LicenseSettings);cursor=1;uiFocusReset(*this);}break;
  case UiPage::MainMenu:if(cursor==0)enter(UiPage::Mode);else unavailable=true;break;
@@ -407,7 +418,7 @@ UiAction MenuState::input(UiInput key){
   enter(selection.mode==UiMode::GrandPrix?UiPage::Confirm:UiPage::Course);break;
  case UiPage::Course:selection.course=selection.course/4*4+cursor;enter(selection.mode==UiMode::TimeTrials?UiPage::Ghost:UiPage::Confirm);break;
  case UiPage::Ghost:if(!choiceVisible(cursor)){unavailable=true;break;}
-  ghostChoice=cursor==0?1:cursor==1?2:0;enter(UiPage::Confirm);break;
+  ghostChoice=cursor==0?1:cursor==1?2:cursor==2?3:0;enter(UiPage::Confirm);break;
  case UiPage::BattleCup:
   if(selection.battleStage/5!=cursor)selection.battleStage=cursor*5;
   enter(UiPage::BattleStage);break;

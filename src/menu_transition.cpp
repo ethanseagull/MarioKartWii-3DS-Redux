@@ -127,6 +127,7 @@ bool uiMenuChangesSection(UiPage from,UiPage to,UiAction action){
     to!=UiPage::Pause&&to!=UiPage::QuitConfirm&&to!=UiPage::Race)return true;
  return (from==UiPage::MainMenu&&to==UiPage::Mode)||(from==UiPage::Mode&&to==UiPage::MainMenu)
      ||(from==UiPage::MainMenu&&to==UiPage::LicenseSettings)||(from==UiPage::LicenseSettings&&to==UiPage::MainMenu)
+     ||(from==UiPage::License&&to==UiPage::Settings)||(from==UiPage::Settings&&to==UiPage::License)
      ||from==UiPage::Intro||to==UiPage::Intro||from==UiPage::Race||to==UiPage::Race;
 }
 

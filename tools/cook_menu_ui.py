@@ -33,11 +33,11 @@ def save(name,img,p=None):
  r={'name':'ui_'+name,'path':'textures/ui_'+name+'.t3x','width':width,'height':height,'padded':padded,'u':width/padded[0],'v':height/padded[1]} if cached else cook_image_sprite(img,'ui_'+name,OUT)
  if p:source(p);r.update(source=str(p.relative_to(ROOT)),source_sha256=evidence[str(p.relative_to(ROOT))])
  if (native_width,native_height)!=(width,height):r.update(width=native_width,height=native_height,rasterWidth=width,rasterHeight=height)
- if name=='background':
+ if name in ('background','background_lines','background_option'):
   # One source row before/after content, filled periodically through POT padding.
   # Runtime adds 1/textureHeight to V. This preserves bilinear continuity.
   from menu_background_texture import write_wrapped_background
-  write_wrapped_background(img,OUT)
+  write_wrapped_background(img,OUT,name)
  records[name]=r
  return r
 def tpl(name,p):return save(name,decode_tpl(p),p)
@@ -455,6 +455,13 @@ def main():
   bake_panel('license_'+position+'_used','Title/button/blyt/common_w076_license_icon_tex_'+position+'.brlyt',hidden=used_hidden,exclude=trophy_prefixes)
   bake_panel('license_'+position+'_empty','Title/button/blyt/common_w076_license_icon_tex_'+position+'.brlyt',hidden=empty_license)
  bake_panel('background','MenuSingle/bg/blyt/bg.brlyt',states=('',),bounds=(-304,-228,304,228))
+ # The title-section pages (title, licenses, main menu) hide the black base:
+ # only the faint stripes cover the blurred title picture. Dolphin frames of
+ # the license screen measure them at half the layout's alpha (235/255 over
+ # white, where the full pane gives 215/248).
+ bake_panel('background_lines','Title/bg/blyt/bg.brlyt',states=('',),bounds=(-304,-228,304,228),hidden=('black_parts',),overrides={'line0':{'alpha':.5}})
+ # The Settings page's own light background.
+ bake_panel('background_option','Channel/bg/blyt/option_bg.brlyt',states=('',),bounds=(-304,-228,304,228))
  bake_panel('header','MenuSingle/bg/blyt/obi_top.brlyt',states=('',),bounds=(-304,-228,304,-125),overrides={'RootPane':{'x':2.1972661,'y':210}})
  bake_panel('footer','MenuSingle/bg/blyt/obi_bottom.brlyt',states=('',),bounds=(-304,125,304,228))
  bake_panel('footer_help','MenuSingle/bg/blyt/obi_bottom_message.brlyt',states=('',),bounds=(-304,125,304,228))

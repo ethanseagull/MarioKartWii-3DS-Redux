@@ -144,11 +144,12 @@ bool Texture::loadMemory(const void* data,size_t size,bool vram) {
     auto t=Tex3DS_TextureImport(data,size,&gpu,nullptr,vram);
     if(!t){gpu={};return false;}
     Tex3DS_TextureFree(t);
-    // Old 3DS: textures over 256x256 texels (course roads, shadows, a few
-    // objects) start at their first mip level, about the size they had before
-    // the texel budgets. Skies have no mips and stay. Level 1 onward is already
-    // laid out as a complete chain, so it moves into a smaller allocation.
-    if(renderQuality().reduced&&!vram&&gpu.maxLevel&&gpu.width*gpu.height>256*256){
+    // Old 3DS and Texture Quality: Standard: textures over 256x256 texels
+    // (course roads, shadows, a few objects) start at their first mip level,
+    // about the size they had before the texel budgets. Skies have no mips and
+    // stay. Level 1 onward is already laid out as a complete chain, so it
+    // moves into a smaller allocation.
+    if(renderQuality().halfLargeTextures&&!vram&&gpu.maxLevel&&gpu.width*gpu.height>256*256){
         C3D_Tex small{};
         const C3D_TexInitParams params{u16(gpu.width/2),u16(gpu.height/2),u8(gpu.maxLevel-1),gpu.fmt,GPU_TEX_2D,false};
         if(C3D_TexInitWithParams(&small,nullptr,params)){
@@ -663,6 +664,7 @@ void Renderer::releaseBottom(){
 }
 bool Renderer::reserveBloom(){
     if(!deviceReady_)return false;
+    if(!bloomEnabled)return true; // Bloom: Off leaves its VRAM to the course.
     if(sceneTarget_)return true;
     drain();
     return initBloomTargets();
@@ -2851,7 +2853,7 @@ void Renderer::releasePausedTop(){
     pausedTop_={};linearFree(pausedVertices_);pausedVertices_=nullptr;
 }
 void Renderer::requestBloomNow(const CourseBloom& settings){
-    bloomRequested_=settings.enabled();bloomSettings_=&settings;
+    bloomRequested_=bloomEnabled&&settings.enabled();bloomSettings_=&settings;
 }
 bool Renderer::initBloomTargets(){
     if(sceneTarget_)return true;

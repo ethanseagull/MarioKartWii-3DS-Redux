@@ -5,6 +5,7 @@
 #include <mkw/license_times.hpp>
 #include <mkw/license_unlocks.hpp>
 #include <mkw/cpu_roster.hpp>
+#include <mkw/game_settings.hpp>
 #include <array>
 #include <algorithm>
 #include <vector>
@@ -35,7 +36,9 @@ struct UiSelection {
  // The retail unlocked engine-class page switches both 50cc/100cc entries
  // together between their restricted type and the combined kart/bike list.
  bool mixedEngineTypes=false;
- unsigned ledMode=0,ledBrightness=100;bool dynamicShadows=true; // Per-license port options, separate from retail RKSD.
+ // Per-license port options, separate from retail RKSD. dynamicShadows is
+ // only read once, to seed the whole-game setting (UiSettings) on first boot.
+ unsigned ledMode=0,ledBrightness=100;bool dynamicShadows=true;
  bool operator==(const UiSelection&)const=default;
 };
 struct UiCharacterInfo {const char* name;unsigned retailId,weight;};
@@ -65,6 +68,7 @@ inline constexpr const char* UiBattleStageNames[]={"Block Plaza","Delfino Pier",
 class MenuState {
 public:
  UiPage page=UiPage::Strap;UiSelection selection{};
+ UiSettings settings{}; // Settings page; saved by main when the page is left
  unsigned cursor=0,age=0,focusAge=0;bool unavailable=false;
  int previewCourse=-1;
  LicenseRecords licenseRecords{};
@@ -85,7 +89,11 @@ public:
  std::array<std::array<std::uint32_t,2>,32> staffGhostTimes{};
  std::array<std::uint32_t,4> licenseExpertGhosts{};
  bool expertGhostUnlocked(unsigned course)const{return course<32&&(licenseExpertGhosts[std::min(selection.license,3u)]>>course&1);}
- // Ghost page choice: 0 alone, 1 staff ghost, 2 expert staff ghost.
+ // The license's own ghost per course: its finish time (ms), 0 for none
+ // (main reads a cup's four with the staff ghosts).
+ std::array<std::array<std::uint32_t,32>,4> ownGhostTimes{};
+ std::uint32_t ownGhostTime(unsigned course)const{return course<32?ownGhostTimes[std::min(selection.license,3u)][course]:0;}
+ // Ghost page choice: 0 alone, 1 staff ghost, 2 expert staff ghost, 3 own ghost.
  unsigned ghostChoice=0;
  int selectRaceMiiRequest=-1;unsigned selectedMiiVoice=0;
  void confirmRaceMii(unsigned weight,unsigned character);
@@ -112,7 +120,7 @@ public:
  void prepareVsCourses();
  void nextVsCourse();
  // The corner control is an independent PushButton, outside the main grid.
- unsigned auxiliarySlot()const{return page==UiPage::MainMenu?7:(page==UiPage::Drift||page==UiPage::VSMode||page==UiPage::BattleMode)?2:~0u;}
+ unsigned auxiliarySlot()const{return page==UiPage::MainMenu?7:page==UiPage::License?4:(page==UiPage::Drift||page==UiPage::VSMode||page==UiPage::BattleMode)?2:~0u;}
  // Results is the retail VS end-of-race menu (VSRaceEnd): Next Race / Quit
  // Game, or only Next after the final race of a VS set (IsFinalRace).
  // GP/VS/BT match the retail PauseMenu: Continue Game / Quit Game. TT adds
@@ -131,6 +139,7 @@ public:
  UiFocusState focus{};
  UiAction input(UiInput);
  void advance(unsigned ticks);
+ void toggleSetting(unsigned row);
  void enter(UiPage);
  void raceStarted(){enter(UiPage::Race);}
  void finish(bool last=false){finalRace=last;enter(UiPage::Results);}

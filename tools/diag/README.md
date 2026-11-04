@@ -113,3 +113,16 @@ baked shadow maps) in LINEAR; without it their ETC1 goes to VRAM as ETC1A4.
 textures left in LINEAR track+sky=… unit1=… objects=…`, count/KB).
 `stereo-slider.txt` (a number from 0 to 1) pins the 3D slider for comparable
 runs.
+`no-menu-pipeline.txt` draws menus immediately on the main thread (CPU work,
+then the GPU, one after the other) instead of through the render thread.
+The Settings page's options are in `settings.dat`, not in the license:
+Dynamic Shadows for benchmarks is set there (or on the Settings page).
+
+## Ghost sync check
+
+`ghost-test.txt` with a script whose Time Trial drives `race:N:items` (A held,
+L pressed at frames 360, 660 and 960): the first 20 s of the race are saved as
+the course's ghost. Race that ghost (Your Ghost on the ghost page) with the
+same script: `runtime.log` lists `ghost test: frame=… distance=…` every 60
+frames. A distance that stays at 0 means the recorded inputs replay exactly,
+mushrooms included.

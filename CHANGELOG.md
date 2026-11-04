@@ -20,6 +20,7 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.8.14.
 - Sped up menu text animation by caching its results.
 - Model draws with plain texture coordinates and none of the extra effects take a shorter vertex shader path.
 - Course textures take VRAM by priority: the sky first, then the track textures that cover the most surface per byte.
+- Menus draw like races: the render thread builds each frame's GPU commands while the next frame is prepared, and the GPU draws one frame while the next is built. Streamed menu movies upload through the frame's deferred writes. The pause pages still draw immediately.
 
 # Racing and visuals
 
@@ -27,6 +28,16 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.8.14.
 - CPU racers drift manually, as on the Wii, and after a fall their path restarts from their respawn point.
 - Course, sky and course object textures are cooked to a texel budget instead of a flat 256 cap, so long road strips, skies and baked shadow maps keep more of the Wii's detail. The Old 3DS loads the larger ones one mip level down.
 - New 3DS: every opponent keeps its full-detail kart, driver and wheels at any distance, and crowds and animated items run every tick, as in the Wii's single-player races.
+
+# Settings
+
+- The Wii's Settings button is back on the license screen. It opens the Wii's Settings page (its buttons, background and music) with this port's options, saved for the whole game in `settings.dat`:
+  - Texture Quality: High keeps every texture at its cooked size; Standard loads textures over 256x256 one mip level down.
+  - Dynamic Shadows (moved here from License Settings; the first start takes the last license's choice).
+  - Bloom: On or Off. Off also leaves bloom's VRAM to the course.
+  - Opponent Detail: Full, or Reduced (distant opponents use the Wii's split-screen models).
+  - Changes apply to the next race.
+- The license screen, title and main menu show the Wii's faint stripes over the blurred title picture on the lower screen, instead of the dark stripes the race menus use.
 
 # Loading
 
@@ -46,6 +57,7 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.8.14.
 
 # Time Trials
 
+- Your own ghosts: every Time Trial records your inputs in the Wii's ghost format. A run that sets the course's best time (or the first finish on a course without a ghost) is saved as `ghosts/license-N/NN.rkg` in the SD folder, and the ghost page lists it as Your Ghost to race. Erasing a license erases its ghosts. Mii racers aren't recorded yet.
 - Staff ghosts: race the disc's Staff Ghost on every course, and its Expert Staff Ghost once you beat the Staff Ghost's time. The ghost is translucent, can't be bumped and uses its own Triple Mushroom. Beating staff ghosts counts towards the retail unlocks that need them, and ghost races count as Ghost Races in your records.
 
 # Fixes

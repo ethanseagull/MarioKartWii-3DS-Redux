@@ -238,8 +238,19 @@ void MenuMovie::upload(){
  if(!ready)return;
  const unsigned rowBytes=s.rowBytes();
  auto* destination=static_cast<unsigned char*>(s.image.gpu.data)+s.stagedFirst*rowBytes;
- std::memcpy(destination,s.staging.data(),s.stagedRows*rowBytes);
- flushGpuData(destination,s.stagedRows*rowBytes);
+ const std::size_t bytes=s.stagedRows*rowBytes;
+ if(auto* deferred=deferredWrites()){
+  // Pipelined menus: the GPU may still sample this texture for the previous
+  // frame. Copy the rows now; the render thread writes them once that frame
+  // has finished, before this frame's draws.
+  struct Write {unsigned char* destination;std::size_t bytes;};
+  auto* w=static_cast<Write*>(deferred->allocate(sizeof(Write)+bytes));
+  w->destination=destination;w->bytes=bytes;std::memcpy(w+1,s.staging.data(),bytes);
+  deferred->queue([](void* p){auto& w=*static_cast<Write*>(p);std::memcpy(w.destination,&w+1,w.bytes);flushGpuData(w.destination,w.bytes);},w);
+ }else{
+  std::memcpy(destination,s.staging.data(),bytes);
+  flushGpuData(destination,bytes);
+ }
  s.current=s.stagedFrame;s.hasFrame=true;
  LightLock_Lock(&s.lock);s.stage=Impl::Free;LightLock_Unlock(&s.lock);
  Streamer::instance().wake();
