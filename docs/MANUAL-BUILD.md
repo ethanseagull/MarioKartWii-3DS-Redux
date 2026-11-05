@@ -184,10 +184,10 @@ For the CIA, remove the `RomFs` block from a copy of
 then:
 
 ```sh
-makerom -f cia -target t -exefslogo -elf mkw-3ds.elf -rsf external-sd.rsf -icon icon.icn -banner banner-startgrid.bnr -ver 142 -DAPP_REMASTER=0 -o MarioKartWii-3DS-Redux-v0.8.14.cia
+makerom -f cia -target t -exefslogo -elf mkw-3ds.elf -rsf external-sd.rsf -icon icon.icn -banner banner-startgrid.bnr -ver 148 -DAPP_REMASTER=0 -o MarioKartWii-3DS-Redux-v0.9.4.cia
 ```
 
-The title version is `major << 10 | minor << 4 | micro`, so 0.8.14 is 142.
+The title version is `major << 10 | minor << 4 | micro`, so 0.9.4 is 148.
 Some makerom builds write 14 instead because of an internal macro clash;
 `tools/build.py` corrects the Ticket and TMD version fields, then checks
 every TMD and content hash (`check_cia`).

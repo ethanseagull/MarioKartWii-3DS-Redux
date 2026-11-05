@@ -1,8 +1,8 @@
 # Changelog
 
-## This fork, after 0.8.14
+## This fork, after 0.9.4
 
-Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.8.14.
+Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.9.4 (merged Nov 4, 2026; earlier fork changes were made on 0.8.14).
 
 # Performance (New 3DS)
 
@@ -84,12 +84,13 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.8.14.
 - Windows path, menu movie and menu texture fixes in the packaging tools.
 - A diagnostic build with per-race profiling and an unattended 32-course benchmark (`tools/diag`).
 
-## Cumulative changes through 0.8.14 / HW137
+## Upstream changes through 0.9.4 / HW143
 
-This list covers the changes retained on top of the existing port, consolidates repeated revisions, excludes withdrawn experiments, packaging-only iterations and unfinished investigations, and does not claim complete parity with the Wii original.
+Changes retained on top of the existing port, grouped by feature; withdrawn experiments, packaging-only revisions and unfinished investigations are excluded.
 
 # Interface and menus
 
+- Updated HOME banner conversion tools while keeping source inputs external to the repository.
 - Bounded menu background residency, reclaimed retired models before replacement loads and retried failed backgrounds to prevent disappearing mode models.
 - Restored the Grand Prix trophy's original diffuse lighting, weighted metal reflections and wood-base opacity.
 - Restored the Time Trials stopwatch's metal and glass material combinations and reflection transforms.
@@ -155,6 +156,7 @@ This list covers the changes retained on top of the existing port, consolidates 
 
 # Miis and character models
 
+- Preserved original color values in transparent face texels across race, menu and award expressions to prevent black facial patches.
 - Replaced the question-mark result icon with the selected Mii portrait on individual and team result boards.
 - Added native 3DS Mii selection and portrait rendering.
 - Corrected license-card Mii portrait orientation, proportions, lighting and frame coverage.
@@ -176,7 +178,6 @@ This list covers the changes retained on top of the existing port, consolidates 
 - Restored Mii head lighting, highlights and Star color handling.
 - Corrected the personal Mii's placement, neck connection and hair occlusion in the staff credits group photo.
 - Fixed normal steering selecting incorrect facial expressions and blinking producing black faces.
-- Fixed transparent pixels in the baby princesses' award face textures losing their RGB values and turning black.
 - Fixed intermittent Toadette braid physics jitter and pose updates.
 - Fixed black polygons around Funky Kong's trouser cuffs.
 - Fixed Pokey's eyes appearing to have a white overlay.
@@ -184,6 +185,9 @@ This list covers the changes retained on top of the existing port, consolidates 
 
 # Race flow, cameras and CPU drivers
 
+- Corrected the paired hallway Thwomps' return path and final turn angle on N64 Bowser's Castle.
+
+- Stopped the lightning shrink timer from repeatedly triggering the damage animation after the initial reaction ends.
 - Restored cup, course, mode and engine-class information during course intros.
 - Extended intro text coverage to Battle arenas.
 - Corrected clipping and placement of intro text, LAP, GO and result digits.
@@ -295,6 +299,13 @@ This list covers the changes retained on top of the existing port, consolidates 
 
 # Scene materials and rendering
 
+- Restored the original white environment highlights in the Thunder Cloud's eyes.
+
+- Restored the original lava color layers on N64 Bowser's Castle, including lava pillars and splash models.
+
+- Restored spectators' original light-texture combinations and kept their lighting maps fixed.
+- Restored the original internal lighting alpha for Peach Beach Nokis and a Bowser Castle crowd material to correct their dark appearance.
+- Kept spectator crowds at their near-model appearance to prevent distance-dependent lighting changes.
 - Restored the original GX lighting channels and environment reflections for racing characters and vehicles.
 - Preserved source normals during GPU skinning and applied the corresponding normal transforms.
 - Restored original course lighting, fog and supported layered material combinations.
@@ -327,6 +338,8 @@ This list covers the changes retained on top of the existing port, consolidates 
 - Regenerated Bowser's Castle rotating-corridor minimap frames without the roof.
 
 # Particles and visual effects
+
+- Restored the original large and small statue fire effects and proximity triggers on N64 Bowser's Castle.
 
 - Added missing vehicle particles for starts, burnouts, drifting, landings and road contact.
 - Added missing activation and stopping conditions for leaf-area and chimney particles.
@@ -383,6 +396,9 @@ This list covers the changes retained on top of the existing port, consolidates 
 
 # Sound and music
 
+- Made menu music replacement atomic and retired detached music instances to prevent overlapping BGM after settings changes.
+- Kept audio automation on a continuous audio-thread clock during saves and loading while preserving game-controlled sound expiry.
+- Raised audio refill priority and split scene reads into smaller pieces with active-stream refills between them.
 - Restored the original voice ranges, fallback behavior and parameters for character and vehicle confirmations.
 - Added missing sounds for damage, wall impacts, vehicle collisions and selected course obstacles.
 - Added missing special collision sounds such as Coconut Mall traffic impacts.

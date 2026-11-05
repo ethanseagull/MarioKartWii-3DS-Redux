@@ -72,7 +72,7 @@ def platform_key():
 
 
 def title_version():
-    """makerom's -ver: major << 10 | minor << 4 | micro (0.8.14 -> 142)."""
+    """makerom's -ver: major << 10 | minor << 4 | micro (0.9.4 -> 148)."""
     major, minor, micro = (int(x) for x in (REPO / 'VERSION').read_text().strip().split('.'))
     return major << 10 | minor << 4 | micro
 
