@@ -186,6 +186,8 @@ MenuModels::Entry& MenuModels::obtain(int kind,int id){
     auto entry=std::make_unique<Entry>();entry->kind=kind;entry->id=id;entries_.push_back(std::move(entry));return *entries_.back();
 }
 void MenuModels::request(const MenuState& state,AssetPriority priority){
+    // The Settings sample loads only for the page on screen: update() frees it elsewhere.
+    if(priority!=AssetPriority::Prefetch)settings_.request(state,priority);
     if(state.page==UiPage::Unlock){request(unlockModelState(state),priority);return;}
     const auto w=wanted(state);
     const std::pair<int,int> items[]={{Driver,w.driver},{Background,w.background},{Machine,w.machine}};
@@ -246,6 +248,7 @@ void MenuModels::update(Renderer& renderer,const MenuState& state,const UiTransi
     const auto visual=state.page==UiPage::Unlock?unlockModelState(state):state;
     const bool confirm=visual.page==UiPage::Vehicle&&motion.active&&!motion.entering&&!motion.back&&motion.to==UiPage::Drift;
     machineRotation_.update(visual.page==UiPage::Vehicle&&!confirm,confirm);
+    settings_.update(renderer,visual);
     for(auto& e:entries_)if(e->job&&e->job->done()){
         auto job=std::move(e->job);
         if(!publishModel(renderer,*e,*job)&&!job->cancelled())e->failed=true;
@@ -309,6 +312,7 @@ void MenuModels::update(Renderer& renderer,const MenuState& state,const UiTransi
     ++clock_;
 }
 void MenuModels::prepare(Renderer& renderer,const MenuState& state){
+    settings_.prepare(renderer,state);
     request(state,AssetPriority::Urgent);
     // QA path: run this state's jobs on the calling thread.
     for(auto& e:entries_)if(e->job&&!e->job->done()){e->job->cancel();auto job=std::make_shared<ModelJob>(e->kind,e->id,e->kind==Driver&&e->id>=24?identities_[unsigned(e->id-24)/2]:NativeMii{});job->run();
@@ -318,6 +322,7 @@ void MenuModels::prepare(Renderer& renderer,const MenuState& state){
     update(renderer,state);
 }
 void MenuModels::reset(Renderer& renderer) {
+    settings_.reset(renderer);
     for(auto& e:entries_){if(e->job)e->job->cancel();renderer.retire(std::move(e->head));renderer.retire(std::move(e->model));}
     entries_.clear();shownDriver_=shownBackground_=shownMachine_=-1;driverClip_=driverFace_=backgroundClip_=-1;
     machineRotation_={};
@@ -331,11 +336,19 @@ void MenuModels::begin(Renderer& renderer) {
     renderer.setStereoSubject(stereo::Garage,ModelDepth);
     renderer.begin({0,0,EyeDistance},{0,0,0},{0,1,0});
 }
+void MenuModels::begin(Renderer& renderer,const MenuState& state) {
+    if(state.page!=UiPage::Settings){begin(renderer);return;}
+    renderer.setFov(Fov,10.f,100000.f);renderer.setCourseLighting(false);
+    renderer.setRetailLighting(&MenuLightings[0]);
+    renderer.setStereoSubject(stereo::Garage,ModelDepth);
+    settings_.begin(renderer,state);
+}
 float MenuModels::backdropParallax(const Renderer& renderer){
     return renderer.stereoParallax(ModelDepth*stereo::GarageBackdropRatio);
 }
 void MenuModels::draw(Renderer& renderer,const MenuState& state,const UiTransitionView& motion) {
     if(state.page==UiPage::Unlock){auto model=unlockModelState(state);if(model.page==UiPage::Vehicle)model.page=UiPage::Drift;draw(renderer,model,motion);return;}
+    if(state.page==UiPage::Settings){settings_.draw(renderer,state,motion);return;}
     if((state.page==UiPage::Character&&!state.driverUnlocked(state.characterDriver(state.cursor)))||
        (state.page==UiPage::Vehicle&&!state.vehicleUnlocked(state.vehicleChoice(state.cursor))))return;
     // The upper screen is the course movie/details area on these pages. The

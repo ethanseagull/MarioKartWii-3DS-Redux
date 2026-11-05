@@ -75,7 +75,7 @@ struct EndCommand {static constexpr uint16_t Type=CmdEnd;};
 struct ProjectionCommand {static constexpr uint16_t Type=CmdProjection;C3D_Mtx projection;};
 struct CourseLightingCommand {static constexpr uint16_t Type=CmdCourseLighting;bool enabled;};
 struct RetailFogCommand {static constexpr uint16_t Type=CmdRetailFog;RetailFog fog;};
-struct RequestBloomCommand {static constexpr uint16_t Type=CmdRequestBloom;const CourseBloom* settings;};
+struct RequestBloomCommand {static constexpr uint16_t Type=CmdRequestBloom;const CourseBloom* settings;float clip[4];bool clipped;};
 struct RequestStadiumCommand {static constexpr uint16_t Type=CmdRequestStadium;const Bounds* screens;unsigned count;};
 struct ApplyBloomCommand {static constexpr uint16_t Type=CmdApplyBloom;};
 struct BottomCommand {static constexpr uint16_t Type=CmdBottom;};
@@ -360,7 +360,7 @@ void Renderer::execute(FrameList& list){
         case CmdCourseLighting:courseLighting_=static_cast<const CourseLightingCommand*>(body)->enabled;break;
         case CmdRetailFog:retailFogNow(static_cast<const RetailFogCommand*>(body)->fog);break;
         case CmdRequestStadium:{const auto& c=*static_cast<const RequestStadiumCommand*>(body);requestStadiumScreen(c.screens,c.count);break;}
-        case CmdRequestBloom:{const auto& c=*static_cast<const RequestBloomCommand*>(body);requestBloomNow(*c.settings);break;}
+        case CmdRequestBloom:{const auto& c=*static_cast<const RequestBloomCommand*>(body);requestBloomNow(*c.settings,c.clipped?c.clip:nullptr);break;}
         case CmdApplyBloom:applyBloom();break;
         case CmdBottom:bottom=true;if(!execDualScreenIntro_&&eye+1==eyes)beginBottom();break;
         case CmdDraw:{
@@ -544,12 +544,13 @@ void Renderer::requestStadiumScreen(const Bounds* screens,unsigned count){
         if(screens&&count)stadiumScreens_.assign(screens,screens+count);
     }
 }
-void Renderer::requestBloom(const CourseBloom& settings){
-    if(!recording()){requestBloomNow(settings);return;}
+void Renderer::requestBloom(const CourseBloom& settings,const float* clip){
+    if(!recording()){requestBloomNow(settings,clip);return;}
     // Bloom's VRAM targets (unless reserved at load) and LINEAR vertices:
     // create them here, once, with the render thread idle.
     if(settings.enabled()&&!bloomVertices_&&!bloomFailed_){drain();initBloom();}
-    command<RequestBloomCommand>().settings=&settings;
+    auto& c=command<RequestBloomCommand>();c.settings=&settings;c.clipped=clip!=nullptr;
+    if(clip)std::memcpy(c.clip,clip,sizeof c.clip);
 }
 void Renderer::begin(Vec3 eye,Vec3 target,Vec3 up,bool mirror){
     auto e=FVec3_New(eye.x,eye.y,eye.z),t=FVec3_New(target.x,target.y,target.z),u=FVec3_New(up.x,up.y,up.z);

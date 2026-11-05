@@ -227,6 +227,7 @@ src/main.cpp
 src/menu_focus.cpp
 src/menu_index.cpp
 src/menu_models.cpp
+src/settings_preview.cpp
 src/menu_movie.cpp
 src/menu_movie_audio.cpp
 src/menu_renderer.cpp

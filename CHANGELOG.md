@@ -31,12 +31,13 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.8.14.
 
 # Settings
 
-- The Wii's Settings button is back on the license screen. It opens the Wii's Settings page (its buttons, background and music) with this port's options, saved for the whole game in `settings.dat`:
+- The Wii's Settings button is back on the license screen, in the lower screen's top right corner as on the Wii (Up from the top row or Right from the right column). It opens the Wii's Settings page (its buttons, background and music) with this port's options, saved for the whole game in `settings.dat`:
   - Texture Quality: High keeps every texture at its cooked size; Standard loads textures over 256x256 one mip level down.
   - Dynamic Shadows (moved here from License Settings; the first start takes the last license's choice).
   - Bloom: On or Off. Off also leaves bloom's VRAM to the course.
   - Opponent Detail: Full, or Reduced (distant opponents use the Wii's split-screen models).
   - Changes apply to the next race.
+  - The upper screen shows a live sample of the highlighted option at its current value, drawn with the race's own code: the road close up at High or Standard, the racer with the dynamic or the plain shadow, with or without bloom, and at full or reduced detail.
 - The license screen, title and main menu show the Wii's faint stripes over the blurred title picture on the lower screen, instead of the dark stripes the race menus use.
 
 # Loading

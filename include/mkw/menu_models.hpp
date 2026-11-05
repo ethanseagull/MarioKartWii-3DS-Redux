@@ -4,6 +4,7 @@
 #include "mkw/menu_transition.hpp"
 #include "mkw/asset_loader.hpp"
 #include "mkw/license_identity.hpp"
+#include "mkw/settings_preview.hpp"
 #include <memory>
 #include <vector>
 
@@ -34,6 +35,9 @@ public:
     // The menu camera and its stereo: Mario Kart 7's garage camera, whose
     // subject is the selection models.
     void begin(Renderer&);
+    // The same for this page: the Settings sample uses its own camera and
+    // may request bloom for its window.
+    void begin(Renderer&,const MenuState&);
     // Stereo disparity of the backdrop pane in the frame begin() started: at
     // the garage's back wall, behind the models.
     static float backdropParallax(const Renderer&);
@@ -52,6 +56,7 @@ private:
     int driverClip_=-1,driverFace_=-1,backgroundClip_=-1;
     unsigned backgroundFrame_=0,driverFrame_=0;
     MenuVehicleRotation machineRotation_;
+    SettingsPreview settings_;
     std::uint32_t clock_=1;
 };
 }

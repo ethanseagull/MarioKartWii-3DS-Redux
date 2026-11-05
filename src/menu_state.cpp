@@ -254,7 +254,9 @@ void MenuState::enter(UiPage next){
 UiAction MenuState::input(UiInput key){
  normalize(selection);
  if(page==UiPage::Unlock){if(key.accept)unlockNextRequested=true;return UiAction::None;}
- cursor=std::min(cursor,count()-1);
+ // The license screen's Settings button is slot 4, past its four licenses
+ // (count()): keep it, or the cursor drops to license 3 the next frame.
+ if(cursor!=auxiliarySlot())cursor=std::min(cursor,count()-1);
  if(page==UiPage::Race){if(key.start)enter(UiPage::Pause);return UiAction::None;}
  if(page==UiPage::Pause&&(key.start||key.back)){enter(UiPage::Race);return UiAction::ResumeRace;}
  if(key.back){
@@ -336,7 +338,10 @@ UiAction MenuState::input(UiInput key){
     cursor=visible[next];
    }
   }else if(hasAuxiliary&&cursor==auxiliary){
-   cursor=std::min(auxiliaryReturnCursor,auxiliary-1);
+   // The license screen's Settings button sits above and right of the
+   // licenses: only Down or Left lead back to them, so a held Up/Right
+   // (direction repeat) stays on the button instead of bouncing off it.
+   if(page!=UiPage::License||key.down||key.left)cursor=std::min(auxiliaryReturnCursor,auxiliary-1);
   }else if(hasAuxiliary&&((key.up&&topRow)||(key.right&&rightEdge))){
    auxiliaryReturnCursor=cursor;cursor=auxiliary;
   }else if(page==UiPage::MainMenu)cursor=moveMainMenu(cursor,key);

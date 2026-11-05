@@ -1222,7 +1222,7 @@ int main() {
             // so they stay immediate; every other page is recorded.
             renderer.setDeferred(menuDeferred&&visual.page!=mkw::UiPage::Pause&&visual.page!=mkw::UiPage::QuitConfirm);
             publishLicensePortraits(quads);
-            menuModels.begin(renderer);
+            menuModels.begin(renderer,visual);
             menuProfile->mark(MenuStage::Begin);
             // Publish streamed movie frames for this frame: at once when the GPU
             // is idle (immediate frames), else as the frame's deferred writes.
@@ -1295,9 +1295,9 @@ int main() {
         return leave(mkw::UiAction::Exit);
     };
     if((kQa&&exists("sdmc:/3ds/mkw-3ds/menu-test.txt"))){
-        struct Snapshot {const char* name;mkw::UiPage page;unsigned cursor;mkw::UiEngineClass engine=mkw::UiEngineClass::CC150;};
+        struct Snapshot {const char* name;mkw::UiPage page;unsigned cursor;mkw::UiEngineClass engine=mkw::UiEngineClass::CC150;int flip=-1;};
         const Snapshot pages[]={{"strap",mkw::UiPage::Strap,0},{"license",mkw::UiPage::License,0},{"class",mkw::UiPage::EngineClass,1},{"title",mkw::UiPage::Title,0},{"main",mkw::UiPage::MainMenu,0},{"single-player",mkw::UiPage::Mode,0},{"character",mkw::UiPage::Character,8},{"vehicle",mkw::UiPage::Vehicle,0},{"drift",mkw::UiPage::Drift,1},{"cup",mkw::UiPage::Cup,0},{"course",mkw::UiPage::Course,0},{"confirm",mkw::UiPage::Confirm,0},{"pause",mkw::UiPage::Pause,0},
-            {"vs-mode",mkw::UiPage::VSMode,0},{"vs-rules",mkw::UiPage::VSRules,0},{"battle-mode",mkw::UiPage::BattleMode,0},{"battle-cup",mkw::UiPage::BattleCup,0},{"battle-stage",mkw::UiPage::BattleStage,0},{"team-confirm",mkw::UiPage::TeamConfirm,0},{"drift-help",mkw::UiPage::DriftHelp,0},{"settings",mkw::UiPage::Settings,0},{"settings-bloom",mkw::UiPage::Settings,2},{"license-option",mkw::UiPage::License,4},{"license-settings",mkw::UiPage::LicenseSettings,0},{"erase-license",mkw::UiPage::EraseLicense,1},{"quit-confirm",mkw::UiPage::QuitConfirm,1},
+            {"vs-mode",mkw::UiPage::VSMode,0},{"vs-rules",mkw::UiPage::VSRules,0},{"battle-mode",mkw::UiPage::BattleMode,0},{"battle-cup",mkw::UiPage::BattleCup,0},{"battle-stage",mkw::UiPage::BattleStage,0},{"team-confirm",mkw::UiPage::TeamConfirm,0},{"drift-help",mkw::UiPage::DriftHelp,0},{"settings",mkw::UiPage::Settings,0},{"settings-bloom",mkw::UiPage::Settings,2},{"settings-texture-standard",mkw::UiPage::Settings,0,mkw::UiEngineClass::CC150,0},{"settings-shadows",mkw::UiPage::Settings,1},{"settings-shadows-off",mkw::UiPage::Settings,1,mkw::UiEngineClass::CC150,1},{"settings-bloom-off",mkw::UiPage::Settings,2,mkw::UiEngineClass::CC150,2},{"settings-detail",mkw::UiPage::Settings,3},{"settings-detail-reduced",mkw::UiPage::Settings,3,mkw::UiEngineClass::CC150,3},{"license-option",mkw::UiPage::License,4},{"license-settings",mkw::UiPage::LicenseSettings,0},{"erase-license",mkw::UiPage::EraseLicense,1},{"quit-confirm",mkw::UiPage::QuitConfirm,1},
             {"vehicle-karts",mkw::UiPage::Vehicle,0,mkw::UiEngineClass::CC50},{"vehicle-bikes",mkw::UiPage::Vehicle,0,mkw::UiEngineClass::CC100}};
         bool snapshotsOnly=false;
         if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/menu-test.txt","r")){char mode[24]{};if(fscanf(f,"%23s",mode)==1)snapshotsOnly=!strcmp(mode,"snapshots");fclose(f);}
@@ -1309,7 +1309,7 @@ int main() {
             mkw::composeMenu(visual,fixture,resident,preload);
             for(const auto& quad:quads)ok&=!quad.bottom;
             renderer.waitForGpu();ok&=menuRenderer.prepare(resident);ok&=menuRenderer.updateMovies(motion.underlay?motion.underlay->age:visual.age);
-            menuModels.prepare(renderer,visual);ok&=menuIcons.prepare(renderer,visual);menuModels.begin(renderer);renderer.drawScreenFade(1.f,false);
+            menuModels.prepare(renderer,visual);ok&=menuIcons.prepare(renderer,visual);menuModels.begin(renderer,visual);renderer.drawScreenFade(1.f,false);
             drawMenuBackdrop(renderer,menuRenderer,quads);if(models)menuModels.draw(renderer,visual);
             if(menuOnBottom(visual.page)){
                 mkw::layoutMenuScreens(visual,quads,upper,lower);menuRenderer.draw(renderer,upper,false,0,~0u,&menuIcons);
@@ -1332,6 +1332,12 @@ int main() {
         for(const auto& page:pages){
             menu.selection={};menu.selection.mode=mkw::UiMode::GrandPrix;
             menu.selection.engineClass=page.engine;
+            // Settings snapshots: the defaults, or one row switched.
+            menu.settings={};
+            if(page.flip==0)menu.settings.textureQuality=1;
+            if(page.flip==1)menu.settings.dynamicShadows=false;
+            if(page.flip==2)menu.settings.bloom=false;
+            if(page.flip==3)menu.settings.opponentDetail=1;
             if(page.page==mkw::UiPage::Vehicle||page.page==mkw::UiPage::Drift||page.page==mkw::UiPage::Cup||page.page==mkw::UiPage::Confirm){menu.selection.driver=10;menu.selection.vehicle=page.page==mkw::UiPage::Vehicle?0:4;}
             menu.enter(page.page);menu.cursor=page.cursor;menu.advance(54);
             for(unsigned tick=0;tick<6;++tick){menu.advance(1);capture(page.name,menu,{},false);}

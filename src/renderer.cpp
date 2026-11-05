@@ -131,15 +131,15 @@ C3D_Tex* Texture::sampledGpu(const MaterialSampler* s,unsigned unit){
     if(!renderQuality().mipmaps||s->minFilter<2)view.minLevel=view.maxLevel=0;
     return &view;
 }
-bool Texture::load(const char* path) {
+bool Texture::load(const char* path,int halveLarge) {
     std::vector<uint8_t> file;
-    return (pack::read(path,file)||readFile(path,file))&&loadMemory(file.data(),file.size());
+    return (pack::read(path,file)||readFile(path,file))&&loadMemory(file.data(),file.size(),false,halveLarge);
 }
 bool Texture::loadVram(const char* path) {
     std::vector<uint8_t> file;
     return (pack::read(path,file)||readFile(path,file))&&loadMemory(file.data(),file.size(),true);
 }
-bool Texture::loadMemory(const void* data,size_t size,bool vram) {
+bool Texture::loadMemory(const void* data,size_t size,bool vram,int halveLarge) {
     reset();
     auto t=Tex3DS_TextureImport(data,size,&gpu,nullptr,vram);
     if(!t){gpu={};return false;}
@@ -149,7 +149,7 @@ bool Texture::loadMemory(const void* data,size_t size,bool vram) {
     // about the size they had before the texel budgets. Skies have no mips and
     // stay. Level 1 onward is already laid out as a complete chain, so it
     // moves into a smaller allocation.
-    if(renderQuality().halfLargeTextures&&!vram&&gpu.maxLevel&&gpu.width*gpu.height>256*256){
+    if((halveLarge<0?renderQuality().halfLargeTextures:halveLarge>0)&&!vram&&gpu.maxLevel&&gpu.width*gpu.height>256*256){
         C3D_Tex small{};
         const C3D_TexInitParams params{u16(gpu.width/2),u16(gpu.height/2),u8(gpu.maxLevel-1),gpu.fmt,GPU_TEX_2D,false};
         if(C3D_TexInitWithParams(&small,nullptr,params)){
@@ -2852,8 +2852,15 @@ void Renderer::releasePausedTop(){
     if(pausedTop_.data)C3D_TexDelete(&pausedTop_);
     pausedTop_={};linearFree(pausedVertices_);pausedVertices_=nullptr;
 }
-void Renderer::requestBloomNow(const CourseBloom& settings){
+void Renderer::requestBloomNow(const CourseBloom& settings,const float* clip){
     bloomRequested_=bloomEnabled&&settings.enabled();bloomSettings_=&settings;
+    bloomClipped_=clip!=nullptr;if(clip)std::memcpy(bloomClip_,clip,sizeof bloomClip_);
+}
+void Renderer::releaseBloom(){
+    // A menu's failed allocation must not keep the next race from trying.
+    bloomFailed_=false;
+    if(!deviceReady_||(!sceneTarget_&&!bloomVertices_))return;
+    waitForGpu();freeBloom();
 }
 bool Renderer::initBloomTargets(){
     if(sceneTarget_)return true;
@@ -2958,7 +2965,18 @@ void Renderer::applyBloomNow(){
     C3D_TexEnvOpRgb(e1,GPU_TEVOP_RGB_SRC_COLOR,GPU_TEVOP_RGB_SRC_ALPHA);C3D_TexEnvScale(e1,C3D_Both,GPU_TEVSCALE_2);
     auto* e2=C3D_GetTexEnv(2);C3D_TexEnvSrc(e2,C3D_Both,GPU_PREVIOUS,GPU_TEXTURE1);C3D_TexEnvFunc(e2,C3D_Both,GPU_MODULATE);
     C3D_TexBind(1,&sceneTex_);blend(false);
+    // A clipped request thresholds only inside its rectangle (rounded
+    // inward); the rest of the near texture keeps the frame's black clear,
+    // which no later pass writes, so both eyes see the same mask.
+    if(bloomClipped_){
+        const float sx=float(BloomNearWidth)/400.f,sy=float(BloomNearHeight)/240.f;
+        const int x0=int(std::ceil(bloomClip_[0]*sx)),x1=int(std::floor((bloomClip_[0]+bloomClip_[2])*sx));
+        const int y0=int(std::ceil(bloomClip_[1]*sy)),y1=int(std::floor((bloomClip_[1]+bloomClip_[3])*sy));
+        C3D_SetScissor(GPU_SCISSOR_NORMAL,unsigned(std::clamp(int(BloomNearHeight)-y1,0,int(BloomNearHeight))),unsigned(std::clamp(int(BloomNearWidth)-x1,0,int(BloomNearWidth))),
+            unsigned(std::clamp(int(BloomNearHeight)-y0,0,int(BloomNearHeight))),unsigned(std::clamp(int(BloomNearWidth)-x0,0,int(BloomNearWidth))));
+    }
     bloomQuad(bloomTex_[1],BloomNearWidth,BloomNearHeight,BloomNearWidth,BloomNearHeight,0,0,400,240,&sceneTex_);
+    if(bloomClipped_)C3D_SetScissor(GPU_SCISSOR_DISABLE,0,0,0,0);
     C3D_TexBind(1,nullptr);
     // EGG keeps a near band (8 taps) and a far band (8 + 16 taps). Reduced
     // quality halves spatial samples, doubling their weights to keep energy.
@@ -3008,8 +3026,11 @@ void Renderer::applyBloomNow(){
     // Merged: one full-screen pass, not a scene copy plus a blended composite.
     // The near and far textures move to units 1 and 2 and share texcoord 1;
     // the scene is unit 0.
-    const GPU_TEVSRC near=bloomMerge?GPU_TEXTURE1:GPU_TEXTURE0,far=bloomMerge?GPU_TEXTURE2:GPU_TEXTURE1;
-    if(!bloomMerge){
+    // A clipped request copies the scene whole, then adds the glow only
+    // inside its rectangle: the merged pass would have to write every pixel.
+    const bool merge=bloomMerge&&!bloomClipped_;
+    const GPU_TEVSRC near=merge?GPU_TEXTURE1:GPU_TEXTURE0,far=merge?GPU_TEXTURE2:GPU_TEXTURE1;
+    if(!merge){
         e0=env();C3D_TexEnvSrc(e0,C3D_Both,GPU_TEXTURE0);C3D_TexEnvFunc(e0,C3D_Both,GPU_REPLACE);
         blend(false);bloomQuad(sceneTex_,400,240,400,240,0,0);
     }
@@ -3025,7 +3046,7 @@ void Renderer::applyBloomNow(){
     e2=C3D_GetTexEnv(2);C3D_TexEnvSrc(e2,C3D_Both,GPU_PREVIOUS,GPU_PREVIOUS_BUFFER);C3D_TexEnvFunc(e2,C3D_Both,GPU_ADD);
     e3=C3D_GetTexEnv(3);C3D_TexEnvColor(e3,pica(bloomDisplayTint(settings)));
     C3D_TexEnvSrc(e3,C3D_Both,GPU_PREVIOUS,GPU_CONSTANT);C3D_TexEnvFunc(e3,C3D_Both,GPU_MODULATE);
-    if(bloomMerge){
+    if(merge){
         // The screen blend in the combiner: bloom * (1 - scene) + scene.
         auto* e4=C3D_GetTexEnv(4);
         C3D_TexEnvSrc(e4,C3D_Both,GPU_PREVIOUS,GPU_TEXTURE0,GPU_TEXTURE0);
@@ -3039,7 +3060,13 @@ void Renderer::applyBloomNow(){
     }else{
         C3D_TexBind(1,&bloomTex_[2]);
         C3D_AlphaBlend(GPU_BLEND_ADD,GPU_BLEND_ADD,GPU_ONE_MINUS_DST_COLOR,GPU_ONE,GPU_ONE_MINUS_DST_ALPHA,GPU_ONE);
+        if(bloomClipped_){
+            const float x=bloomClip_[0],y=bloomClip_[1],w=bloomClip_[2],h=bloomClip_[3];
+            C3D_SetScissor(GPU_SCISSOR_NORMAL,unsigned(std::clamp(std::floor(240.f-y-h),0.f,240.f)),unsigned(std::clamp(std::floor(400.f-x-w),0.f,400.f)),
+                unsigned(std::clamp(std::ceil(240.f-y),0.f,240.f)),unsigned(std::clamp(std::ceil(400.f-x),0.f,400.f)));
+        }
         bloomQuad(bloomTex_[1],BloomNearWidth,BloomNearHeight,400,240,0,0,BloomFarWidth,BloomFarHeight,&bloomTex_[2]);
+        if(bloomClipped_)C3D_SetScissor(GPU_SCISSOR_DISABLE,0,0,0,0);
     }
     for(int unit=0;unit<3;++unit)C3D_TexBind(unit,nullptr);
     auto* env0=env();C3D_TexEnvSrc(env0,C3D_Both,GPU_TEXTURE0,GPU_PRIMARY_COLOR);C3D_TexEnvFunc(env0,C3D_Both,GPU_MODULATE);

@@ -57,7 +57,8 @@ const char* uiFocusControlName(const MenuState& state,unsigned slot){
   constexpr const char* parents[]={"TopMenuSingleWaku","TopMenuMultiWaku","TopMenuWifiWaku","TopMenuChannelWaku"};
   return parents[slot-UiFocusMainParentBase];
  }
- if(slot>=state.count())return "";
+ // The license screen's Settings button (slot 4) is past count().
+ if(slot>=state.count()&&slot!=state.auxiliarySlot())return "";
  switch(state.page){
  case UiPage::License:if(slot==4)return "LicenseSelectS";return slot<2?"LicenseSelectT":"LicenseSelectB";
  case UiPage::MainMenu:if(slot==7)return "FileAdmin";return slot==0?"TopMenuSingle":slot<4?"TopMenuMulti":slot<6?"TopMenuWifi":"TopMenuChannel";

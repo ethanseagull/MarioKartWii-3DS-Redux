@@ -78,12 +78,15 @@ public:
     void reset();
     // Reads the whole .t3x in one FS request. Safe on the asset loader
     // thread: it allocates LINEAR memory and flushes, but touches no GPU state.
-    bool load(const char* path);
+    // halveLarge: -1 follows Texture Quality (renderQuality), 0 keeps the
+    // cooked size, 1 starts textures over 256x256 at their first mip level
+    // (loadMemory). The Settings page's sample loads both.
+    bool load(const char* path,int halveLarge=-1);
     // The same texture in VRAM: citro3d decodes into a temporary LINEAR buffer and copies
     // it with a GX transfer, so LINEAR is unchanged afterwards. Main thread only, while no
     // frame is recorded or replayed (startup).
     bool loadVram(const char* path);
-    bool loadMemory(const void* data,size_t size,bool vram=false);
+    bool loadMemory(const void* data,size_t size,bool vram=false,int halveLarge=-1);
     uint32_t bytes() const;
     // GMV movie frames are already GPU ETC1 payloads. This keeps the opening
     // preview on the same native presentation path as the 3DS renderer.
@@ -405,8 +408,14 @@ public:
     // off screen; applyBloom() composites it with blur(max(scene-threshold,0))
     // *tint*intensity, after which draws (HUD) go straight to the top screen.
     // CourseBloom is a generated static resource; it outlives deferred frames.
-    void requestBloom(const CourseBloom& settings);
+    // clip (x,y,w,h, upper-screen pixels): only that rectangle is thresholded
+    // and receives the glow (the Settings page's sample window); the rest of
+    // the screen is copied unchanged.
+    void requestBloom(const CourseBloom& settings,const float* clip=nullptr);
     void applyBloom();
+    // Frees bloom's targets and vertices (render thread idle), for a menu that
+    // used bloom: a race with Bloom Off then gets that VRAM.
+    void releaseBloom();
     // Diagnostic overlay (mkw/diag.hpp): the draws recorded after this belong
     // to GPU pass `pass` until the next marker. Recorded frames only.
     void diagPass(unsigned pass);
@@ -642,7 +651,7 @@ private:
     void drawSceneEffectsImmediate(RaceEffects&,const Texture*,const EffectLayerBuffer&);
     void sceneEffectListNow(const RaceEffects&,const ef::DrawList&,const Texture*,const EffectLayerBuffer&);
     void drawEffectsImmediate(RaceEffects& effects,const Texture* textures);
-    void requestBloomNow(const CourseBloom& settings);
+    void requestBloomNow(const CourseBloom& settings,const float* clip=nullptr);
     void applyBloomNow();
     void shadowVolumesNow(const ShadowVolume* volumes,unsigned count,float darkness,uint8_t excludedStencil=0);
     void playerShadowNow(const ShadowCaster*,unsigned,const Model* const*,unsigned,Vec3,Vec3,float,const ShadowVolume*,const ShadowReceiver*,unsigned,bool);
@@ -766,7 +775,8 @@ private:
     C3D_RenderTarget* bloomTarget_[4]{};
     Vertex* bloomVertices_=nullptr;
     unsigned bloomCount_=0;
-    bool bloomRequested_=false,bloomFrame_=false,bloomFailed_=false;
+    bool bloomRequested_=false,bloomFrame_=false,bloomFailed_=false,bloomClipped_=false;
+    float bloomClip_[4]{};
     const CourseBloom* bloomSettings_=nullptr;
     C3D_Tex white_{};
     // Existing screen quads plus up to four textured wheel-contact quads.

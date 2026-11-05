@@ -975,19 +975,8 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
   std::snprintf(captions[3],sizeof captions[3],"Opponent Detail: %s",o.opponentDetail?"Reduced":"Full");
   for(unsigned i=0;i<4;++i){auto p=control("OptionTopButton",variants[i],i);c.group(UiMenuRole::Choice,i,p,"settings_button_free");c.button("settings_button",i,p,captions[i]);}
   c.chrome("Settings");
-  // The upper screen explains the chosen row (all four while preloading,
-  // so every glyph is resident before the cursor moves).
-  static constexpr const char* help[4][3]={
-   {"High: every texture full size.","Standard: the largest ones at","half size. Faster, softer."},
-   {"Racers cast live shadows on","the course. Off saves the most","GPU time of any option."},
-   {"The Wii's glow around bright","light. Off saves GPU time.",""},
-   {"Full: every opponent at full","detail. Reduced: distant ones","use split-screen models."}};
-  c.group(UiMenuRole::Content);
-  for(unsigned row=0;row<4;++row){
-   if(row!=std::min(s.cursor,3u)&&!preload)continue;
-   for(unsigned line=0;line<3;++line)if(*help[row][line])c.screenText(help[row][line],200,92.f+26.f*line,18,0,0x404040ff);
-  }
-  c.screenText("Changes apply to the next race.",200,196,14,0,0x707070ff);
+  // The upper screen is only a live sample of the chosen row at its
+  // current value (SettingsPreview); the rows below name the values.
   break;
  }
  case UiPage::License:{
@@ -1504,8 +1493,12 @@ void layoutMenuScreens(const MenuState& state,const std::vector<UiQuad>& source,
    if(g.page==UiPage::MainMenu||g.page==UiPage::License||g.page==UiPage::Drift||g.page==UiPage::VSMode||g.page==UiPage::BattleMode){
     // Retail round panes are authored for the widescreen Wii canvas.
     // Restore its source X/Y ratio rather than stretching the group to a box.
-    const float sy=50.f/g.h,sx=sy*(92.f/68.f)*YScale/XScale;
-    placeMenuQuad(q,{392-g.w*sx,3,g.w*sx,50},false,top);break;
+    // The license screen's Settings button sits in the lower screen's top
+    // right corner (the Wii's place for it), a little smaller.
+    const bool lower=g.page==UiPage::License;
+    const float h=lower?38.f:50.f,sy=h/g.h,sx=sy*(92.f/68.f)*YScale/XScale;
+    if(lower){placeMenuQuad(q,{316-g.w*sx,2,g.w*sx,h},true,bottom);break;}
+    placeMenuQuad(q,{392-g.w*sx,3,g.w*sx,h},false,top);break;
    }
    const auto cell=menuChoiceRect(q,state);
    const MenuRect rect=(g.page==UiPage::Cup||g.page==UiPage::BattleCup)?MenuRect{cell.x+(cell.w-88.f)*.5f,cell.y+39.3f,88,18.4f}:
