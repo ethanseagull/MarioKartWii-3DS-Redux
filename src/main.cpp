@@ -1,5 +1,6 @@
 #include "mkw/console_model.hpp"
 #include "mkw/sim_profile.hpp"
+#include "mkw/hw_probe.hpp"
 #include <mkw/mii_voice.hpp>
 #include <mkw/notification_led.hpp>
 #include <game/kart/KartAction.hh>
@@ -626,6 +627,8 @@ int main() {
     }else report("stereo unavailable (2D model)");
     // secondCore: see pipelineFrames above.
     if(!secondCore)report("Old 3DS: race frames and presentation jobs on core 0");
+    // DIAG: memory latency and core-1 share, once, when running as an Old 3DS (mkw/hw_probe.hpp).
+    if(kQa&&!mkw::isNew3ds()){char text[256];mkw::hwprobe::run(text,sizeof text);report(text);}
     if(mkw::old3dsTestBuild){char text[120];snprintf(text,sizeof text,"Old 3DS test build: speedup off, Old 3DS paths, no ZL/ZR/C-stick; application memory %lu KB",(unsigned long)osGetMemRegionSize(MEMREGION_APPLICATION)/1024);report(text);}
     // Second-core presentation jobs (racer posing); none run while the race steps.
     if(secondCore&&!mkw::jobWorker().start())report("job worker unavailable: presentation jobs run on core 0");

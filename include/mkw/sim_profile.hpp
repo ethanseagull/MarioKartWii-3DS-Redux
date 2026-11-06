@@ -20,6 +20,7 @@ enum Slot : unsigned {
     PortItemsBefore, PortAi, PortItemsAfter, PortCamera, PortLakitu, PortAudio, // main: the port's work around it
     TickTotal,                                               // main: the tick's logic (to the step-time stamp)
     PresPlayer, PresOpponents, PresKartFx, PresParticles, PostTick, // main: presentation in the same tick, after it
+    OppVehicle, OppController, OppLook,                      // RacerVisuals::step, all 11 opponents
     Count
 };
 inline constexpr const char* Names[Count]={
@@ -28,7 +29,8 @@ inline constexpr const char* Names[Count]={
     "k1_total","k1_box_search","k1_kart_col","k1_object_col","k1_item_col","k1_body_col","k1_wheels",
     "k1_model","kinoko",
     "port_items_before","port_ai","port_items_after","port_camera","port_lakitu","port_audio","tick_total",
-    "pres_player","pres_opponents","pres_kart_fx","pres_particles","post_tick"};
+    "pres_player","pres_opponents","pres_kart_fx","pres_particles","post_tick",
+    "opp_vehicle","opp_controller","opp_look"};
 struct Data {unsigned long long ticks[Count]{};unsigned steps=0;bool on=false;};
 inline Data data{};
 #if defined(__3DS__)

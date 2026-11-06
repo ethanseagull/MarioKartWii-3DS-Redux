@@ -1,4 +1,5 @@
 #include <mkw/racer_visuals.hpp>
+#include <mkw/sim_profile.hpp>
 #include <mkw/asset_pack.hpp>
 #include <3ds.h>
 #include <malloc.h>
@@ -134,7 +135,7 @@ void RacerVisuals::resetAnimation(){
 void RacerVisuals::step(unsigned tick,const RaceItems& items){
     for(unsigned i=0;i<11;++i)if(auto* r=impl_->racers[i].get()){
         auto* kart=K::Kart::KartObjectManager::Instance()->object(i+1);auto& status=kart->status();
-        r->vehicle.step(*kart);DriverSignals s;
+        {MKW_SIM_SCOPE(OppVehicle);r->vehicle.step(*kart);}DriverSignals s;
         s.bike=kart->param()->isBike();s.handleRelativeBike=kart->param()->stats().body==K::Kart::KartParam::Stats::Body::Handle_Relative_Bike;s.wheelie=status.onBit(K::Kart::eStatus::Wheelie);
         s.airborne=status.offBit(K::Kart::eStatus::TouchingGround);s.hopping=status.onBit(K::Kart::eStatus::Hop);
         s.steering=kart->move()->cpuSteer()?kart->move()->cpuStick():kart->inputs()->currentState().stick.x;
@@ -155,8 +156,8 @@ void RacerVisuals::step(unsigned tick,const RaceItems& items){
         s.countdown=unsigned(race->stage())<=1;
         driverItemSignals(s,items,i+1);
         s.blink=(tick+i*13)%180==0;
-        r->pose=r->controller.step(s);
-        if(r->animation){
+        {MKW_SIM_SCOPE(OppController);r->pose=r->controller.step(s);}
+        if(r->animation){MKW_SIM_SCOPE(OppLook);
             DriverLookParameters parameters;
             const bool available=driverLookParameters(r->choice->character,r->choice->vehicle,parameters);
             C3D_Mtx seated=r->vehicle.body();Mtx_Translate(&seated,0,r->choice->seatY,r->choice->seatZ,true);
