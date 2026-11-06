@@ -55,6 +55,10 @@ public:
     void resetDriftManual();
 
     void calc();
+    // mkw-3ds: calc() in two halves for the phase-major pass 0 (KartObjectManager).
+    // calcPart1 returns false when the step ended there (respawn).
+    bool calcPart1();
+    void calcPart2();
     void beginBattleProtection();
     void loseAllBalloons();
     void calcBattleRecovery();

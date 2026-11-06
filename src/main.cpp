@@ -2362,13 +2362,14 @@ int main() {
     mkw::DriverAnimation::verifyLook=kQa&&exists("sdmc:/3ds/MKWiiDS/look-verify.txt");
     // DIAG ab-alternate.txt: same-binary A/B in one run. Each 600-step sim profile
     // window runs one combination of the Old 3DS speed-ups (bit 0: head-look subset,
-    // bit 1: packed KCL prisms, bit 2: item contact mask; set = new path), cycling
-    // 7,0,6,5,3 (all new, all old, then each one off alone); the window's line ends
-    // with "ab <bits>".
+    // bit 1: packed KCL prisms, bit 2: item contact mask, bit 3: phase-major pass 0;
+    // set = new path), cycling 15,0,14,13,11,7 (all new, all old, then each one off
+    // alone); the window's line ends with "ab <bits>".
     const bool abAlternate=kQa&&exists("sdmc:/3ds/MKWiiDS/ab-alternate.txt");
     unsigned abWindow=0;
-    auto abApply=[&]{if(!abAlternate)return;static constexpr unsigned order[5]={7,0,6,5,3};const unsigned bits=order[abWindow%5];
-        mkw::DriverAnimation::subsetLook=bits&1;K::Field::KColData::s_packed=(bits>>1)&1;mkw::RaceItems::fullContactScan=!((bits>>2)&1);};
+    auto abApply=[&]{if(!abAlternate)return;static constexpr unsigned order[6]={15,0,14,13,11,7};const unsigned bits=order[abWindow%6];
+        mkw::DriverAnimation::subsetLook=bits&1;K::Field::KColData::s_packed=(bits>>1)&1;mkw::RaceItems::fullContactScan=!((bits>>2)&1);
+        K::Kart::KartObjectManager::s_phaseMajor=(bits>>3)&1;};
     abApply();
     if(kQa&&exists("sdmc:/3ds/MKWiiDS/bottom-rgba8.txt"))mkw::renderQuality().bottomRgba4=false;
     mkw::renderQuality().mipmaps=!exists("sdmc:/3ds/MKWiiDS/diagnose-no-mipmaps.txt");
@@ -2906,7 +2907,7 @@ int main() {
                         for(unsigned i=0;i<sp::Count&&n>0&&n<int(sizeof text);++i)
                             n+=snprintf(text+n,sizeof text-n," %s %.0f",sp::Names[i],double(sp::data.ticks[i])*1e6/SYSCLOCK_ARM11/sp::data.steps);
                         if(mkw::DriverAnimation::verifyLook&&n>0&&n<int(sizeof text))n+=snprintf(text+n,sizeof text-n," look_checks %u look_mismatches %u",mkw::DriverAnimation::lookChecks,mkw::DriverAnimation::lookMismatches);
-                        if(abAlternate&&n>0&&n<int(sizeof text))snprintf(text+n,sizeof text-n," ab %u",unsigned(mkw::DriverAnimation::subsetLook)|unsigned(K::Field::KColData::s_packed)<<1|unsigned(!mkw::RaceItems::fullContactScan)<<2);
+                        if(abAlternate&&n>0&&n<int(sizeof text))snprintf(text+n,sizeof text-n," ab %u",unsigned(mkw::DriverAnimation::subsetLook)|unsigned(K::Field::KColData::s_packed)<<1|unsigned(!mkw::RaceItems::fullContactScan)<<2|unsigned(K::Kart::KartObjectManager::s_phaseMajor)<<3);
                         ++abWindow;abApply();
                         report(text);sp::data=sp::Data{};
                     }

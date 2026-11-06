@@ -22,6 +22,9 @@ public:
     void resetPhysics();
 
     void calcPass0();
+    // mkw-3ds: calcPass0 in two halves (see KartObjectManager::calc).
+    void calcPass0A();
+    void calcPass0B();
     void calcPass1();
     void resizeAABB(f32 radiusScale);
     void addFloor(const CollisionData &, bool);
@@ -37,6 +40,7 @@ public:
     /// @endGetters
 
 private:
+    bool m_pass0MoveDone = false;
     KartMove *m_move;
     KartAction *m_action;
     KartCollide *m_collide;

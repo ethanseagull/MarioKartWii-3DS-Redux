@@ -167,6 +167,14 @@ void KartObject::calcSub() {
     sub()->calcPass0();
 }
 
+void KartObject::calcSubA() {
+    sub()->calcPass0A();
+}
+
+void KartObject::calcSubB() {
+    sub()->calcPass0B();
+}
+
 /// @addr{0x8058EEBC}
 void KartObject::calc() {
     sub()->calcPass1();

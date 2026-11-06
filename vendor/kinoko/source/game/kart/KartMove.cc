@@ -394,11 +394,17 @@ void KartMove::calcSlipstream() {
 }
 
 void KartMove::calc() {
+    if (calcPart1()) {
+        calcPart2();
+    }
+}
+
+bool KartMove::calcPart1() {
     auto &status = KartObjectProxy::status();
 
     if (status.onBit(eStatus::InRespawn)) {
         calcInRespawn();
-        return;
+        return false;
     }
 
     dynamics()->resetInternalVelocity();
@@ -429,6 +435,12 @@ void KartMove::calc() {
     calcMushroomBoost();
     calcZipperBoost();
     calcSlipstream();
+    return true;
+}
+
+void KartMove::calcPart2() {
+    auto &status = KartObjectProxy::status();
+
     // RMCU PlayerSub10 update order: POW (0x8057a844), Mega, Star, shock, crush.
     calcPow();
     calcMega();

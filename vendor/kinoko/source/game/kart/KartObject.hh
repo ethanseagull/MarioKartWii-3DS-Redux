@@ -24,6 +24,8 @@ public:
     void createModel();
 
     void calcSub();
+    void calcSubA();
+    void calcSubB();
     void calc();
 
     [[nodiscard]] const KartAccessor *accessor() const;

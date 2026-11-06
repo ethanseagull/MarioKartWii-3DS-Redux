@@ -103,6 +103,11 @@ void KartSub::resetPhysics() {
 /// @details Handles the first-half of physics calculations. This includes input processing,
 /// subsequent position/speed updates, as well as responding to last frame's collisions.
 void KartSub::calcPass0() {
+    calcPass0A();
+    calcPass0B();
+}
+
+void KartSub::calcPass0A() {
     auto &status = KartObjectProxy::status();
 
     if (status.onBit(eStatus::CannonStart)) {
@@ -129,7 +134,12 @@ void KartSub::calcPass0() {
     dynamics()->setAngVel0YFactor(0.9f);
 
     {MKW_SIM_SCOPE(K0State);state()->calcInput();}
-    {MKW_SIM_SCOPE(K0Move);move()->calc();}
+    {MKW_SIM_SCOPE(K0Move);m_pass0MoveDone=!move()->calcPart1();}
+}
+
+void KartSub::calcPass0B() {
+    auto &status = KartObjectProxy::status();
+    {MKW_SIM_SCOPE(K0Move);if(!m_pass0MoveDone)move()->calcPart2();}
     {MKW_SIM_SCOPE(K0Action);action()->calc();collide()->pullPath().calc();}
 
     if (status.onBit(eStatus::SkipWheelCalc)) {

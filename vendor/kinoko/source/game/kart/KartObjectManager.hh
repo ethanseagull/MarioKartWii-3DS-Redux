@@ -34,6 +34,9 @@ public:
 
     [[nodiscard]] size_t count() const { return m_count; }
 
+    /// mkw-3ds: pass 0 phase-major (default on; DIAG ab-alternate.txt switches it).
+    static bool s_phaseMajor;
+
     static KartObjectManager *CreateInstance();
     static void DestroyInstance();
 

@@ -4,6 +4,7 @@
 #include "game/kart/KartCollide.hh"
 #include "game/kart/KartParamFileManager.hh"
 #include "game/system/RaceConfig.hh"
+#include "game/system/RaceManager.hh"
 
 #include <abstract/g3d/ResFile.hh>
 
@@ -29,8 +30,33 @@ void KartObjectManager::calc() {
         object->collide()->setMovement(EGG::Vector3f::zero);
     }
 
-    for (size_t i = 0; i < m_count; ++i) {
-        m_objects[i]->calcSub();
+    if (s_phaseMajor && m_count >= 2) {
+        // mkw-3ds: pass 0 phase-major. Part A (state, input, KartMove up to the
+        // slipstream check) for each kart of a group, then part B (the rest of
+        // KartMove, action, pull path, physics, hitboxes): each part's code stays in
+        // the instruction cache across the group instead of being fetched again per
+        // kart (the Old 3DS has 16 KB of L1 and no L2; after Codiak540's
+        // o3ds-performance Kinoko patch). Pass 0 reads and writes only its own kart,
+        // except the slipstream check of the kart whose turn it is (timer % count),
+        // which reads the others: it runs alone, after every lower kart's whole pass 0
+        // and before any higher kart's, as in the retail order. Pass 0 does not narrow
+        // the KCL prism cache (pass 1 does), so no query depends on the kart order.
+        const size_t slip = System::RaceManager::Instance()->timer() % m_count;
+        auto group = [&](size_t begin, size_t end) {
+            for (size_t i = begin; i < end; ++i) {
+                m_objects[i]->calcSubA();
+            }
+            for (size_t i = begin; i < end; ++i) {
+                m_objects[i]->calcSubB();
+            }
+        };
+        group(0, slip);
+        group(slip, slip + 1);
+        group(slip + 1, m_count);
+    } else {
+        for (size_t i = 0; i < m_count; ++i) {
+            m_objects[i]->calcSub();
+        }
     }
 
     for (size_t i = 0; i < m_count; ++i) {
@@ -125,5 +151,6 @@ Abstract::g3d::ResAnmChr *KartObjectManager::s_megaScaleUpAnmChr = nullptr;
 Abstract::g3d::ResAnmChr *KartObjectManager::s_megaScaleDownAnmChr = nullptr;
 Abstract::g3d::ResAnmChr *KartObjectManager::s_pressScaleUpAnmChr = nullptr;
 KartObjectManager *KartObjectManager::s_instance = nullptr;
+bool KartObjectManager::s_phaseMajor = true;
 
 } // namespace Kinoko::Kart
