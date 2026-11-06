@@ -1,5 +1,6 @@
 #pragma once
 
+#include "game/field/KColData.hh"
 #include "game/kart/CollisionGroup.hh"
 #include "game/kart/KartObjectProxy.hh"
 #include "game/kart/KartParam.hh"
@@ -23,6 +24,11 @@ public:
 
     void updateCollision(const EGG::Vector3f &bottom, const EGG::Vector3f &topmostPos);
     void calcSuspension(const EGG::Vector3f &forward);
+
+    /// mkw-3ds: the course query updateCollision would make with the wheel at pos
+    /// (KartSub's batched wheels); false when it would make none.
+    [[nodiscard]] bool predictCollision(const EGG::Vector3f &pos, const EGG::Vector3f &bottom,
+            Field::KColData::BatchSphere &out) const;
 
     /// @beginSetters
     void setSuspTravel(f32 suspTravel) {
@@ -93,6 +99,9 @@ public:
     /// @endGetters
 
 private:
+    [[nodiscard]] EGG::Vector3f collisionCenter(const EGG::Vector3f &pos,
+            const EGG::Vector3f &bottom) const;
+
     u16 m_wheelIdx;
     u16 m_bspWheelIdx;
     const BSP::Wheel *m_bspWheel;
@@ -131,7 +140,21 @@ public:
     void calcCollision(f32 dt, const EGG::Vector3f &gravity, const EGG::Matrix34f &mat);
     void calcSuspension(const EGG::Vector3f &forward, const EGG::Vector3f &vehicleMovement);
 
+    /// mkw-3ds: the course query calcCollision would make with this wheel matrix,
+    /// without changing anything (same expressions); false when it would make none.
+    [[nodiscard]] bool predictCollision(const EGG::Matrix34f &mat,
+            Field::KColData::BatchSphere &out);
+
+    /// mkw-3ds (Old 3DS): KartSub batches the wheels' course prism tests
+    /// (KColData::batchSpheresCached) and each wheel keeps its fixed rotated
+    /// "down" vector instead of rebuilding it from xRot every tick (same values).
+    /// Off: no-batch-wheels.txt; DIAG ab-alternate.txt bit 4.
+    static bool s_batchWheels;
+
 private:
+    void wheelFrame(const EGG::Matrix34f &mat, EGG::Vector3f &topmostPos,
+            EGG::Vector3f &bottomDir);
+
     const BSP::Wheel *m_bspWheel;
     WheelPhysics *m_tirePhysics;
     TireType m_tireType;
@@ -140,6 +163,8 @@ private:
     EGG::Vector3f m_topmostPos;
     f32 m_maxTravelScaled;
     EGG::Vector3f m_bottomDir;
+    EGG::Vector3f m_localBottom;      ///< mkw-3ds: makeR(xRot) applied to -y, once.
+    bool m_localBottomReady = false;
 };
 
 } // namespace Kinoko::Kart

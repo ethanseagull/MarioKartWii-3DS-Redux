@@ -814,6 +814,12 @@ void KartCollide::activateOob(bool detachCamera, Field::KCLTypeMask *mask,
 /// 0 \\ -13 \\ 0 \end{bmatrix}\f$
 /// @param center The wheel's position
 /// @param radius The wheel's size
+Field::KCLTypeMask KartCollide::wheelTypeMask() const {
+    return m_sinkholeFall && status().onBit(eStatus::BeforeRespawn) ?
+            KCL_TYPE_VEHICLE_COLLIDEABLE & ~KCL_TYPE_FLOOR :
+            KCL_TYPE_VEHICLE_COLLIDEABLE;
+}
+
 void KartCollide::calcWheelCollision(u16 /*wheelIdx*/, CollisionGroup *hitboxGroup,
         const EGG::Vector3f &colVel, const EGG::Vector3f &center, f32 radius) {
     Hitbox &firstHitbox = hitboxGroup->hitbox(0);
@@ -829,9 +835,7 @@ void KartCollide::calcWheelCollision(u16 /*wheelIdx*/, CollisionGroup *hitboxGro
     Field::CourseColMgr::Instance()->setNoBounceWallInfo(&noBounceWallInfo);
 
     bool collided = Field::CollisionDirector::Instance()->checkSphereCachedFullPush(
-            firstHitbox.radius(), firstHitbox.worldPos(), firstHitbox.lastPos(),
-            m_sinkholeFall&&status().onBit(eStatus::BeforeRespawn)?
-                    KCL_TYPE_VEHICLE_COLLIDEABLE&~KCL_TYPE_FLOOR:KCL_TYPE_VEHICLE_COLLIDEABLE,
+            firstHitbox.radius(), firstHitbox.worldPos(), firstHitbox.lastPos(), wheelTypeMask(),
             &colInfo, &kclOut, 0);
 
     CollisionData &collisionData = hitboxGroup->collisionData();

@@ -287,6 +287,24 @@ void KartSub::calcPass1() {
     f32 handlingFactor = 0.0f;
     bodyScope.reset();
     std::optional<::mkw::simprof::Scope> wheelScope(std::in_place,::mkw::simprof::K1Wheels);
+    // mkw-3ds (Old 3DS): every wheel's course query is predicted and tested in one
+    // pass over the prism list; the loop below replays a query's hits only when it
+    // asks exactly that query (KColData::batchSpheresCached).
+    const bool batchWheels = KartSuspensionPhysics::s_batchWheels &&
+            status.offBit(eStatus::SkipWheelCalc) && suspCount() >= 2 &&
+            suspCount() <= Field::KColData::BATCH_MAX;
+    if (batchWheels) {
+        Field::KColData::BatchSphere spheres[Field::KColData::BATCH_MAX];
+        size_t count = 0;
+        for (u16 i = 0; i < suspCount(); ++i) {
+            if (suspensionPhysics(i)->predictCollision(body()->wheelMatrix(i), spheres[count])) {
+                ++count;
+            }
+        }
+        if (count >= 2) {
+            Field::CourseColMgr::Instance()->batchSpheresCached(spheres, count);
+        }
+    }
     for (u16 i = 0; i < suspCount(); ++i) {
         const EGG::Matrix34f wheelMatrix = body()->wheelMatrix(i);
         suspensionPhysics(i)->calcCollision(DT, gravity, wheelMatrix);
@@ -299,6 +317,9 @@ void KartSub::calcPass1() {
             handlingFactor += colData.rotFactor;
             addFloor(colData, false);
         }
+    }
+    if (batchWheels) {
+        Field::KColData::ClearBatch();
     }
 
     if (status.offBit(eStatus::SkipWheelCalc)) {

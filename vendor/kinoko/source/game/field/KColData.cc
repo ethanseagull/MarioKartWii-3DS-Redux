@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 // Credit: em-eight/mkw
 // Credit: stblr/Hanachan
@@ -62,6 +63,7 @@ KColData::~KColData() = default;
 /// @addr{0x807C24C0}
 void KColData::narrowScopeLocal(const EGG::Vector3f &pos, f32 radius, KCLTypeMask mask) {
     m_prismCacheTop = m_prismCache.data() + 1;
+    ++m_cacheGen;
     m_pos = pos;
     m_radius = radius;
     m_typeMask = mask;
@@ -271,6 +273,163 @@ void KColData::lookupSphereCached(const EGG::Vector3f &p1, const EGG::Vector3f &
     m_typeMask = typeMask;
 }
 
+namespace {
+
+/// mkw-3ds: the one batch (KColData::batchSpheresCached). Racers step one at a
+/// time, and only the course KCL batches.
+struct SphereBatch {
+    struct Hit {
+        f32 dist;
+        const EGG::Vector3f *fnrm;
+        u16 attribute;
+    };
+    struct Entry {
+        EGG::Vector3f pos;
+        EGG::Vector3f prevPos;
+        EGG::Vector3f movement;
+        f32 radius;
+        KCLTypeMask typeMask;
+        const u16 *prismIter;
+        u16 count;
+        bool valid;
+        bool movementCheck;
+        Hit hits[KColData::BATCH_HITS];
+    };
+    const KColData *owner = nullptr;
+    u32 gen = 0;
+    size_t count = 0;
+    const Entry *replay = nullptr;
+    u16 replayIndex = 0;
+    Entry entries[KColData::BATCH_MAX];
+};
+
+SphereBatch s_batch;
+
+bool sameBits(const EGG::Vector3f &a, const EGG::Vector3f &b) {
+    return std::memcmp(&a, &b, sizeof a) == 0;
+}
+
+} // namespace
+
+void KColData::ClearBatch() {
+    s_batch.owner = nullptr;
+    s_batch.count = 0;
+    s_batch.replay = nullptr;
+}
+
+void KColData::batchSpheresCached(const BatchSphere *spheres, size_t count) {
+    count = std::min(count, BATCH_MAX);
+    s_batch.owner = this;
+    s_batch.gen = m_cacheGen;
+    s_batch.count = count;
+    s_batch.replay = nullptr;
+
+    // The query setup of lookupSphereCached, per sphere.
+    for (size_t i = 0; i < count; ++i) {
+        const BatchSphere &in = spheres[i];
+        SphereBatch::Entry &e = s_batch.entries[i];
+        EGG::Sphere3f sphere1(in.pos, in.radius);
+        EGG::Sphere3f sphere2(m_cachedPos, m_cachedRadius);
+        if (!sphere1.isInsideOtherSphere(sphere2)) {
+            e.prismIter = searchBlock(in.pos);
+            e.radius = std::min(m_sphereRadius, in.radius);
+        } else {
+            e.radius = in.radius;
+            e.prismIter = m_cachedPrismArray;
+        }
+        e.pos = in.pos;
+        e.prevPos = in.prevPos;
+        e.movement = in.pos - in.prevPos;
+        e.typeMask = in.typeMask;
+        e.count = 0;
+        e.valid = true;
+        e.movementCheck = std::isfinite(in.prevPos.y);
+    }
+
+    // One pass over each distinct prism list, every sphere on it tested per prism
+    // (checkSphere / checkSphereMovement's loop, in the same order).
+    bool done[BATCH_MAX] = {};
+    size_t group[BATCH_MAX];
+    for (size_t i = 0; i < count; ++i) {
+        if (done[i]) {
+            continue;
+        }
+        const u16 *iter = s_batch.entries[i].prismIter;
+        size_t n = 0;
+        for (size_t j = i; j < count; ++j) {
+            if (!done[j] && s_batch.entries[j].prismIter == iter) {
+                done[j] = true;
+                group[n++] = j;
+            }
+        }
+        if (!iter) {
+            continue;
+        }
+        for (const u16 *it = iter; *++it != 0;) {
+            const PackedPrism &prism = m_packed[parse<u16>(*it)];
+            const u32 attributeMask = KCL_ATTRIBUTE_TYPE_BIT(prism.attribute);
+            for (size_t k = 0; k < n; ++k) {
+                SphereBatch::Entry &e = s_batch.entries[group[k]];
+                if (!(attributeMask & e.typeMask)) {
+                    continue;
+                }
+                const QueryRef q{e.pos, e.movement, e.radius, e.typeMask};
+                f32 dist;
+                const bool hit = e.movementCheck ?
+                        checkCollision<CollisionCheckType::Movement>(q, prism, &dist, nullptr, nullptr) :
+                        checkCollision<CollisionCheckType::Plane>(q, prism, &dist, nullptr, nullptr);
+                if (!hit) {
+                    continue;
+                }
+                if (e.count == BATCH_HITS) {
+                    e.valid = false;
+                    continue;
+                }
+                e.hits[e.count++] = SphereBatch::Hit{dist, &prism.fnrm, prism.attribute};
+            }
+        }
+    }
+}
+
+bool KColData::replayBatched() {
+    if (s_batch.owner != this || s_batch.gen != m_cacheGen) {
+        return false;
+    }
+    for (size_t i = 0; i < s_batch.count; ++i) {
+        const SphereBatch::Entry &e = s_batch.entries[i];
+        if (e.valid && e.prismIter == m_prismIter && e.typeMask == m_typeMask &&
+                std::memcmp(&e.radius, &m_radius, sizeof m_radius) == 0 && sameBits(e.pos, m_pos) &&
+                sameBits(e.prevPos, m_prevPos)) {
+            s_batch.replay = &e;
+            s_batch.replayIndex = 0;
+            return true;
+        }
+    }
+    return false;
+}
+
+/// mkw-3ds: checkSphereCollision for a batched query: the kept hits, then false
+/// with m_prismIter cleared, as the prism loop ends.
+bool KColData::checkSphereReplay(f32 *distOut, EGG::Vector3f *fnrmOut, u16 *flagsOut) {
+    const SphereBatch::Entry *e = s_batch.replay;
+    if (e && s_batch.replayIndex < e->count) {
+        const SphereBatch::Hit &hit = e->hits[s_batch.replayIndex++];
+        if (distOut) {
+            *distOut = hit.dist;
+        }
+        if (fnrmOut) {
+            *fnrmOut = *hit.fnrm;
+        }
+        if (flagsOut) {
+            *flagsOut = hit.attribute;
+        }
+        return true;
+    }
+    s_batch.replay = nullptr;
+    m_prismIter = nullptr;
+    return false;
+}
+
 /// @brief Finds the data block corresponding to the provided position
 /// @addr{0x807BE030}
 /// @param point The player's position
@@ -447,8 +606,8 @@ void KColData::preloadVertices() {
 /// 2. A collision with the triangle plane (0x807C1514)
 /// 3. A collision such that we are inside the triangle (0x807C0884)
 template <KColData::CollisionCheckType Type>
-bool KColData::checkCollision(const PackedPrism &prism, f32 *distOut, EGG::Vector3f *fnrmOut,
-        u16 *flagsOut) {
+bool KColData::checkCollision(const QueryRef &q, const PackedPrism &prism, f32 *distOut,
+        EGG::Vector3f *fnrmOut, u16 *flagsOut) {
     // Responsible for updating the output params
     auto out = [&](f32 dist) {
         if (distOut) {
@@ -466,11 +625,11 @@ bool KColData::checkCollision(const PackedPrism &prism, f32 *distOut, EGG::Vecto
     // The flag check occurs earlier than in the base game here. We don't want to do math if the tri
     // we're checking doesn't have matching flags.
     u32 attributeMask = KCL_ATTRIBUTE_TYPE_BIT(prism.attribute);
-    if (!(attributeMask & m_typeMask)) {
+    if (!(attributeMask & q.typeMask)) {
         return false;
     }
 
-    const EGG::Vector3f relativePos = m_pos - prism.vertex;
+    const EGG::Vector3f relativePos = q.pos - prism.vertex;
 
     // mkw-3ds: the four distances are independent, so all are computed before
     // the first exit (same expressions, same rounding): on the in-order VFP11
@@ -484,26 +643,26 @@ bool KColData::checkCollision(const PackedPrism &prism, f32 *distOut, EGG::Vecto
     const f32 dist_ab = relativePos.ps_dot(enrm2);
     const f32 dist_bc = relativePos.ps_dot(enrm3) - prism.height;
     const f32 plane_dist = relativePos.ps_dot(fnrm);
-    if (m_radius <= dist_ca) {
+    if (q.radius <= dist_ca) {
         return false;
     }
 
-    if (m_radius <= dist_ab) {
+    if (q.radius <= dist_ab) {
         return false;
     }
 
-    if (m_radius <= dist_bc) {
+    if (q.radius <= dist_bc) {
         return false;
     }
 
-    f32 dist_in_plane = m_radius - plane_dist;
+    f32 dist_in_plane = q.radius - plane_dist;
     if (dist_in_plane <= 0.0f) {
         return false;
     }
 
     f32 typeDistance = m_prismThickness;
     if constexpr (Type == CollisionCheckType::Edge) {
-        typeDistance += m_radius;
+        typeDistance += q.radius;
     }
 
     if (dist_in_plane >= typeDistance) {
@@ -511,7 +670,7 @@ bool KColData::checkCollision(const PackedPrism &prism, f32 *distOut, EGG::Vecto
     }
 
     if constexpr (Type == CollisionCheckType::Movement) {
-        if (attributeMask & KCL_TYPE_DIRECTIONAL && m_movement.dot(fnrm) > 0.0f) {
+        if (attributeMask & KCL_TYPE_DIRECTIONAL && q.movement.dot(fnrm) > 0.0f) {
             return false;
         }
     }
@@ -520,7 +679,7 @@ bool KColData::checkCollision(const PackedPrism &prism, f32 *distOut, EGG::Vecto
     // If these are all zero, then we're inside the triangle
     if (dist_ab <= 0.0f && dist_bc <= 0.0f && dist_ca <= 0.0f) {
         if constexpr (Type == CollisionCheckType::Movement) {
-            EGG::Vector3f lastPos = relativePos - m_movement;
+            EGG::Vector3f lastPos = relativePos - q.movement;
             // We're only colliding if we are moving towards the face
             if (plane_dist < 0.0f && lastPos.ps_dot(fnrm) < 0.0f) {
                 return false;
@@ -589,7 +748,7 @@ bool KColData::checkCollision(const PackedPrism &prism, f32 *distOut, EGG::Vecto
                 return false;
             }
         }
-        sq_dist = m_radius * m_radius - edge_dist * edge_dist;
+        sq_dist = q.radius * q.radius - edge_dist * edge_dist;
     } else {
         f32 sq_sin = cos * cos - 1.0f;
 
@@ -612,7 +771,7 @@ bool KColData::checkCollision(const PackedPrism &prism, f32 *distOut, EGG::Vecto
             }
         }
 
-        sq_dist = m_radius * m_radius - cornerDot;
+        sq_dist = q.radius * q.radius - cornerDot;
     }
 
     if (sq_dist < plane_dist * plane_dist || sq_dist <= 0.0f) {
@@ -625,7 +784,7 @@ bool KColData::checkCollision(const PackedPrism &prism, f32 *distOut, EGG::Vecto
     }
 
     if constexpr (Type == CollisionCheckType::Movement) {
-        EGG::Vector3f lastPos = relativePos - m_movement;
+        EGG::Vector3f lastPos = relativePos - q.movement;
         // We're only colliding if we are moving towards the face
         if (lastPos.ps_dot(fnrm) < 0.0f) {
             return false;

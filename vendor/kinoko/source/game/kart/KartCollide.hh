@@ -107,6 +107,8 @@ public:
     }
     void calcWheelCollision(u16 wheelIdx, CollisionGroup *hitboxGroup, const EGG::Vector3f &colVel,
             const EGG::Vector3f &center, f32 radius);
+    /// The KCL types a wheel sphere collides with (calcWheelCollision).
+    [[nodiscard]] Field::KCLTypeMask wheelTypeMask() const;
     void calcSideCollision(CollisionData &collisionData, Hitbox &hitbox,
             Field::CollisionInfo *colInfo);
     void calcBoundingRadius();
