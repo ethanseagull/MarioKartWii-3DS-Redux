@@ -18,7 +18,7 @@
 namespace mkw {
 namespace {
 // Luigi Circuit's start straight (1024x128, ETC1, 5 mips): one of the course
-// textures over 256x256 that Texture Quality: Standard loads from mip 1.
+// textures of 256x256 or more that Texture Quality: Low loads from mip 1.
 constexpr const char* RoadTexture="textures/course_08_023.t3x";
 // Both versions of the road, loaded the way the race loads them.
 struct RoadJob final:AssetJob {

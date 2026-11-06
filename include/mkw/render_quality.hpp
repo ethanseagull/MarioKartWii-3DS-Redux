@@ -15,8 +15,8 @@ namespace mkw {
 struct RenderQuality {
     bool reduced=false;
     bool mipmaps=true; // authored per-material filters/LOD bias; LOD0 fallback remains available
-    // Textures over 256x256 texels load from their first mip level
-    // (Texture::loadMemory): Old 3DS, or Texture Quality: Standard.
+    // Textures of 256x256 texels or more load from their first mip level
+    // (Texture::loadMemory): Old 3DS, or Texture Quality: Low.
     bool halfLargeTextures=false;
     unsigned halvedTextures=0; // QA: textures loaded at half size (Texture Quality: Low).
     // Objects whose bounding sphere spans less than this radius/distance

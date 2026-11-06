@@ -79,7 +79,7 @@ public:
     // Reads the whole .t3x in one FS request. Safe on the asset loader
     // thread: it allocates LINEAR memory and flushes, but touches no GPU state.
     // halveLarge: -1 follows Texture Quality (renderQuality), 0 keeps the
-    // cooked size, 1 starts textures over 256x256 at their first mip level
+    // cooked size, 1 starts textures of 256x256 or more at their first mip level
     // (loadMemory). The Settings page's sample loads both.
     bool load(const char* path,int halveLarge=-1);
     // The same texture in VRAM: citro3d decodes into a temporary LINEAR buffer and copies

@@ -72,9 +72,9 @@ needs the soxr resampler, which most builds have.
 
 The results are in `build/standard/output/`:
 
-- `MarioKartWii-3DS-Redux-v<version>.cia`, the game;
+- `MarioKartWiiDS-v<version>.cia`, the game (shown as "Mario Kart WiiDS" on the HOME Menu);
 - `sd/3ds/`, the game data for the SD card;
-- `mkw-3ds.3dsx`, the same game for the Homebrew Launcher.
+- `MarioKartWiiDS.3dsx`, the same game for the Homebrew Launcher.
 
 ### If the Python environment uses another version
 
@@ -108,13 +108,20 @@ py -3.12 tools/build.py --disc "C:/Games/RMCE01.wbfs"
 Only what changed gets rebuilt, so this usually takes a few minutes (longer
 if an early cook stage changed). Copy the new `sd/3ds` over the old one on
 your SD card and install the new CIA with FBI. Your saves
-(`rksys.dat`, `license-options-*.dat`, `last-license.txt`, `mii-*.3dsmii`)
-aren't touched.
+(`rksys.dat`, `license-options-*.dat`, `last-license.txt`, `mii-*.3dsmii`,
+`settings.dat` and the `ghosts` folder) aren't touched.
 
 The game data is now three packs (`menu.pak`, `race.pak`, `stream.pak`) and
-`mkw-3ds.3dsx`. If your card has data from an older build, delete everything
-else in `sd:/3ds/mkw-3ds/` except your saves before copying: old loose files
+`MarioKartWiiDS.3dsx`. If your card has data from an older build, delete everything
+else in `sd:/3ds/MKWiiDS/` except your saves before copying: old loose files
 still work but slow down every file the game opens.
+
+Earlier builds (up to 0.9.4) kept their data in `sd:/3ds/mkw-3ds/` and
+installed over upstream's title. This build is its own title with its own
+folder, `sd:/3ds/MKWiiDS/`. To keep your licenses, records, ghosts and
+settings, move your saves (the files above) from `sd:/3ds/mkw-3ds/` into
+`sd:/3ds/MKWiiDS/`. Then delete `sd:/3ds/mkw-3ds/`, and delete the old title
+in FBI if you no longer want it.
 
 If `git pull` complains about local changes, run `git stash` first, or
 `git reset --hard origin/main` to throw them away.
@@ -135,9 +142,9 @@ The version in the CIA's file name doesn't change with every commit.
 ## Installing
 
 7. Copy the `sd/3ds` folder to the root of your SD card. The game data ends
-   up in `sd:/3ds/mkw-3ds/`.
+   up in `sd:/3ds/MKWiiDS/`.
 8. Copy the CIA to the SD card and install it with FBI. Or skip the CIA and
-   start `mkw-3ds.3dsx` from the Homebrew Launcher.
+   start `MarioKartWiiDS.3dsx` from the Homebrew Launcher.
 
 If your console has never run a homebrew game with sound, dump its DSP
 firmware once with DSP1.

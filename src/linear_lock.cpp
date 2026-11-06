@@ -43,7 +43,7 @@ std::atomic<unsigned> packReads{0};std::atomic<unsigned long long> packReadBytes
 OpenTrace openTrace;}
 extern "C" FILE* __real_fopen(const char* path,const char* mode);
 // Diagnostic overlay (mkw/diag.hpp): while a race is profiled, append-mode
-// logs under sdmc:/3ds/mkw-3ds/ write into RAM through funopen and reach
+// logs under sdmc:/3ds/MKWiiDS/ write into RAM through funopen and reach
 // the SD card when profiling stops. Bounded: later bytes are counted, not kept.
 namespace mkw::diag {
 std::atomic<unsigned> deferredOpens{0};
@@ -96,11 +96,11 @@ namespace {
 // takes its fallback, the console's own CFL system archive (title
 // 0004009B00010202); cfl-fallback.txt records each step.
 bool cflFallbackTest(){
- static const int on=[]{FILE* f=__real_fopen("sdmc:/3ds/mkw-3ds/cfl-fallback-test.txt","r");if(f)std::fclose(f);return f?1:0;}();
+ static const int on=[]{FILE* f=__real_fopen("sdmc:/3ds/MKWiiDS/cfl-fallback-test.txt","r");if(f)std::fclose(f);return f?1:0;}();
  return on;
 }
 void cflFallbackLog(const char* text){
- if(FILE* f=__real_fopen("sdmc:/3ds/mkw-3ds/cfl-fallback.txt","a")){std::fputs(text,f);std::fclose(f);}
+ if(FILE* f=__real_fopen("sdmc:/3ds/MKWiiDS/cfl-fallback.txt","a")){std::fputs(text,f);std::fclose(f);}
 }
 }
 #endif
@@ -129,7 +129,7 @@ FILE* __wrap_fopen(const char* path,const char* mode){
 #endif
  const u64 start=svcGetSystemTick();FILE* file=nullptr;
  if(mkw::diag::deferring.load(std::memory_order_relaxed)&&path&&mode&&mode[0]=='a'&&
-    !std::strncmp(path,"sdmc:/3ds/mkw-3ds/",18)&&std::strncmp(path+18,"perf-",5))file=mkw::diag::deferredOpen(path);
+    !std::strncmp(path,"sdmc:/3ds/MKWiiDS/",18)&&std::strncmp(path+18,"perf-",5))file=mkw::diag::deferredOpen(path);
  // Game files (relative paths, read-only) come from the packs first; a file
  // no pack holds is opened loose, as are older SD folders' files.
  if(!file&&path&&mode&&mode[0]=='r'&&!std::strchr(mode,'+')&&!std::strchr(path,':'))file=mkw::pack::openFile(path);
@@ -139,7 +139,7 @@ FILE* __wrap_fopen(const char* path,const char* mode){
  if(path)mkw::openTrace.add(path,ticks,file!=nullptr);
  // DIAG: every failed open of a game asset (relative path) is logged, so a
  // missing loose file shows even outside the traced load stages.
- if(!file&&path&&!std::strchr(path,':'))if(FILE* log=__real_fopen("sdmc:/3ds/mkw-3ds/missing-opens.txt","a")){std::fprintf(log,"%s %s\n",path,mode?mode:"");std::fclose(log);}
+ if(!file&&path&&!std::strchr(path,':'))if(FILE* log=__real_fopen("sdmc:/3ds/MKWiiDS/missing-opens.txt","a")){std::fprintf(log,"%s %s\n",path,mode?mode:"");std::fclose(log);}
  return file;
 }
 }
