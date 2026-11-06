@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <bit>
+#include <cstring>
 
 // Credit: em-eight/mkw
 // Credit: stblr/Hanachan
@@ -62,6 +64,7 @@ KColData::~KColData() = default;
 /// @addr{0x807C24C0}
 void KColData::narrowScopeLocal(const EGG::Vector3f &pos, f32 radius, KCLTypeMask mask) {
     m_prismCacheTop = m_prismCache.data() + 1;
+    ++m_cacheGen;
     m_pos = pos;
     m_radius = radius;
     m_typeMask = mask;
@@ -271,6 +274,165 @@ void KColData::lookupSphereCached(const EGG::Vector3f &p1, const EGG::Vector3f &
     m_typeMask = typeMask;
 }
 
+namespace {
+
+/// mkw-3ds: the one batch (KColData::batchSpheresCached). Racers step one at a
+/// time, and only the course KCL batches.
+struct SphereBatch {
+    struct Hit {
+        f32 dist;
+        const EGG::Vector3f *fnrm;
+        u16 attribute;
+    };
+    struct Entry {
+        EGG::Vector3f pos;
+        EGG::Vector3f prevPos;
+        EGG::Vector3f movement;
+        f32 radius;
+        KCLTypeMask typeMask;
+        u16 count;
+        bool valid;
+        bool movementCheck;
+        Hit hits[KColData::BATCH_HITS];
+    };
+    const KColData *owner = nullptr;
+    u32 gen = 0;
+    size_t count = 0;
+    size_t next = 0; ///< The entry the next query most likely asks (batch order).
+    const Entry *replay = nullptr;
+    u16 replayIndex = 0;
+    Entry entries[KColData::BATCH_MAX];
+};
+
+SphereBatch s_batch;
+
+bool sameBits(const EGG::Vector3f &a, const EGG::Vector3f &b) {
+    return std::bit_cast<u32>(a.x) == std::bit_cast<u32>(b.x) &&
+            std::bit_cast<u32>(a.y) == std::bit_cast<u32>(b.y) &&
+            std::bit_cast<u32>(a.z) == std::bit_cast<u32>(b.z);
+}
+
+} // namespace
+
+u32 KColData::s_batchedSpheres = 0;
+u32 KColData::s_batchReplays = 0;
+
+void KColData::ClearBatch() {
+    s_batch.owner = nullptr;
+    s_batch.count = 0;
+    s_batch.replay = nullptr;
+}
+
+void KColData::batchSpheresCached(const BatchSphere *spheres, size_t count) {
+    count = std::min(count, BATCH_MAX);
+    s_batch.owner = this;
+    s_batch.gen = m_cacheGen;
+    s_batch.count = count;
+    s_batch.next = 0;
+    s_batch.replay = nullptr;
+
+    // lookupSphereCached's choice, per sphere: only spheres inside the narrowed
+    // prism cache's sphere are batched (they all read its list); the rest run
+    // their own query.
+    size_t batched[BATCH_MAX];
+    size_t n = 0;
+    for (size_t i = 0; i < count; ++i) {
+        const BatchSphere &in = spheres[i];
+        SphereBatch::Entry &e = s_batch.entries[i];
+        EGG::Sphere3f sphere1(in.pos, in.radius);
+        EGG::Sphere3f sphere2(m_cachedPos, m_cachedRadius);
+        e.valid = sphere1.isInsideOtherSphere(sphere2);
+        if (!e.valid) {
+            continue;
+        }
+        e.radius = in.radius;
+        e.pos = in.pos;
+        e.prevPos = in.prevPos;
+        e.movement = in.pos - in.prevPos;
+        e.typeMask = in.typeMask;
+        e.count = 0;
+        e.movementCheck = std::isfinite(in.prevPos.y);
+        batched[n++] = i;
+    }
+    s_batchedSpheres += n;
+    if (n == 0) {
+        return;
+    }
+
+    // One pass over the prism list, every batched sphere tested per prism
+    // (checkSphere / checkSphereMovement's loop, in the same order).
+    for (const u16 *it = m_cachedPrismArray; *++it != 0;) {
+        const PackedPrism &prism = m_packed[parse<u16>(*it)];
+        const u32 attributeMask = KCL_ATTRIBUTE_TYPE_BIT(prism.attribute);
+        for (size_t k = 0; k < n; ++k) {
+            SphereBatch::Entry &e = s_batch.entries[batched[k]];
+            if (!(attributeMask & e.typeMask)) {
+                continue;
+            }
+            const QueryRef q{e.pos, e.movement, e.radius, e.typeMask};
+            f32 dist;
+            const bool hit = e.movementCheck ?
+                    checkCollision<CollisionCheckType::Movement>(q, prism, &dist, nullptr, nullptr) :
+                    checkCollision<CollisionCheckType::Plane>(q, prism, &dist, nullptr, nullptr);
+            if (!hit) {
+                continue;
+            }
+            if (e.count == BATCH_HITS) {
+                e.valid = false;
+                continue;
+            }
+            e.hits[e.count++] = SphereBatch::Hit{dist, &prism.fnrm, prism.attribute};
+        }
+    }
+}
+
+bool KColData::replayBatched() {
+    if (s_batch.owner != this || s_batch.gen != m_cacheGen ||
+            m_prismIter != m_cachedPrismArray) {
+        return false;
+    }
+    auto matches = [&](const SphereBatch::Entry &e) {
+        return e.valid && e.typeMask == m_typeMask &&
+                std::bit_cast<u32>(e.radius) == std::bit_cast<u32>(m_radius) &&
+                sameBits(e.pos, m_pos) && sameBits(e.prevPos, m_prevPos);
+    };
+    size_t i = s_batch.next;
+    if (i >= s_batch.count || !matches(s_batch.entries[i])) {
+        for (i = 0; i < s_batch.count && !matches(s_batch.entries[i]); ++i) {
+        }
+        if (i == s_batch.count) {
+            return false;
+        }
+    }
+    s_batch.next = i + 1;
+    s_batch.replay = &s_batch.entries[i];
+    s_batch.replayIndex = 0;
+    ++s_batchReplays;
+    return true;
+}
+
+/// mkw-3ds: checkSphereCollision for a batched query: the kept hits, then false
+/// with m_prismIter cleared, as the prism loop ends.
+bool KColData::checkSphereReplay(f32 *distOut, EGG::Vector3f *fnrmOut, u16 *flagsOut) {
+    const SphereBatch::Entry *e = s_batch.replay;
+    if (e && s_batch.replayIndex < e->count) {
+        const SphereBatch::Hit &hit = e->hits[s_batch.replayIndex++];
+        if (distOut) {
+            *distOut = hit.dist;
+        }
+        if (fnrmOut) {
+            *fnrmOut = *hit.fnrm;
+        }
+        if (flagsOut) {
+            *flagsOut = hit.attribute;
+        }
+        return true;
+    }
+    s_batch.replay = nullptr;
+    m_prismIter = nullptr;
+    return false;
+}
+
 /// @brief Finds the data block corresponding to the provided position
 /// @addr{0x807BE030}
 /// @param point The player's position
@@ -447,8 +609,8 @@ void KColData::preloadVertices() {
 /// 2. A collision with the triangle plane (0x807C1514)
 /// 3. A collision such that we are inside the triangle (0x807C0884)
 template <KColData::CollisionCheckType Type>
-bool KColData::checkCollision(const PackedPrism &prism, f32 *distOut, EGG::Vector3f *fnrmOut,
-        u16 *flagsOut) {
+bool KColData::checkCollision(const QueryRef &q, const PackedPrism &prism, f32 *distOut,
+        EGG::Vector3f *fnrmOut, u16 *flagsOut) {
     // Responsible for updating the output params
     auto out = [&](f32 dist) {
         if (distOut) {
@@ -466,11 +628,11 @@ bool KColData::checkCollision(const PackedPrism &prism, f32 *distOut, EGG::Vecto
     // The flag check occurs earlier than in the base game here. We don't want to do math if the tri
     // we're checking doesn't have matching flags.
     u32 attributeMask = KCL_ATTRIBUTE_TYPE_BIT(prism.attribute);
-    if (!(attributeMask & m_typeMask)) {
+    if (!(attributeMask & q.typeMask)) {
         return false;
     }
 
-    const EGG::Vector3f relativePos = m_pos - prism.vertex;
+    const EGG::Vector3f relativePos = q.pos - prism.vertex;
 
     // mkw-3ds: the four distances are independent, so all are computed before
     // the first exit (same expressions, same rounding): on the in-order VFP11
@@ -484,26 +646,26 @@ bool KColData::checkCollision(const PackedPrism &prism, f32 *distOut, EGG::Vecto
     const f32 dist_ab = relativePos.ps_dot(enrm2);
     const f32 dist_bc = relativePos.ps_dot(enrm3) - prism.height;
     const f32 plane_dist = relativePos.ps_dot(fnrm);
-    if (m_radius <= dist_ca) {
+    if (q.radius <= dist_ca) {
         return false;
     }
 
-    if (m_radius <= dist_ab) {
+    if (q.radius <= dist_ab) {
         return false;
     }
 
-    if (m_radius <= dist_bc) {
+    if (q.radius <= dist_bc) {
         return false;
     }
 
-    f32 dist_in_plane = m_radius - plane_dist;
+    f32 dist_in_plane = q.radius - plane_dist;
     if (dist_in_plane <= 0.0f) {
         return false;
     }
 
     f32 typeDistance = m_prismThickness;
     if constexpr (Type == CollisionCheckType::Edge) {
-        typeDistance += m_radius;
+        typeDistance += q.radius;
     }
 
     if (dist_in_plane >= typeDistance) {
@@ -511,7 +673,7 @@ bool KColData::checkCollision(const PackedPrism &prism, f32 *distOut, EGG::Vecto
     }
 
     if constexpr (Type == CollisionCheckType::Movement) {
-        if (attributeMask & KCL_TYPE_DIRECTIONAL && m_movement.dot(fnrm) > 0.0f) {
+        if (attributeMask & KCL_TYPE_DIRECTIONAL && q.movement.dot(fnrm) > 0.0f) {
             return false;
         }
     }
@@ -520,7 +682,7 @@ bool KColData::checkCollision(const PackedPrism &prism, f32 *distOut, EGG::Vecto
     // If these are all zero, then we're inside the triangle
     if (dist_ab <= 0.0f && dist_bc <= 0.0f && dist_ca <= 0.0f) {
         if constexpr (Type == CollisionCheckType::Movement) {
-            EGG::Vector3f lastPos = relativePos - m_movement;
+            EGG::Vector3f lastPos = relativePos - q.movement;
             // We're only colliding if we are moving towards the face
             if (plane_dist < 0.0f && lastPos.ps_dot(fnrm) < 0.0f) {
                 return false;
@@ -589,7 +751,7 @@ bool KColData::checkCollision(const PackedPrism &prism, f32 *distOut, EGG::Vecto
                 return false;
             }
         }
-        sq_dist = m_radius * m_radius - edge_dist * edge_dist;
+        sq_dist = q.radius * q.radius - edge_dist * edge_dist;
     } else {
         f32 sq_sin = cos * cos - 1.0f;
 
@@ -612,7 +774,7 @@ bool KColData::checkCollision(const PackedPrism &prism, f32 *distOut, EGG::Vecto
             }
         }
 
-        sq_dist = m_radius * m_radius - cornerDot;
+        sq_dist = q.radius * q.radius - cornerDot;
     }
 
     if (sq_dist < plane_dist * plane_dist || sq_dist <= 0.0f) {
@@ -625,7 +787,7 @@ bool KColData::checkCollision(const PackedPrism &prism, f32 *distOut, EGG::Vecto
     }
 
     if constexpr (Type == CollisionCheckType::Movement) {
-        EGG::Vector3f lastPos = relativePos - m_movement;
+        EGG::Vector3f lastPos = relativePos - q.movement;
         // We're only colliding if we are moving towards the face
         if (lastPos.ps_dot(fnrm) < 0.0f) {
             return false;

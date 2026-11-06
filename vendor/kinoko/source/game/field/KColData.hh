@@ -153,6 +153,41 @@ public:
     /// mkw-3ds DIAG A/B (ab-alternate.txt): false reads the unpacked arrays.
     static bool s_packed;
 
+    /// mkw-3ds (Old 3DS): batched sphere queries against the course KCL. A kart's
+    /// wheel or body spheres are predicted before its collision loop and tested in
+    /// one pass over each prism list (most share the kart's narrowed prism cache),
+    /// so a prism is read once for every sphere instead of once per sphere (the Old
+    /// 3DS has 16 KB of L1 data cache and no L2). The hits are kept per sphere in
+    /// prism order. The collision loop then runs unchanged: when a live query
+    /// (lookupSphereCached) equals a batched one bit for bit (position, previous
+    /// position, radius, type mask, prism list and prism cache generation),
+    /// checkSphereReplay returns the kept hits instead of testing the prisms again.
+    /// The hits are a function of exactly those inputs, so the result is
+    /// bit-identical; a sphere predicted wrongly just runs its own query. After
+    /// Codiak540's o3ds-performance Kinoko patch.
+    struct BatchSphere {
+        EGG::Vector3f pos;
+        EGG::Vector3f prevPos;
+        f32 radius;
+        KCLTypeMask typeMask;
+    };
+    static constexpr size_t BATCH_MAX = 16;
+    static constexpr size_t BATCH_HITS = 32;
+
+    /// Tests every sphere (at most BATCH_MAX) as lookupSphereCached + checkSphereCollision
+    /// would, and keeps the hits for replayBatched. Replaces any earlier batch.
+    void batchSpheresCached(const BatchSphere *spheres, size_t count);
+    /// Forgets the batch (a later query never matches it).
+    static void ClearBatch();
+    /// After lookupSphereCached: true when the batch holds this exact query; the
+    /// next checkSphereReplay calls then return its hits.
+    [[nodiscard]] bool replayBatched();
+    [[nodiscard]] bool checkSphereReplay(f32 *distOut, EGG::Vector3f *fnrmOut, u16 *flagsOut);
+    /// DIAG counts (the sim profile prints and resets them): spheres batched, and
+    /// live queries answered from a batch.
+    static u32 s_batchedSpheres;
+    static u32 s_batchReplays;
+
     [[nodiscard]] static EGG::Vector3f GetVertex(f32 height, const EGG::Vector3f &vertex1,
             const EGG::Vector3f &fnrm, const EGG::Vector3f &enrm3, const EGG::Vector3f &enrm);
 
@@ -163,9 +198,24 @@ private:
     void packPrisms();
     [[nodiscard]] const PackedPrism *prismAt(u16 index, PackedPrism &scratch) const;
 
+    /// The query a prism test reads: the members for a live query, a batch entry's
+    /// copies for a batched one (same values, same expressions).
+    struct QueryRef {
+        const EGG::Vector3f &pos;
+        const EGG::Vector3f &movement;
+        f32 radius;
+        KCLTypeMask typeMask;
+    };
+
+    template <CollisionCheckType Type>
+    [[nodiscard]] bool checkCollision(const QueryRef &q, const PackedPrism &prism, f32 *distOut,
+            EGG::Vector3f *fnrmOut, u16 *flagsOut);
     template <CollisionCheckType Type>
     [[nodiscard]] bool checkCollision(const PackedPrism &prism, f32 *distOut,
-            EGG::Vector3f *fnrmOut, u16 *flagsOut);
+            EGG::Vector3f *fnrmOut, u16 *flagsOut) {
+        return checkCollision<Type>(QueryRef{m_pos, m_movement, m_radius, m_typeMask}, prism,
+                distOut, fnrmOut, flagsOut);
+    }
 
     [[nodiscard]] bool checkPointCollision(const PackedPrism &prism, f32 *distOut,
             EGG::Vector3f *fnrmOut, u16 *flagsOut, bool movement);
@@ -200,6 +250,7 @@ private:
     u16 *m_cachedPrismArray;
     EGG::Vector3f m_cachedPos;
     f32 m_cachedRadius = 0.0f;
+    u32 m_cacheGen = 0; ///< mkw-3ds: counts narrowScopeLocal calls (batch keys).
 
     /// @brief Optimizes for time by avoiding unnecessary byteswapping.
     /// The Wii doesn't have this problem because big endian is always assumed.

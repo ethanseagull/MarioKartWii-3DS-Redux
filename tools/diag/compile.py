@@ -30,6 +30,25 @@ GEN = WORK / 'generated'
 VARIANT = os.environ.get('MKW_DIAG_VARIANT', '')
 OUT = ROOT / ('build/diag-' + VARIANT if VARIANT else 'build/diag')
 NAME = 'mkw-3ds-diag'
+# MKW_KINOKO_PGO: profile-guided optimization of Kinoko (vendor/kinoko, built with LTO).
+#   generate  a training build in <out>-pgogen whose Kinoko writes its profile counters
+#             to sdmc:/3ds/MKWiiDS/pgo/<source path>.gcda at each race end (merged over
+#             races); copy that folder's contents to tools/pgo/kinoko/.
+#   off       ignore tools/pgo/kinoko/.
+#   (unset)   Kinoko sources with a profile in tools/pgo/kinoko/ are built with it
+#             (tools/build.py does the same); the rest as before.
+PGO = os.environ.get('MKW_KINOKO_PGO', '')
+if PGO == 'generate':
+    OUT = OUT.with_name(OUT.name + '-pgogen')
+KINOKO_SOURCE = ROOT / 'vendor/kinoko/source'
+PGO_DIR = ROOT / 'tools/pgo/kinoko'
+# Path components of the training build's object folder for the Kinoko sources, which
+# libgcov cuts from each .gcda path (GCOV_PREFIX_STRIP) before adding the SD folder.
+PGO_STRIP = len((OUT / 'objects' / KINOKO_SOURCE.relative_to(ROOT)).resolve().as_posix().split('/'))
+# Profile use: no unrolling or peeling (the Old 3DS is instruction-cache bound); code
+# the training never reached is optimized as without a profile.
+PGO_USE_FLAGS = ['-fprofile-use', '-fprofile-partial-training', '-Wno-missing-profile', '-Wno-coverage-mismatch',
+                 '-fno-unroll-loops', '-fno-peel-loops']
 SHADER = WORK / 'shader'
 # devkitPro's shells set DEVKITPRO=/opt/devkitpro, which Windows Python cannot open.
 SDK = next(p for p in [Path(os.environ.get('DEVKITPRO', '')), Path('C:/devkitPro'), Path('/opt/devkitpro')]
@@ -57,12 +76,22 @@ def compile_one(src, signature):
     obj = OUT / 'objects' / src.relative_to(ROOT).with_suffix('.o')
     obj.parent.mkdir(parents=True, exist_ok=True)
     flags = FLAGS + (['-flto=auto'] if src.suffix == '.cc' else [])
-    digest = hashlib.sha256(src.read_bytes() + signature + ' '.join(flags).encode()).hexdigest()
+    profile = b''
+    if src.suffix == '.cc' and src.is_relative_to(KINOKO_SOURCE):
+        if PGO == 'generate':
+            flags = flags + ['-fprofile-generate', '-fprofile-update=single', f'-DMKW_KINOKO_PGO_GENERATE={PGO_STRIP}']
+        elif PGO != 'off' and (PGO_DIR / src.relative_to(KINOKO_SOURCE)).with_suffix('.gcda').is_file():
+            # GCC reads the profile beside the object (its -o path with .gcda).
+            profile = (PGO_DIR / src.relative_to(KINOKO_SOURCE)).with_suffix('.gcda').read_bytes()
+            obj.with_suffix('.gcda').write_bytes(profile)
+            flags = flags + PGO_USE_FLAGS
+    digest = hashlib.sha256(src.read_bytes() + signature + ' '.join(flags).encode() + profile).hexdigest()
     name = str(obj.relative_to(OUT / 'objects').with_suffix(src.suffix))
     stamp = obj.with_suffix('.sha256')
     if obj.exists() and stamp.exists() and stamp.read_text() == digest:
         return name, 0, 'cached'
-    run = subprocess.run([str(CXX), *flags, '-c', str(src), '-o', str(obj)], env=env, capture_output=True, text=True)
+    # A forward-slash object path: the training build's .gcda paths are cut at '/'.
+    run = subprocess.run([str(CXX), *flags, '-c', str(src), '-o', obj.as_posix()], env=env, capture_output=True, text=True)
     obj.with_suffix('.log').write_text(run.stdout + run.stderr)
     if run.returncode == 0:
         stamp.write_text(digest)
@@ -91,7 +120,7 @@ def main():
                 'romfsMountFromTitle']  # DIAG: logs the Mii resource fallback (cfl-fallback-test.txt)
     if PLAY:
         wrappers.remove('romfsMountFromTitle')
-    subprocess.run([str(CXX), *ARCH, '-flto=auto', '-specs=3dsx.specs', '-Wl,--gc-sections', '-Wl,-Map=' + str(OUT / (NAME + '.map')),
+    subprocess.run([str(CXX), *ARCH, '-flto=auto', *(['-fprofile-generate'] if PGO == 'generate' else []), '-specs=3dsx.specs', '-Wl,--gc-sections', '-Wl,-Map=' + str(OUT / (NAME + '.map')),
                     *['-Wl,--wrap=' + w for w in wrappers], '@' + str(rsp), str(WORK / 'libCFL.a'), str(WORK / 'libcitro3d.a'),
                     '-L' + str(SDK / 'libctru/lib'), '-lctru', '-lm', '-o', str(OUT / (NAME + '.elf'))], env=env, check=True)
     subprocess.run([str(SDK / 'devkitARM/bin/arm-none-eabi-size'), str(OUT / (NAME + '.elf'))], env=env, check=True)

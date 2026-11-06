@@ -42,7 +42,26 @@ void KartObjectManager::calc() {
         // and before any higher kart's, as in the retail order. Pass 0 does not narrow
         // the KCL prism cache (pass 1 does), so no query depends on the kart order.
         const size_t slip = System::RaceManager::Instance()->timer() % m_count;
+        // With s_pass0Split, four parts: A1 (state, input, KartMove to calcDirs),
+        // A2 (the rest of KartMove's first half, slipstream included), B1 (its second
+        // half, action, pull path), B2 (physics, hitboxes). Each part reads and writes
+        // only its own kart, as A and B do, so the finer split keeps the result.
         auto group = [&](size_t begin, size_t end) {
+            if (s_pass0Split) {
+                for (size_t i = begin; i < end; ++i) {
+                    m_objects[i]->calcSubA1();
+                }
+                for (size_t i = begin; i < end; ++i) {
+                    m_objects[i]->calcSubA2();
+                }
+                for (size_t i = begin; i < end; ++i) {
+                    m_objects[i]->calcSubB1();
+                }
+                for (size_t i = begin; i < end; ++i) {
+                    m_objects[i]->calcSubB2();
+                }
+                return;
+            }
             for (size_t i = begin; i < end; ++i) {
                 m_objects[i]->calcSubA();
             }
@@ -59,8 +78,43 @@ void KartObjectManager::calc() {
         }
     }
 
-    for (size_t i = 0; i < m_count; ++i) {
-        m_objects[i]->calc();
+    if (s_pass1Grouped && m_count >= 2) {
+        // mkw-3ds: pass 1 grouped, like pass 0: the serial part of every kart in
+        // order, then each local part (the code of each part stays in the instruction
+        // cache across the karts). Retail runs serial(i) local(i) per kart; moving
+        // local(i) after serial(j), j > i, keeps the result because:
+        // - the racer pair (i, j) is resolved once, in serial(min(i, j)), before
+        //   either local part, and reads and writes only those two karts;
+        // - serial(j)'s objects and items involve only kart j (item snapshots of other
+        //   racers are taken in their own serial parts), and local parts change no
+        //   collidable object, item or random state;
+        // - local(i) starts its own box search and prism cache narrowing
+        //   (checkCourseColNarrScLocal) before any query, so serial(j)'s search does
+        //   not reach it, and serial(j) starts its own search.
+        // One exception: a pair skipped because one kart was exempt (respawn, cannon)
+        // is checked again by the other kart's serial part, which in retail sees the
+        // exempt kart after its local part. So before serial(i), if a kart whose
+        // local part is still to run is exempt, the waiting local parts run first.
+        size_t pending = 0;
+        auto runLocal = [&](size_t end) {
+            for (; pending < end; ++pending) {
+                m_objects[pending]->calcLocal();
+            }
+        };
+        for (size_t i = 0; i < m_count; ++i) {
+            for (size_t k = pending; k < i; ++k) {
+                if (KartCollide::KartCollisionStatusExempt(m_objects[k])) {
+                    runLocal(i);
+                    break;
+                }
+            }
+            m_objects[i]->calcSerial();
+        }
+        runLocal(m_count);
+    } else {
+        for (size_t i = 0; i < m_count; ++i) {
+            m_objects[i]->calc();
+        }
     }
 
     // RMCU PlayerHolder_update 0x805897c4: the POW hit window ticks after every kart.
@@ -152,5 +206,7 @@ Abstract::g3d::ResAnmChr *KartObjectManager::s_megaScaleDownAnmChr = nullptr;
 Abstract::g3d::ResAnmChr *KartObjectManager::s_pressScaleUpAnmChr = nullptr;
 KartObjectManager *KartObjectManager::s_instance = nullptr;
 bool KartObjectManager::s_phaseMajor = true;
+bool KartObjectManager::s_pass0Split = true;
+bool KartObjectManager::s_pass1Grouped = true;
 
 } // namespace Kinoko::Kart

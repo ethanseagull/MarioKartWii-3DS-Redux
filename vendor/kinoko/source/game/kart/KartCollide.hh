@@ -79,6 +79,10 @@ public:
     void FUN_805B72B8(f32 param_1, f32 param_2, bool lockXZ, bool addExtVelY);
     void calcBodyCollision(f32 totalScale, f32 sinkDepth, const EGG::Quatf &rot,
             const EGG::Vector3f &scale);
+    /// mkw-3ds (Old 3DS): calcBodyCollision batches its hitboxes' course prism
+    /// tests (KColData::batchSpheresCached). Off by default (more instructions
+    /// than it saves); on: batch-body.txt; DIAG ab-alternate.txt bit 5.
+    static bool s_batchBody;
     void calcFloorEffect();
     void calcTriggers(Field::KCLTypeMask *mask, const EGG::Vector3f &pos, bool twoPoint);
     void handleTriggers(Field::KCLTypeMask *mask);
@@ -107,6 +111,8 @@ public:
     }
     void calcWheelCollision(u16 wheelIdx, CollisionGroup *hitboxGroup, const EGG::Vector3f &colVel,
             const EGG::Vector3f &center, f32 radius);
+    /// The KCL types a wheel sphere collides with (calcWheelCollision).
+    [[nodiscard]] Field::KCLTypeMask wheelTypeMask() const;
     void calcSideCollision(CollisionData &collisionData, Hitbox &hitbox,
             Field::CollisionInfo *colInfo);
     void calcBoundingRadius();
@@ -140,6 +146,9 @@ public:
     /// PlayerSub18_checkItemCollision right after the object collision; a race item controller
     /// registers this hook to resolve its contacts for the racer at that point.
     using ItemCollisionHook = void (*)(void *context, size_t playerIdx);
+    /// The status part of the racer-pair exemption (respawn, cannon, battle hidden);
+    /// ghosts are exempt as well, by type.
+    [[nodiscard]] static bool KartCollisionStatusExempt(const KartObject *kart);
     static void SetItemCollisionHook(ItemCollisionHook hook, void *context) {
         s_itemCollisionHook = hook;
         s_itemCollisionContext = context;

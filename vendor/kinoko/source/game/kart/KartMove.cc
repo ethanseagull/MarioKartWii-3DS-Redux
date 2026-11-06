@@ -400,6 +400,14 @@ void KartMove::calc() {
 }
 
 bool KartMove::calcPart1() {
+    if (!calcPart1A()) {
+        return false;
+    }
+    calcPart1B();
+    return true;
+}
+
+bool KartMove::calcPart1A() {
     auto &status = KartObjectProxy::status();
 
     if (status.onBit(eStatus::InRespawn)) {
@@ -421,6 +429,12 @@ bool KartMove::calcPart1() {
 
     calcAutoDrift();
     calcDirs();
+    return true;
+}
+
+void KartMove::calcPart1B() {
+    auto &status = KartObjectProxy::status();
+
     calcStickyRoad();
     calcOffroad();
     calcTurn();
@@ -435,7 +449,6 @@ bool KartMove::calcPart1() {
     calcMushroomBoost();
     calcZipperBoost();
     calcSlipstream();
-    return true;
 }
 
 void KartMove::calcPart2() {

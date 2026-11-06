@@ -175,9 +175,34 @@ void KartObject::calcSubB() {
     sub()->calcPass0B();
 }
 
+void KartObject::calcSubA1() {
+    sub()->calcPass0A1();
+}
+
+void KartObject::calcSubA2() {
+    sub()->calcPass0A2();
+}
+
+void KartObject::calcSubB1() {
+    sub()->calcPass0B1();
+}
+
+void KartObject::calcSubB2() {
+    sub()->calcPass0B2();
+}
+
 /// @addr{0x8058EEBC}
 void KartObject::calc() {
     sub()->calcPass1();
+    {MKW_SIM_SCOPE(K1Model);model()->calc();}
+}
+
+void KartObject::calcSerial() {
+    sub()->calcPass1Serial();
+}
+
+void KartObject::calcLocal() {
+    sub()->calcPass1Local();
     {MKW_SIM_SCOPE(K1Model);model()->calc();}
 }
 

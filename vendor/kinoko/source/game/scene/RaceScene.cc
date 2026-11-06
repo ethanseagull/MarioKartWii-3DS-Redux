@@ -17,6 +17,14 @@
 
 #include <ScopeLock.hh>
 
+#ifdef MKW_KINOKO_PGO_GENERATE
+#include <cstdio>
+#include <cstdlib>
+#include <sys/stat.h>
+extern "C" void __gcov_dump();
+extern "C" void __gcov_reset();
+#endif
+
 namespace Kinoko::Scene {
 
 /// @addr{0x80553B88}
@@ -118,8 +126,36 @@ void RaceScene::calcEngines() {
     raceMgr->random().next();
 }
 
+#ifdef MKW_KINOKO_PGO_GENERATE
+namespace {
+/// mkw-3ds PGO training build (tools/diag/compile.py, MKW_KINOKO_PGO=generate): at
+/// each race end, Kinoko's profile counters go to sdmc:/3ds/MKWiiDS/pgo/<source path>
+/// .gcda (the object path with its first MKW_KINOKO_PGO_GENERATE components cut), merged
+/// with the races before. libgcov does not create the folders itself on the SD card.
+void dumpKinokoProfile() {
+    static const char *const dirs[] = {"", "/abstract", "/abstract/g3d", "/abstract/memory", "/egg",
+            "/egg/core", "/egg/util", "/game", "/game/field", "/game/field/jugem",
+            "/game/field/obj", "/game/item", "/game/kart", "/game/render", "/game/scene",
+            "/game/system", "/game/system/map"};
+    char path[96];
+    for (const char *dir : dirs) {
+        std::snprintf(path, sizeof path, "sdmc:/3ds/MKWiiDS/pgo%s", dir);
+        mkdir(path, 0777);
+    }
+    std::snprintf(path, sizeof path, "%d", MKW_KINOKO_PGO_GENERATE);
+    setenv("GCOV_PREFIX", "sdmc:/3ds/MKWiiDS/pgo", 1);
+    setenv("GCOV_PREFIX_STRIP", path, 1);
+    __gcov_dump();
+    __gcov_reset();
+}
+} // namespace
+#endif
+
 /// @addr{0x805549B0}
 void RaceScene::destroyEngines() {
+#ifdef MKW_KINOKO_PGO_GENERATE
+    dumpKinokoProfile();
+#endif
     System::KPadDirector::Instance()->endGhostProxies();
     Render::KartCamera::DestroyInstance();
     Kart::KartObjectManager::DestroyInstance();
