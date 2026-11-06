@@ -102,6 +102,16 @@ On Old 3DS the pause menu is not preloaded when that would leave under 3 MiB of
 LINEAR (`runtime.log`: `Old 3DS: pause menu not preloaded (LINEAR)`). A failed
 `new` writes `FAIL out of heap: ...` to `runtime.log` before the game aborts.
 
+Render CPU switches (each change is exact unless noted; both consoles unless
+noted): `no-light-blend.txt` blends the course light textures with the
+reference loop and rewrites and flushes them every frame, instead of through
+tables and only when their bytes change. `no-bloom-list.txt` builds bloom's
+GPU commands every frame instead of copying the commands recorded on the
+race's first bloom frame (immediate mono frames: Old 3DS). `no-c3d-fast.txt`
+makes citro3d compare its register shadows with memcmp and scan every uniform
+on each draw, instead of word compares and a per-shader "any uniform dirty"
+flag (the same GPU commands).
+
 ## Repacked packs
 
 `tools/pakpack.c` (build: `gcc -O2 -o pakpack tools/pakpack.c`) rewrites an

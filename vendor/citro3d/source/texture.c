@@ -303,7 +303,7 @@ void C3Di_SetTex(int unit, C3D_Tex* tex)
 		if (regcount == 5)
 		{
 			u32* shadow = C3Di_TexShadow[unit];
-			if (C3Di_TexShadowValid[unit] && memcmp(shadow, reg, 5*sizeof(u32)) == 0 && shadow[5] == (u32)tex->fmt)
+			if (C3Di_TexShadowValid[unit] && C3Di_SameWords(shadow, reg, 5*sizeof(u32)) && shadow[5] == (u32)tex->fmt)
 				return;
 			memcpy(shadow, reg, 5*sizeof(u32));
 			shadow[5] = tex->fmt;

@@ -157,8 +157,16 @@ void Renderer::retailBeginFrame(){
         // stable pair needs neither conversion nor another cache flush.
         if(retailTexturesValid_&&!sample&&!lightTextureTransition_[which])continue;
         auto* out=static_cast<uint8_t*>(retailTexture_[which].data);
-        blendLightTexture32(out,lightTextureFrom_[which],lightTextureTo_[which],blendTick);
-        C3D_TexFlush(&retailTexture_[which]);
+        if(lightTextureSkip){
+            // The table blend (byte-identical to the reference); a texture that
+            // already holds these bytes is neither rewritten nor flushed.
+            alignas(4) uint8_t staged[LightTextureSize*LightTextureSize*4];
+            blendLightTexture32(staged,lightTextureFrom_[which],lightTextureTo_[which],blendTick);
+            if(std::memcmp(out,staged,sizeof staged)){std::memcpy(out,staged,sizeof staged);C3D_TexFlush(&retailTexture_[which]);}
+        }else{
+            blendLightTexture32Reference(out,lightTextureFrom_[which],lightTextureTo_[which],blendTick);
+            C3D_TexFlush(&retailTexture_[which]);
+        }
         retailTextureCurrent_[which]=true;retailTextureAltCurrent_[which]=false;
     }
     lightTextureAppliedTick_=execFrame_;

@@ -2920,6 +2920,7 @@ bool Renderer::initBloom(){
     return true;
 }
 void Renderer::freeBloom(){
+    bloomListValid_=false;
     for(auto*& t:bloomTarget_){if(t)C3D_RenderTargetDelete(t);t=nullptr;}
     if(sceneTarget_)C3D_RenderTargetDelete(sceneTarget_);
     sceneTarget_=nullptr;
@@ -2961,8 +2962,61 @@ void Renderer::bloomQuad(const C3D_Tex& source,unsigned sourceWidth,unsigned sou
     auto* buf=C3D_GetBufInfo();BufInfo_Init(buf);BufInfo_Add(buf,v,sizeof(Vertex),4,0x3210);
     C3D_DrawArrays(GPU_TRIANGLES,0,6);bloomCount_+=6;stats_.triangles+=2;++stats_.drawCalls;
 }
+// citro3d's context and its "already on the GPU" shadows (vendor/citro3d).
+extern "C" {
+#include "../vendor/citro3d/source/internal.h"
+}
 void Renderer::applyBloomNow(){
     flushSprites();bloomFrame_=false;
+    // The commands depend only on these (and on the vertex slots holding the
+    // recorded quads): immediate mono frames, no clip rectangle.
+    const bool listed=bloomList&&!execPipelined_&&!execStereo_.active()&&!execDualScreenIntro_&&!bloomClipped_&&!bottomPass_;
+    if(!listed){bloomListValid_=false;bloomPasses();return;}
+    BloomListKey key{bloomSettings_,sceneTex_.data,{bloomTex_[0].data,bloomTex_[1].data,bloomTex_[2].data,bloomTex_[3].data},topTarget(),
+                     bloomVertices_,bloomCount_,renderQuality().bloomBlurRounds,bloomMerge};
+    // State set before bloom reaches the frame's own commands first, so the
+    // recorded commands hold only what the passes set.
+    C3Di_UpdateContext();
+    const std::size_t quadBytes=bloomListVertices_.size()*sizeof(Vertex);
+    if(bloomListValid_&&key==bloomListKey_&&bloomCount_+bloomListVertices_.size()<=kBloomVertices&&
+       !std::memcmp(bloomVertices_+bloomCount_,bloomListVertices_.data(),quadBytes)&&
+       gpuCmdBufOffset+bloomListWords_.size()+0x4000<=gpuCmdBufSize){
+        GPUCMD_AddRawCommands(bloomListWords_.data(),uint32_t(bloomListWords_.size()));
+        bloomCount_+=unsigned(bloomListVertices_.size());
+        stats_.triangles+=bloomListTriangles_;stats_.drawCalls+=bloomListDraws_;
+        // The context exactly as the passes leave it (their last target, the
+        // composite's state, then the reset below).
+        bloomPass(topTarget(),400,240);
+        C3D_TexUnit2UseCoord1(false);
+        for(int unit=0;unit<3;++unit)C3D_TexBind(unit,nullptr);
+        C3D_TexEnvBufUpdate(C3D_Both,0);for(int i=0;i<6;++i)C3D_TexEnvInit(C3D_GetTexEnv(i));
+        auto* env0=C3D_GetTexEnv(0);C3D_TexEnvSrc(env0,C3D_Both,GPU_TEXTURE0,GPU_PRIMARY_COLOR);C3D_TexEnvFunc(env0,C3D_Both,GPU_MODULATE);
+        C3D_AlphaBlend(GPU_BLEND_ADD,GPU_BLEND_ADD,GPU_SRC_ALPHA,GPU_ONE_MINUS_SRC_ALPHA,GPU_ONE,GPU_ONE_MINUS_SRC_ALPHA);
+        *C3D_GetBufInfo()=bloomListBuffer_;
+        uploadProjection(projectionLoc_,projection_);
+        spriteStateReady_=false;
+        // The GPU holds the commands' last values, not what the shadows say:
+        // the next draw writes every state the passes touch again.
+        C3Di_InvalidateStateShadows();C3Di_InvalidateUniformShadows();
+        auto& ctx=*C3Di_GetContext();
+        ctx.flags|=C3DiF_FrameBuf|C3DiF_Viewport|C3DiF_Effect|C3DiF_TexEnvBuf|C3DiF_TexAll|C3DiF_TexEnvAll|C3DiF_BufInfo|C3DiF_DrawUsed;
+        return;
+    }
+    // Record: every state the passes set is written, whatever the GPU held.
+    u32* start=nullptr;u32 startOffset=0;GPUCMD_GetBuffer(&start,nullptr,&startOffset);
+    C3Di_InvalidateStateShadows();C3Di_InvalidateUniformShadows();
+    const unsigned first=bloomCount_;const uint32_t triangles=stats_.triangles,draws=stats_.drawCalls;
+    bloomPasses();
+    u32* end=nullptr;u32 endOffset=0;GPUCMD_GetBuffer(&end,nullptr,&endOffset);
+    bloomListValid_=end==start&&endOffset>startOffset&&bloomCount_>first;
+    if(!bloomListValid_)return;
+    bloomListKey_=key;
+    bloomListWords_.assign(start+startOffset,start+endOffset);
+    bloomListVertices_.assign(bloomVertices_+first,bloomVertices_+bloomCount_);
+    bloomListBuffer_=*C3D_GetBufInfo();
+    bloomListTriangles_=stats_.triangles-triangles;bloomListDraws_=stats_.drawCalls-draws;
+}
+void Renderer::bloomPasses(){
     const auto& settings=*bloomSettings_;
     auto pica=[](uint32_t rgba){return ((rgba>>24)&255)|((rgba>>8)&0xff00)|((rgba<<8)&0xff0000)|((rgba<<24)&0xff000000);};
     auto env=[](){C3D_TexEnvBufUpdate(C3D_Both,0);for(int i=0;i<6;++i)C3D_TexEnvInit(C3D_GetTexEnv(i));return C3D_GetTexEnv(0);};

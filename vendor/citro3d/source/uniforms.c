@@ -7,6 +7,8 @@ C3D_IVec C3D_IVUnif[2][C3D_IVUNIF_COUNT];
 u16      C3D_BoolUnifs[2];
 
 bool C3D_FVUnifDirty[2][C3D_FVUNIF_COUNT] __attribute__((aligned(4)));
+bool C3D_FVUnifAnyDirty[2];
+bool C3D_FastState = true;
 bool C3D_IVUnifDirty[2][C3D_IVUNIF_COUNT];
 bool C3D_BoolUnifsDirty[2];
 
@@ -50,8 +52,12 @@ void C3D_UpdateUniforms(GPU_SHADER_TYPE type)
 	}
 
 	// Update FVec uniforms. A dirty uniform whose value is already in its
-	// register (shadow) is not uploaded again.
+	// register (shadow) is not uploaded again. The loop clears every dirty
+	// entry, so with none set it is skipped.
 	const bool* dirty = C3D_FVUnifDirty[type];
+	if (C3D_FastState && !C3D_FVUnifAnyDirty[type])
+		i = C3D_FVUNIF_COUNT;
+	C3D_FVUnifAnyDirty[type] = false;
 	while (i < C3D_FVUNIF_COUNT)
 	{
 		// Skip four clean entries at a time (the array is 4-byte aligned)
@@ -70,7 +76,7 @@ void C3D_UpdateUniforms(GPU_SHADER_TYPE type)
 			i ++;
 			continue;
 		}
-		if (C3Di_FVUnifShadowValid[type][i] && memcmp(&C3D_FVUnif[type][i], &C3Di_FVUnifShadow[type][i], sizeof(C3D_FVec)) == 0)
+		if (C3Di_FVUnifShadowValid[type][i] && C3Di_SameWords(&C3D_FVUnif[type][i], &C3Di_FVUnifShadow[type][i], sizeof(C3D_FVec)))
 		{
 			C3D_FVUnifDirty[type][i] = false;
 			C3Di_FVUnifEverDirty[type][i] = true;
@@ -81,7 +87,7 @@ void C3D_UpdateUniforms(GPU_SHADER_TYPE type)
 		// Find the number of consecutive dirty, changed uniforms
 		int j;
 		for (j = i + 1; j < C3D_FVUNIF_COUNT && dirty[j]
-			&& !(C3Di_FVUnifShadowValid[type][j] && memcmp(&C3D_FVUnif[type][j], &C3Di_FVUnifShadow[type][j], sizeof(C3D_FVec)) == 0); j ++);
+			&& !(C3Di_FVUnifShadowValid[type][j] && C3Di_SameWords(&C3D_FVUnif[type][j], &C3Di_FVUnifShadow[type][j], sizeof(C3D_FVec))); j ++);
 
 		// Upload the uniforms
 		GPUCMD_AddWrite(GPUREG_VSH_FLOATUNIFORM_CONFIG+offset, 0x80000000|i);
@@ -128,6 +134,7 @@ void C3Di_DirtyUniforms(GPU_SHADER_TYPE type)
 		C3Di_ShaderFVecData[type].dirty = true;
 	for (i = 0; i < C3D_FVUNIF_COUNT; i ++)
 		C3D_FVUnifDirty[type][i] = C3D_FVUnifDirty[type][i] || C3Di_FVUnifEverDirty[type][i];
+	C3D_FVUnifAnyDirty[type] = true;
 	for (i = 0; i < C3D_IVUNIF_COUNT; i ++)
 		C3D_IVUnifDirty[type][i] = C3D_IVUnifDirty[type][i] || C3Di_IVUnifEverDirty[type][i];
 }
