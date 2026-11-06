@@ -9,6 +9,12 @@ extern C3D_IVec C3D_IVUnif[2][C3D_IVUNIF_COUNT];
 extern u16      C3D_BoolUnifs[2];
 
 extern bool C3D_FVUnifDirty[2][C3D_FVUNIF_COUNT];
+// Any C3D_FVUnifDirty entry of the shader type may be set (mkw-3ds): an update
+// with none set skips the scan.
+extern bool C3D_FVUnifAnyDirty[2];
+// mkw-3ds: false restores the library comparisons and full uniform scans
+// (the same commands, more CPU). May change at any time.
+extern bool C3D_FastState;
 extern bool C3D_IVUnifDirty[2][C3D_IVUNIF_COUNT];
 extern bool C3D_BoolUnifsDirty[2];
 
@@ -17,6 +23,7 @@ static inline C3D_FVec* C3D_FVUnifWritePtr(GPU_SHADER_TYPE type, int id, int siz
 	int i;
 	for (i = 0; i < size; i ++)
 		C3D_FVUnifDirty[type][id+i] = true;
+	C3D_FVUnifAnyDirty[type] = true;
 	return &C3D_FVUnif[type][id];
 }
 

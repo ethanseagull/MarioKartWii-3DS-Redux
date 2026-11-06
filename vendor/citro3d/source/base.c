@@ -222,7 +222,7 @@ void C3Di_UpdateContext(void)
 	if (ctx->flags & C3DiF_AttrInfo)
 	{
 		ctx->flags &= ~C3DiF_AttrInfo;
-		if (!C3Di_AttrShadowValid || memcmp(&C3Di_AttrShadow, &ctx->attrInfo, sizeof(ctx->attrInfo)) != 0)
+		if (!C3Di_AttrShadowValid || !C3Di_SameWords(&C3Di_AttrShadow, &ctx->attrInfo, sizeof(ctx->attrInfo)))
 		{
 			C3Di_AttrInfoBind(&ctx->attrInfo);
 			C3Di_AttrShadow = ctx->attrInfo;
@@ -233,7 +233,7 @@ void C3Di_UpdateContext(void)
 	if (ctx->flags & C3DiF_BufInfo)
 	{
 		ctx->flags &= ~C3DiF_BufInfo;
-		if (!C3Di_BufShadowValid || memcmp(&C3Di_BufShadow, &ctx->bufInfo, sizeof(ctx->bufInfo)) != 0)
+		if (!C3Di_BufShadowValid || !C3Di_SameWords(&C3Di_BufShadow, &ctx->bufInfo, sizeof(ctx->bufInfo)))
 		{
 			C3Di_BufInfoBind(&ctx->bufInfo);
 			C3Di_BufShadow = ctx->bufInfo;
@@ -244,7 +244,7 @@ void C3Di_UpdateContext(void)
 	if (ctx->flags & C3DiF_Effect)
 	{
 		ctx->flags &= ~C3DiF_Effect;
-		if (!C3Di_EffectShadowValid || memcmp(&C3Di_EffectShadow, &ctx->effect, sizeof(C3D_Effect)) != 0)
+		if (!C3Di_EffectShadowValid || !C3Di_SameWords(&C3Di_EffectShadow, &ctx->effect, sizeof(C3D_Effect)))
 		{
 			C3Di_EffectBind(&ctx->effect);
 			C3Di_EffectShadow = ctx->effect;
@@ -322,7 +322,7 @@ void C3Di_UpdateContext(void)
 		for (i = 0; i < 6; i ++)
 		{
 			if (!(ctx->flags & C3DiF_TexEnv(i))) continue;
-			if ((C3Di_TexEnvShadowValid & BIT(i)) && memcmp(&C3Di_TexEnvShadow[i], &ctx->texEnv[i], sizeof(C3D_TexEnv)) == 0)
+			if ((C3Di_TexEnvShadowValid & BIT(i)) && C3Di_SameWords(&C3Di_TexEnvShadow[i], &ctx->texEnv[i], sizeof(C3D_TexEnv)))
 				continue;
 			C3Di_TexEnvBind(i, &ctx->texEnv[i]);
 			C3Di_TexEnvShadow[i] = ctx->texEnv[i];

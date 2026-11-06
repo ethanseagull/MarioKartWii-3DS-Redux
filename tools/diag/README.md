@@ -107,7 +107,10 @@ noted): `no-light-blend.txt` blends the course light textures with the
 reference loop and rewrites and flushes them every frame, instead of through
 tables and only when their bytes change. `no-bloom-list.txt` builds bloom's
 GPU commands every frame instead of copying the commands recorded on the
-race's first bloom frame (immediate mono frames: Old 3DS).
+race's first bloom frame (immediate mono frames: Old 3DS). `no-c3d-fast.txt`
+makes citro3d compare its register shadows with memcmp and scan every uniform
+on each draw, instead of word compares and a per-shader "any uniform dirty"
+flag (the same GPU commands).
 
 ## Repacked packs
 
