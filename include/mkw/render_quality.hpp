@@ -47,11 +47,18 @@ struct RenderQuality {
     // after the race's VRAM users have loaded, leaving vramReserve bytes free.
     bool vramCourseTextures=true;
     static constexpr std::size_t vramReserve=1024*1024;
+    // The race's lower screen redraws on every Nth presented frame (2 on Old
+    // 3DS: 15 Hz at its 30 FPS); an undrawn screen keeps its last picture.
+    // Fades still draw every frame. DIAG: bottom-every-frame.txt sets 1.
+    unsigned bottomInterval=1;
+    // The race lower screen's RGBA8 UI atlas is stored as RGBA4 (Old 3DS: 256 KB
+    // of VRAM for course textures). DIAG: bottom-rgba8.txt keeps RGBA8.
+    bool bottomRgba4=false;
     void setReduced(bool on){
         *this=RenderQuality{};
         if(!on)return;
         reduced=true;halfLargeTextures=true;minScreenRatio=.015f;objectLowDistance=4000.f;
-        shadowVolumes=false;bloomBlurRounds=1;boxSparkleRatio=.04f;particleBudget=96;kartEffectScreens=2;racerLod=true;animationStep=4;vramCourseTextures=true;
+        shadowVolumes=false;bloomBlurRounds=1;boxSparkleRatio=.04f;particleBudget=96;kartEffectScreens=2;racerLod=true;animationStep=4;vramCourseTextures=true;bottomInterval=2;bottomRgba4=true;
     }
 #ifdef MKW_RENDER_QUALITY_C3D
     // True when bounds b placed by transform t are too small to draw from camera.

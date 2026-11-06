@@ -1,5 +1,6 @@
 // Race bottom screen: see include/mkw/race_bottom_screen.hpp and docs/BOTTOM_SCREEN.md.
 #include <mkw/race_bottom_screen.hpp>
+#include <mkw/render_quality.hpp>
 #include <mkw/native_mii_portrait.hpp>
 #include <mkw/race_map_assets.hpp>
 #include <mkw/battle_map_assets.hpp>
@@ -245,7 +246,7 @@ bool RaceBottomScreen::load(Renderer& renderer,unsigned course){
     m.quads.reset(new(std::nothrow) Renderer::MaterialQuad[2*QuadCapacity]);
     if(!m.quads){unload(renderer);return false;}
     const auto& c=*art;
-    renderer.loadVramTexture(m.atlas,RaceMapAtlasTexture);
+    renderer.loadVramTexture(m.atlas,RaceMapAtlasTexture,GPU_CLAMP_TO_EDGE,renderQuality().bottomRgba4);
     if(course>=32)renderer.loadVramTexture(m.scores,BattleBottomScoreTexture);
     if(course<32)renderer.loadVramTexture(m.map,c.texture);
     renderer.loadVramTexture(m.overview,c.overview);

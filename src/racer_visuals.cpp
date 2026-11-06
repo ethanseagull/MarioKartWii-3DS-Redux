@@ -1,4 +1,7 @@
 #include <mkw/racer_visuals.hpp>
+#include <mkw/asset_pack.hpp>
+#include <3ds.h>
+#include <malloc.h>
 #include <mkw/diag.hpp>
 #include <mkw/racer_lod.hpp>
 #include <mkw/vehicle_lod_layout.hpp>
@@ -70,12 +73,23 @@ void RacerVisuals::reset(){for(auto& r:impl_->racers)r.reset();impl_->count=0;}
 unsigned RacerVisuals::count() const{return impl_->count;}
 bool RacerVisuals::load(){
     reset();const auto& config=K::System::RaceConfig::Instance()->raceScenario();
+    // Banks kept from the last race (DriverAnimation::keepReleased) that this
+    // lineup doesn't use go now, before its own banks are allocated.
+    {std::vector<std::string> banks;
+     for(unsigned i=1;i<config.playerCount&&i<=11;++i){const auto& player=config.players[i];
+      VehicleVisualAssets::bankPaths(unsigned(player.character),unsigned(player.vehicle),config.teams?RaceTeam(player.team):RaceTeam::None,diag::unlitBanks,banks);}
+     DriverAnimation::keepOnly(banks);}
     for(unsigned i=1;i<config.playerCount&&i<=11;++i){
         auto r=std::make_unique<Impl::Racer>();const auto& player=config.players[i];
         std::string failure;
         if(!r->load(unsigned(player.character),unsigned(player.vehicle),config.teams?RaceTeam(player.team):RaceTeam::None,&failure,diag::unlitBanks)){
             if(auto* log=std::fopen("sdmc:/3ds/mkw-3ds/opponent-load-error.txt","w")){
-                std::fprintf(log,"slot=%u character=%u vehicle=%u team=%u\nasset=%s\nlinear=%lu\n",i,unsigned(player.character),unsigned(player.vehicle),unsigned(player.team),failure.c_str(),static_cast<unsigned long>(linearSpaceFree()));
+                // Free heap and the largest LINEAR block (a free total says nothing about fragmentation).
+                const struct mallinfo m=mallinfo();const size_t heapTotal=envGetHeapSize();
+                const size_t heapFree=(heapTotal>size_t(m.arena)?heapTotal-size_t(m.arena):0)+size_t(m.fordblks);
+                size_t lo=0,hi=linearSpaceFree();
+                while(hi-lo>4096){const size_t mid=lo+(hi-lo)/2;if(void* p=linearAlloc(mid)){linearFree(p);lo=mid;}else hi=mid;}
+                std::fprintf(log,"slot=%u character=%u vehicle=%u team=%u\nasset=%s\nbank_failure=%s\npack_failure=%s\nlinear=%lu\nlinear_largest=%lu\nheap_free=%lu\n",i,unsigned(player.character),unsigned(player.vehicle),unsigned(player.team),failure.c_str(),driverBankFailure,pack::lastReadFailure,static_cast<unsigned long>(linearSpaceFree()),static_cast<unsigned long>(lo),static_cast<unsigned long>(heapFree));
                 std::fclose(log);
             }
             reset();return false;

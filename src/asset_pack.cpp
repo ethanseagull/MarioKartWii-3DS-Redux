@@ -18,6 +18,8 @@
 
 namespace mkw {extern std::atomic<unsigned> packReads;extern std::atomic<unsigned long long> packReadBytes,packReadTicks;}
 namespace mkw::pack {
+// Why the last pack read failed (asset_pack.hpp; opponent-load-error.txt).
+const char* lastReadFailure="";
 namespace {
 // stored: bytes in the file; less than size for an LZ4 block (MPK2, tools/pakpack.c).
 struct Entry {std::uint32_t name,offset,size,stored;};
@@ -257,9 +259,9 @@ bool readAtUntraced(Archives& all,Archive& a,std::uint32_t offset,void* destinat
    if(all.staging){
     all.cached=nullptr;
     // The last sector may run past the end of the file.
-    if(std::fseek(a.file,long(first),SEEK_SET)!=0)return false;
+    if(std::fseek(a.file,long(first),SEEK_SET)!=0){lastReadFailure="staged seek";return false;}
     const size_t got=std::fread(all.staging,1,end-first,a.file);
-    if(got<offset-first+bytes)return false;
+    if(got<offset-first+bytes){lastReadFailure="staged short read";return false;}
     all.cached=&a;all.cachedFirst=first;all.cachedEnd=first+std::uint32_t(got);
     std::memcpy(destination,all.staging+(offset-first),bytes);
     schedulePrefetch(all,a,all.cachedEnd);
@@ -267,7 +269,9 @@ bool readAtUntraced(Archives& all,Archive& a,std::uint32_t offset,void* destinat
    }
   }
  }
- return std::fseek(a.file,long(offset),SEEK_SET)==0&&std::fread(destination,1,bytes,a.file)==bytes;
+ if(std::fseek(a.file,long(offset),SEEK_SET)!=0){lastReadFailure="direct seek";return false;}
+ if(std::fread(destination,1,bytes,a.file)!=bytes){lastReadFailure="direct short read";return false;}
+ return true;
 }
 // An LZ4 block (tools/pakpack.c) into exactly size bytes; false if malformed.
 bool unlz4(const unsigned char* in,size_t n,unsigned char* out,size_t size){
@@ -306,10 +310,17 @@ bool readEntry(Archives& all,Archive& a,const Entry& e,void* destination){
   if(raw){std::memcpy(out,k->data.get(),e.size);return true;}
   return unlz4(k->data.get(),e.stored,out,e.size);
  }
- if(raw){if(!readAt(all,a,e.offset,out,e.size))return false;keep(all,a,e,out);return true;}
+ if(raw){if(!readAt(all,a,e.offset,out,e.size)){lastReadFailure="raw read";return false;}keep(all,a,e,out);return true;}
  std::unique_ptr<unsigned char[]> packed(new(std::nothrow) unsigned char[e.stored?e.stored:1]);
- if(!packed||!readAt(all,a,e.offset,packed.get(),e.stored)||!unlz4(packed.get(),e.stored,out,e.size))return false;
- keep(all,a,e,packed.get());return true;
+ // A fragmented heap (Old 3DS, after a race is released) can have the bytes
+ // free but no block this size: then the compressed copy borrows LINEAR.
+ struct LinearScratch{void* p=nullptr;~LinearScratch(){if(p)linearFree(p);}} borrowed;
+ unsigned char* in=packed.get();
+ if(!in)in=static_cast<unsigned char*>(borrowed.p=linearAlloc(e.stored?e.stored:1));
+ if(!in){lastReadFailure="lz4 buffer allocation";return false;}
+ if(!readAt(all,a,e.offset,in,e.stored)){lastReadFailure="lz4 read";return false;}
+ if(!unlz4(in,e.stored,out,e.size)){lastReadFailure="lz4 decode";return false;}
+ keep(all,a,e,in);return true;
 }
 }
 namespace {
@@ -410,9 +421,54 @@ bool readInto(const char* path,void* destination,size_t bytes){
  auto& all=archives();LightLock_Lock(&all.lock);
  const Entry* e=nullptr;Archive* a=lookup(all,path,&e);
  const auto start=svcGetSystemTick();
+ if(!a)lastReadFailure="not in a pack";else if(e->size!=bytes)lastReadFailure="size mismatch";
  const bool ok=a&&e->size==bytes&&readEntry(all,*a,*e,destination);
  if(a){packReads.fetch_add(1,std::memory_order_relaxed);packReadBytes.fetch_add(bytes,std::memory_order_relaxed);packReadTicks.fetch_add(svcGetSystemTick()-start,std::memory_order_relaxed);}
  LightLock_Unlock(&all.lock);return ok;
+}
+long storedSize(const char* path){auto& all=archives();LightLock_Lock(&all.lock);const Entry* e=nullptr;const long result=lookup(all,path,&e)?long(e->stored):-1;LightLock_Unlock(&all.lock);return result;}
+bool readStored(const char* path,void* destination,size_t bytes){
+ auto& all=archives();LightLock_Lock(&all.lock);
+ const Entry* e=nullptr;Archive* a=lookup(all,path,&e);
+ const bool ok=a&&e->stored==bytes&&readAt(all,*a,e->offset,destination,bytes);
+ LightLock_Unlock(&all.lock);return ok;
+}
+bool decodeLz4Frames(const unsigned char* in,size_t n,size_t size,unsigned char* header,size_t head,
+                     size_t frameBytes,unsigned stride,unsigned count,unsigned char* out){
+ if(!frameBytes||!stride)return false;
+ // LZ4 matches reach back at most 65535 bytes: a 64 KiB ring holds every
+ // byte a match can copy, so the whole output never has to exist.
+ std::unique_ptr<unsigned char[]> ring(new(std::nothrow) unsigned char[65536]);if(!ring)return false;
+ size_t pos=0,frameOffset=0;unsigned frame=0;unsigned char* dst=count?out:nullptr;
+ auto put=[&](unsigned char b){
+  ring[pos&0xffff]=b;
+  if(pos<head)header[pos]=b;
+  else{
+   if(dst)*dst++=b;
+   if(++frameOffset==frameBytes){
+    frameOffset=0;++frame;
+    dst=frame%stride==0&&frame/stride<count?out+size_t(frame/stride)*frameBytes:nullptr;
+   }
+  }
+  ++pos;
+ };
+ const unsigned char* const end=in+n;
+ while(in<end){
+  const unsigned token=*in++;size_t literals=token>>4;
+  if(literals==15){unsigned b;do{if(in==end)return false;b=*in++;literals+=b;}while(b==255);}
+  if(literals>size_t(end-in)||literals>size-pos)return false;
+  for(size_t i=0;i<literals;++i)put(in[i]);
+  in+=literals;
+  if(in==end)break;
+  if(end-in<2)return false;
+  const size_t distance=in[0]|in[1]<<8;in+=2;
+  size_t length=token&15;
+  if(length==15){unsigned b;do{if(in==end)return false;b=*in++;length+=b;}while(b==255);}
+  length+=4;
+  if(!distance||distance>pos||length>size-pos)return false;
+  for(size_t i=0;i<length;++i)put(ring[(pos-distance)&0xffff]);
+ }
+ return pos==size;
 }
 bool readRange(const char* path,size_t offset,void* destination,size_t bytes){
  auto& all=archives();LightLock_Lock(&all.lock);

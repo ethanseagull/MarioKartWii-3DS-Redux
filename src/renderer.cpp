@@ -669,7 +669,7 @@ bool Renderer::reserveBloom(){
     drain();
     return initBloomTargets();
 }
-bool Renderer::loadVramTexture(Texture& texture,const char* path,GPU_TEXTURE_WRAP_PARAM wrap){
+bool Renderer::loadVramTexture(Texture& texture,const char* path,GPU_TEXTURE_WRAP_PARAM wrap,bool rgba4){
     texture.reset();
     if(!ready_||!text_)return false;
     // The GPU and the render thread are idle: nothing reads the staging region.
@@ -696,16 +696,26 @@ bool Renderer::loadVramTexture(Texture& texture,const char* path,GPU_TEXTURE_WRA
     ok=ok&&!(header[2]&0x40)&&header[4]==0&&width<=1024&&height<=1024&&
         (format==GPU_ETC1||format==GPU_RGBA8||format==GPU_RGBA4)&&
         bytes==C3D_TexCalcTotalSize(baseBytes,0);
+    // Same texel order in both formats (8x8 Morton tiles): RGBA8 [A,B,G,R] bytes
+    // become RGBA4 u16 R<<12|G<<8|B<<4|A, chunk by chunk, at half the offset.
+    const bool narrow=rgba4&&format==GPU_RGBA8;
     // VRAM only: a failure leaves the texture empty and never falls back to LINEAR.
-    ok=ok&&C3D_TexInitVRAM(&texture.gpu,uint16_t(width),uint16_t(height),GPU_TEXCOLOR(format));
+    ok=ok&&C3D_TexInitVRAM(&texture.gpu,uint16_t(width),uint16_t(height),narrow?GPU_RGBA4:GPU_TEXCOLOR(format));
     if(!ok){texture.gpu={};if(f)std::fclose(f);return false;}
     uint8_t* staging=reinterpret_cast<uint8_t*>(text_);
     for(std::size_t done=0;ok&&done<bytes;){
         const std::size_t chunk=std::min(kStagingBytes,bytes-done);
         ok=read(staging,chunk);
+        if(ok&&narrow){
+            auto four=[](unsigned v){return (v*15u+127u)/255u;};
+            auto* out=reinterpret_cast<uint16_t*>(staging);
+            for(std::size_t i=0;i<chunk/4;++i){const uint8_t* t=staging+4*i;
+                out[i]=uint16_t(four(t[3])<<12|four(t[2])<<8|four(t[1])<<4|four(t[0]));}
+        }
         if(ok){
-            GSPGPU_FlushDataCache(staging,u32(chunk));
-            C3D_SyncTextureCopy(reinterpret_cast<u32*>(staging),0,reinterpret_cast<u32*>(static_cast<uint8_t*>(texture.gpu.data)+done),0,u32(chunk),8);
+            const std::size_t stored=narrow?chunk/2:chunk,at=narrow?done/2:done;
+            GSPGPU_FlushDataCache(staging,u32(stored));
+            C3D_SyncTextureCopy(reinterpret_cast<u32*>(staging),0,reinterpret_cast<u32*>(static_cast<uint8_t*>(texture.gpu.data)+at),0,u32(stored),8);
         }
         done+=chunk;
     }

@@ -80,10 +80,26 @@ traced order). `no-race-cache.txt` turns off the New 3DS RAM cache that keeps
 the racers, items, effects, Lakitu and pause menu textures read by one race
 load for the next.
 `no-pause-keep.txt` releases the racers' graphics on every pause, as before.
+`no-bank-keep.txt` makes a race load read every animation bank again instead of
+reusing the banks the last race had loaded (`runtime.log`: `animation banks reused N, unused M`).
 `no-prefetch.txt` turns off the background thread that reads the next 128 KB
 of a repacked pack's traced entries while the game parses the last read.
 `pack-trace.txt` writes every pack read to `pack-trace.csv` (archive, offset,
 size, ms, read-ahead hit, matches a direct read) for `tools/pak_order.py`.
+
+Old 3DS only:
+`o3ds-core1.txt` puts the render thread and the job worker back on core 1
+(with an 80% CPU time limit), as before; by default every race frame is
+recorded and drawn on core 0 and core 1 keeps only audio (`runtime.log`:
+`Old 3DS: race frames and presentation jobs on core 0`).
+`bottom-every-frame.txt` redraws the race's lower screen on every frame; by
+default Old 3DS redraws it on every second frame (15 Hz).
+`bottom-rgba8.txt` keeps the lower screen's UI atlas in RGBA8; by default Old 3DS
+stores it as RGBA4 (256 KB less VRAM, so more course textures leave LINEAR).
+`full-quality.txt` turns off every Old 3DS detail reduction.
+On Old 3DS the pause menu is not preloaded when that would leave under 3 MiB of
+LINEAR (`runtime.log`: `Old 3DS: pause menu not preloaded (LINEAR)`). A failed
+`new` writes `FAIL out of heap: ...` to `runtime.log` before the game aborts.
 
 ## Repacked packs
 

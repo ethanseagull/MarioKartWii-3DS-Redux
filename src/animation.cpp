@@ -6,15 +6,18 @@
 #include <mkw/asset_pack.hpp>
 #include "mkw/pose_blend.hpp"
 #include <3ds.h>
+#include <malloc.h>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
 #include <algorithm>
 #include <cmath>
 namespace mkw {
+// Why the last DriverAnimation::load failed (opponent-load-error.txt).
+const char* driverBankFailure="";
 // Animation banks are CPU-only. Prefer LINEAR while it has spare capacity,
 // but reserve room for GPU resources and allow banks to use the ordinary heap.
-void DriverAnimation::reset(){resetLook();bodyLook_={};lookCount_=0;lookYaw_=lookPitch_=0;beforeLookPalette_.clear();hasBraids_=braidsRacing_=false;braids_.reset();braidWorld_={1,0,0,0,0,1,0,0,0,0,1,0,1,0,0,0,1,0,0,0,1};effectRootSlot_=-2;effectRootReady_=false;effectRootTracks_={};effectRoot_=previousEffectRoot_={};if(data_){if(dataLinear_)linearFree(data_);else std::free(data_);}data_=nullptr;dataLinear_=true;ready=false;rigidParts_.clear();count_=faceCount_=hairNodeCount_=hairClipCount_=uvClipCount_=0;baseUV_.clear();lastClip_=-1;hasPreviousPose_=false;cachedVertices_=nullptr;cachedSettled_=false;poseBoundsValid_=false;usedMatrices_.fill(false);neutralUv_=nullptr;uvBuffer_=nullptr;uvNeutral_=true;shared_={};handleDrive_=dash_=shake_=-1;gpu_=false;shapeHidden_.fill(false);}
+void DriverAnimation::reset(){resetLook();bodyLook_={};lookCount_=0;lookYaw_=lookPitch_=0;beforeLookPalette_.clear();hasBraids_=braidsRacing_=false;braids_.reset();braidWorld_={1,0,0,0,0,1,0,0,0,0,1,0,1,0,0,0,1,0,0,0,1};effectRootSlot_=-2;effectRootReady_=false;effectRootTracks_={};effectRoot_=previousEffectRoot_={};releaseData();dataLinear_=true;ready=false;rigidParts_.clear();count_=faceCount_=hairNodeCount_=hairClipCount_=uvClipCount_=0;baseUV_.clear();lastClip_=-1;hasPreviousPose_=false;cachedVertices_=nullptr;cachedSettled_=false;poseBoundsValid_=false;usedMatrices_.fill(false);neutralUv_=nullptr;uvBuffer_=nullptr;uvNeutral_=true;shared_={};handleDrive_=dash_=shake_=-1;gpu_=false;shapeHidden_.fill(false);}
 bool DriverAnimation::gpuSkin(Model& model){
     if(!ready||gpu_||matrices_>Renderer::MaxSkinBones||vertices_!=model.vertexCount)return false;
     if(skinNormals_){
@@ -68,28 +71,96 @@ bool DriverAnimation::prepareLitSkinning(Model& model){
 }
 int DriverAnimation::find(const char* name)const{if(name)for(unsigned i=0;i<count_;++i)if(!std::strcmp(name,clips_[i].name))return i;return -1;}
 int DriverAnimation::face(const char* name)const{if(name)for(unsigned i=0;i<faceCount_;++i)if(!std::strcmp(name,faces_[i].name))return i;return -1;}
+namespace {
+struct KeptBank {std::string path;uint8_t* data;size_t size;bool linear;};
+struct KeptBanks {
+    LightLock lock;bool on=false;unsigned reused=0;std::vector<KeptBank> banks;
+    KeptBanks(){LightLock_Init(&lock);}
+};
+KeptBanks& kept(){static KeptBanks k;return k;}
+void freeBank(uint8_t* data,bool linear){if(linear)linearFree(data);else std::free(data);}
+}
+void DriverAnimation::releaseData(){
+    if(!data_)return;
+    auto& k=kept();LightLock_Lock(&k.lock);
+    const bool keep=k.on&&!path_.empty();
+    if(keep)k.banks.push_back({path_,data_,size_,dataLinear_});
+    LightLock_Unlock(&k.lock);
+    if(!keep)freeBank(data_,dataLinear_);
+    data_=nullptr;path_.clear();size_=0;
+}
+bool DriverAnimation::takeKept(const char* path,size_t& size){
+    auto& k=kept();LightLock_Lock(&k.lock);
+    bool found=false;
+    for(auto it=k.banks.begin();it!=k.banks.end();++it)if(it->path==path){
+        data_=it->data;dataLinear_=it->linear;size=it->size;k.banks.erase(it);++k.reused;found=true;break;
+    }
+    LightLock_Unlock(&k.lock);
+    return found;
+}
+void DriverAnimation::keepReleased(bool on){auto& k=kept();LightLock_Lock(&k.lock);k.on=on;LightLock_Unlock(&k.lock);}
+void DriverAnimation::dropKept(){
+    auto& k=kept();std::vector<KeptBank> drop;
+    LightLock_Lock(&k.lock);drop.swap(k.banks);k.reused=0;LightLock_Unlock(&k.lock);
+    for(auto& b:drop)freeBank(b.data,b.linear);
+}
+void DriverAnimation::keepOnly(const std::vector<std::string>& paths){
+    auto& k=kept();std::vector<KeptBank> drop;
+    LightLock_Lock(&k.lock);
+    // Each listed path keeps at most as many banks as it is listed.
+    std::vector<std::string> wanted=paths;
+    for(auto it=k.banks.begin();it!=k.banks.end();){
+        auto w=std::find(wanted.begin(),wanted.end(),it->path);
+        if(w!=wanted.end()){wanted.erase(w);++it;}else{drop.push_back(*it);it=k.banks.erase(it);}
+    }
+    LightLock_Unlock(&k.lock);
+    for(auto& b:drop)freeBank(b.data,b.linear);
+}
+unsigned DriverAnimation::keptCount(){auto& k=kept();LightLock_Lock(&k.lock);const unsigned n=unsigned(k.banks.size());LightLock_Unlock(&k.lock);return n;}
+unsigned DriverAnimation::reusedCount(){return kept().reused;}
 bool DriverAnimation::load(const char* path,const Model& model){
     reset();
     // These banks are read by the CPU, never directly by PICA or DSP. Leave
-    // LINEAR room for meshes/textures and the race sound cache.
-    // Prefer ordinary heap even when early loading has spare LINEAR.
+    // LINEAR room for meshes/textures and the race sound cache: prefer the
+    // ordinary heap, but only while it keeps a reserve. On Old 3DS eleven
+    // racers' banks (about 1 MiB each) filled the heap and the next small
+    // allocation failed mid-load (MiniBandit 4006b3f); then a bank goes to LINEAR.
+    constexpr size_t HeapReserve=4u<<20;
+    auto heapFree=[]{const struct mallinfo m=mallinfo();const size_t total=envGetHeapSize();
+        return (total>size_t(m.arena)?total-size_t(m.arena):0)+size_t(m.fordblks);};
+    // Old 3DS: LINEAR first while it keeps 10 MiB free for meshes, textures,
+    // sound and the pause menu. Kept banks (keepReleased) then stay where they
+    // are race after race, so the split between the two pools stays put.
+    static const bool new3ds=[]{bool n=false;APT_CheckNew3DS(&n);return n;}();
+    constexpr size_t LinearReserve=10u<<20;
     auto allocateBank=[&](size_t bytes){
-        data_=static_cast<uint8_t*>(std::malloc(bytes));
-        if(data_){dataLinear_=false;return true;}
-        data_=static_cast<uint8_t*>(linearAlloc(bytes));dataLinear_=true;
+        if(!new3ds&&linearSpaceFree()>=bytes+LinearReserve){
+            data_=static_cast<uint8_t*>(linearAlloc(bytes));
+            if(data_){dataLinear_=true;return true;}
+        }
+        if(heapFree()>=bytes+HeapReserve){
+            data_=static_cast<uint8_t*>(std::malloc(bytes));
+            if(data_){dataLinear_=false;return true;}
+        }
+        data_=static_cast<uint8_t*>(linearAlloc(bytes));
+        if(data_){dataLinear_=true;return true;}
+        data_=static_cast<uint8_t*>(std::malloc(bytes));dataLinear_=false;
         return data_!=nullptr;
     };
     // Menu banks come from the open menu.pak; other banks are loose files.
     bool ok=false;size_t size=0;
-    if(const long packed=pack::size(path);packed>=0){
-        size=size_t(packed);if(size<28||size>12*1024*1024)return false;
-        if(!allocateBank(size))return false;
+    // A bank kept from the race this load replaced (keepReleased): the same bytes,
+    // already expanded if they came from a .dsku.
+    if(takeKept(path,size))ok=true;
+    else if(const long packed=pack::size(path);packed>=0){
+        size=size_t(packed);if(size<28||size>12*1024*1024){driverBankFailure="bank size";return false;}
+        if(!allocateBank(size)){driverBankFailure="bank allocation";return false;}
         ok=pack::readInto(path,data_,size);
     }else{
-        FILE* f=std::fopen(path,"rb");if(!f)return false;std::fseek(f,0,SEEK_END);long length=std::ftell(f);std::rewind(f);
-        if(length<0){std::fclose(f);return false;}size=size_t(length);
-        if(size<28||size>12*1024*1024){std::fclose(f);return false;}
-        if(!allocateBank(size)){std::fclose(f);return false;}
+        FILE* f=std::fopen(path,"rb");if(!f){driverBankFailure="bank open";return false;}std::fseek(f,0,SEEK_END);long length=std::ftell(f);std::rewind(f);
+        if(length<0){std::fclose(f);{driverBankFailure="bank length";return false;}}size=size_t(length);
+        if(size<28||size>12*1024*1024){std::fclose(f);{driverBankFailure="bank size";return false;}}
+        if(!allocateBank(size)){std::fclose(f);{driverBankFailure="bank allocation";return false;}}
         ok=std::fread(data_,1,size,f)==size;std::fclose(f);
     }
     auto u32=[](const uint8_t* p){uint32_t v;std::memcpy(&v,p,4);return v;};
@@ -112,7 +183,7 @@ bool DriverAnimation::load(const char* path,const Model& model){
             if(at>compactSize)valid=false;
         }
         const size_t full=valid?compactSize-size_t(matrixCount)*36+extra:0;
-        if(!valid||full>12*1024*1024||!allocateBank(full)){release();data_=nullptr;reset();return false;}
+        if(!valid||full>12*1024*1024||!allocateBank(full)){release();data_=nullptr;reset();{driverBankFailure="compact bank";return false;}}
         uint8_t* out=data_;const uint8_t* in=compact+head;const uint8_t* normals=in;in+=size_t(matrixCount)*36;
         std::memcpy(out,"DSKM",4);std::memcpy(out+4,compact+4,head-4);out+=head;
         for(unsigned c=0;c<clipCount;++c){
@@ -125,117 +196,118 @@ bool DriverAnimation::load(const char* path,const Model& model){
         std::memcpy(out,in,size_t(compact+compactSize-in));
         size=full;release();
     }
-    if(!ok||std::memcmp(data_,"DSKM",4)||u32(data_+4)<2||u32(data_+4)>8){reset();return false;}
+    if(!ok||std::memcmp(data_,"DSKM",4)||u32(data_+4)<2||u32(data_+4)>8){driverBankFailure=!ok?"bank read":"bank header";reset();return false;}
     vertices_=u32(data_+8);matrices_=u32(data_+12);count_=u32(data_+16);shapes_=u32(data_+20);faceCount_=u32(data_+24);
-    if(vertices_!=model.vertexCount||!matrices_||matrices_>128||!count_||count_>64||shapes_>64||faceCount_>64||model.submeshes.size()>64){reset();return false;}
+    if(vertices_!=model.vertexCount||!matrices_||matrices_>128||!count_||count_>64||shapes_>64||faceCount_>64||model.submeshes.size()>64){reset();{driverBankFailure="bank format";return false;}}
     size_t cursor=28;
     if(u32(data_+4)>=5){
-        if(size<32){reset();return false;}
+        if(size<32){reset();{driverBankFailure="bank format";return false;}}
         effectRootSlot_=int32_t(u32(data_+28));cursor=32;
-        if(effectRootSlot_<-1||(effectRootSlot_>=0&&unsigned(effectRootSlot_)>=matrices_)){reset();return false;}
+        if(effectRootSlot_<-1||(effectRootSlot_>=0&&unsigned(effectRootSlot_)>=matrices_)){reset();{driverBankFailure="bank format";return false;}}
     }
     source_=reinterpret_cast<const SourceVertex*>(data_+cursor);cursor+=vertices_*sizeof(SourceVertex);
     ranges_=reinterpret_cast<const Range*>(data_+cursor);cursor+=shapes_*sizeof(Range);
-    if(cursor>size){reset();return false;}
-    for(unsigned i=0;i<vertices_;++i)if(source_[i].matrix>=matrices_){reset();return false;}
+    if(cursor>size){reset();{driverBankFailure="bank format";return false;}}
+    for(unsigned i=0;i<vertices_;++i)if(source_[i].matrix>=matrices_){reset();{driverBankFailure="bank format";return false;}}
     for(unsigned i=0;i<vertices_;++i){
         const auto& v=source_[i];Vec3 p{v.p[0],v.p[1],v.p[2]};
         if(!usedMatrices_[v.matrix]){sourceBounds_[v.matrix]={p,p};usedMatrices_[v.matrix]=true;}
         else sourceBounds_[v.matrix].include(p);
     }
-    for(unsigned i=0;i<shapes_;++i)if(ranges_[i].first>vertices_||ranges_[i].count>vertices_-ranges_[i].first){reset();return false;}
+    for(unsigned i=0;i<shapes_;++i)if(ranges_[i].first>vertices_||ranges_[i].count>vertices_-ranges_[i].first){reset();{driverBankFailure="bank format";return false;}}
     for(unsigned bank=0;bank<2;++bank)for(unsigned i=0;i<(bank?faceCount_:count_);++i){
-        if(cursor+44>size){reset();return false;}auto& c=(bank?faces_:clips_)[i];std::memcpy(c.name,data_+cursor,32);c.name[31]=0;
+        if(cursor+44>size){reset();{driverBankFailure="bank format";return false;}}auto& c=(bank?faces_:clips_)[i];std::memcpy(c.name,data_+cursor,32);c.name[31]=0;
         c.duration=u32(data_+cursor+32);c.loop=u32(data_+cursor+36);c.count=u32(data_+cursor+40);cursor+=44;c.data=data_+cursor;
-        if(!c.count||c.count>2000||c.duration!=c.count){reset();return false;}
-        cursor+=size_t(c.count)*(bank?shapes_*4:matrices_*84+shapes_*4);if(cursor>size){reset();return false;}
+        if(!c.count||c.count>2000||c.duration!=c.count){reset();{driverBankFailure="bank format";return false;}}
+        cursor+=size_t(c.count)*(bank?shapes_*4:matrices_*84+shapes_*4);if(cursor>size){reset();{driverBankFailure="bank format";return false;}}
     }
     if(u32(data_+4)>=3){
-        if(cursor+12>size||std::memcmp(data_+cursor,"HLOC",4)){reset();return false;}
+        if(cursor+12>size||std::memcmp(data_+cursor,"HLOC",4)){reset();{driverBankFailure="bank format";return false;}}
         hairNodeCount_=u32(data_+cursor+4);hairClipCount_=u32(data_+cursor+8);cursor+=12;
-        if((!hairNodeCount_!=!hairClipCount_)||hairNodeCount_>hairNodes_.size()||hairClipCount_>hairClips_.size()||cursor+hairNodeCount_*8>size){reset();return false;}
+        if((!hairNodeCount_!=!hairClipCount_)||hairNodeCount_>hairNodes_.size()||hairClipCount_>hairClips_.size()||cursor+hairNodeCount_*8>size){reset();{driverBankFailure="bank format";return false;}}
         for(unsigned i=0;i<hairNodeCount_;++i){
             auto& n=hairNodes_[i];n.matrix=u32(data_+cursor);n.parent=u32(data_+cursor+4);cursor+=8;
-            if(n.matrix>=matrices_||n.parent>=matrices_||n.matrix==n.parent){reset();return false;}
-            for(unsigned j=0;j<i;++j)if(hairNodes_[j].matrix==n.matrix||hairNodes_[j].parent==n.matrix){reset();return false;}
+            if(n.matrix>=matrices_||n.parent>=matrices_||n.matrix==n.parent){reset();{driverBankFailure="bank format";return false;}}
+            for(unsigned j=0;j<i;++j)if(hairNodes_[j].matrix==n.matrix||hairNodes_[j].parent==n.matrix){reset();{driverBankFailure="bank format";return false;}}
         }
         for(unsigned i=0;i<hairClipCount_;++i){
-            if(cursor+44>size){reset();return false;}auto& h=hairClips_[i];auto& c=h.clip;
+            if(cursor+44>size){reset();{driverBankFailure="bank format";return false;}}auto& h=hairClips_[i];auto& c=h.clip;
             std::memcpy(c.name,data_+cursor,32);c.name[31]=0;c.duration=u32(data_+cursor+32);c.loop=u32(data_+cursor+36);c.count=u32(data_+cursor+40);cursor+=44;
-            if(!c.count||c.count>2000||c.duration!=c.count){reset();return false;}
+            if(!c.count||c.count>2000||c.duration!=c.count){reset();{driverBankFailure="bank format";return false;}}
             h.inverseRest=reinterpret_cast<const float*>(data_+cursor);cursor+=hairNodeCount_*84;
-            c.data=data_+cursor;cursor+=size_t(c.count)*hairNodeCount_*84;if(cursor>size){reset();return false;}
+            c.data=data_+cursor;cursor+=size_t(c.count)*hairNodeCount_*84;if(cursor>size){reset();{driverBankFailure="bank format";return false;}}
         }
     }
     if(u32(data_+4)>=4){
-        if(cursor+8>size||std::memcmp(data_+cursor,"UVAN",4)){reset();return false;}
+        if(cursor+8>size||std::memcmp(data_+cursor,"UVAN",4)){reset();{driverBankFailure="bank format";return false;}}
         uvClipCount_=u32(data_+cursor+4);cursor+=8;
-        if(uvClipCount_>uvClips_.size()){reset();return false;}
+        if(uvClipCount_>uvClips_.size()){reset();{driverBankFailure="bank format";return false;}}
         for(unsigned i=0;i<uvClipCount_;++i){
-            if(cursor+44>size){reset();return false;}auto& c=uvClips_[i];
+            if(cursor+44>size){reset();{driverBankFailure="bank format";return false;}}auto& c=uvClips_[i];
             std::memcpy(c.name,data_+cursor,32);c.name[31]=0;
             c.duration=u32(data_+cursor+32);c.loop=u32(data_+cursor+36);c.count=u32(data_+cursor+40);cursor+=44;c.data=data_+cursor;
-            if(!c.count||c.count>2000||c.duration!=c.count){reset();return false;}
-            cursor+=size_t(c.count)*shapes_*24;if(cursor>size){reset();return false;}
+            if(!c.count||c.count>2000||c.duration!=c.count){reset();{driverBankFailure="bank format";return false;}}
+            cursor+=size_t(c.count)*shapes_*24;if(cursor>size){reset();{driverBankFailure="bank format";return false;}}
         }
         baseUV_.resize(vertices_);
         for(unsigned i=0;i<vertices_;++i)baseUV_[i]={model.vertices[i].uv[0],model.vertices[i].uv[1]};
     }
     if(u32(data_+4)>=5&&effectRootSlot_==-1){
-        if(cursor+8>size||std::memcmp(data_+cursor,"ROOT",4)||u32(data_+cursor+4)!=count_){reset();return false;}
+        if(cursor+8>size||std::memcmp(data_+cursor,"ROOT",4)||u32(data_+cursor+4)!=count_){reset();{driverBankFailure="bank format";return false;}}
         cursor+=8;
         for(unsigned i=0;i<count_;++i){
             const size_t bytes=size_t(clips_[i].count)*12;
-            if(cursor>size||bytes>size-cursor){reset();return false;}
+            if(cursor>size||bytes>size-cursor){reset();{driverBankFailure="bank format";return false;}}
             effectRootTracks_[i]=reinterpret_cast<const float*>(data_+cursor);
-            for(unsigned j=0;j<clips_[i].count*3;++j)if(!std::isfinite(effectRootTracks_[i][j])){reset();return false;}
+            for(unsigned j=0;j<clips_[i].count*3;++j)if(!std::isfinite(effectRootTracks_[i][j])){reset();{driverBankFailure="bank format";return false;}}
             cursor+=bytes;
         }
     }
     if(u32(data_+4)==6||(u32(data_+4)>=7&&cursor+4<=size&&!std::memcmp(data_+cursor,"BRAD",4))){
-        if(cursor+32>size||std::memcmp(data_+cursor,"BRAD",4)){reset();return false;}
+        if(cursor+32>size||std::memcmp(data_+cursor,"BRAD",4)){reset();{driverBankFailure="bank format";return false;}}
         braidHead_=u32(data_+cursor+4);
-        if(braidHead_>=matrices_){reset();return false;}
+        if(braidHead_>=matrices_){reset();{driverBankFailure="bank format";return false;}}
         for(unsigned i=0;i<6;++i){
             braidSlots_[i]=u32(data_+cursor+8+i*4);
-            if(braidSlots_[i]>=matrices_||braidSlots_[i]==braidHead_){reset();return false;}
-            for(unsigned j=0;j<i;++j)if(braidSlots_[j]==braidSlots_[i]){reset();return false;}
+            if(braidSlots_[i]>=matrices_||braidSlots_[i]==braidHead_){reset();{driverBankFailure="bank format";return false;}}
+            for(unsigned j=0;j<i;++j)if(braidSlots_[j]==braidSlots_[i]){reset();{driverBankFailure="bank format";return false;}}
         }
         cursor+=32;hasBraids_=true;
     }
     if(u32(data_+4)>=7){
-        if(cursor+12>size||std::memcmp(data_+cursor,"LOOK",4)){reset();return false;}
+        if(cursor+12>size||std::memcmp(data_+cursor,"LOOK",4)){reset();{driverBankFailure="bank format";return false;}}
         lookHead_=u32(data_+cursor+4);lookCount_=u32(data_+cursor+8);cursor+=12;
-        if(lookHead_>=matrices_||!lookCount_||lookCount_>matrices_||cursor+lookCount_*4>size){reset();return false;}
+        if(lookHead_>=matrices_||!lookCount_||lookCount_>matrices_||cursor+lookCount_*4>size){reset();{driverBankFailure="bank format";return false;}}
         bool hasHead=false;
         for(unsigned i=0;i<lookCount_;++i){
             const unsigned slot=u32(data_+cursor);cursor+=4;
-            if(slot>=matrices_){reset();return false;}
-            for(unsigned j=0;j<i;++j)if(lookSlots_[j]==slot){reset();return false;}
+            if(slot>=matrices_){reset();{driverBankFailure="bank format";return false;}}
+            for(unsigned j=0;j<i;++j)if(lookSlots_[j]==slot){reset();{driverBankFailure="bank format";return false;}}
             lookSlots_[i]=slot;hasHead|=slot==lookHead_;
         }
-        if(!hasHead){reset();return false;}
+        if(!hasHead){reset();{driverBankFailure="bank format";return false;}}
         beforeLookPalette_.resize(matrices_*21);
     }
     if(u32(data_+4)>=8){
-        if(cursor+4>size||std::memcmp(data_+cursor,"BODY",4)){reset();return false;}cursor+=4;
+        if(cursor+4>size||std::memcmp(data_+cursor,"BODY",4)){reset();{driverBankFailure="bank format";return false;}}cursor+=4;
         for(auto& body:bodyLook_){
-            if(cursor+8>size){reset();return false;}
+            if(cursor+8>size){reset();{driverBankFailure="bank format";return false;}}
             body.joint=u32(data_+cursor);body.count=u32(data_+cursor+4);cursor+=8;
-            if(body.joint>=matrices_||!body.count||body.count>matrices_||cursor+body.count*4>size){reset();return false;}
+            if(body.joint>=matrices_||!body.count||body.count>matrices_||cursor+body.count*4>size){reset();{driverBankFailure="bank format";return false;}}
             bool hasJoint=false;
             for(unsigned i=0;i<body.count;++i){
                 const unsigned slot=u32(data_+cursor);cursor+=4;
-                if(slot>=matrices_){reset();return false;}
-                for(unsigned j=0;j<i;++j)if(body.slots[j]==slot){reset();return false;}
+                if(slot>=matrices_){reset();{driverBankFailure="bank format";return false;}}
+                for(unsigned j=0;j<i;++j)if(body.slots[j]==slot){reset();{driverBankFailure="bank format";return false;}}
                 body.slots[i]=slot;hasJoint|=slot==body.joint;
             }
-            if(!hasJoint){reset();return false;}
+            if(!hasJoint){reset();{driverBankFailure="bank format";return false;}}
         }
     }
-    if(cursor!=size){reset();return false;}
+    if(cursor!=size){reset();{driverBankFailure="bank format";return false;}}
     for(unsigned i=0;i<model.submeshes.size();++i)baseTextures_[i]=model.submeshes[i].texture;
     handleDrive_=find("handle_drive");dash_=find("dash");shake_=find("shake");
+    path_=path;size_=size;
     return ready=true;
 }
 namespace {

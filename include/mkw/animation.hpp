@@ -1,6 +1,8 @@
 #pragma once
 #include "mkw/renderer.hpp"
 #include <array>
+#include <string>
+#include <vector>
 #include <mkw/visibility.hpp>
 #include <mkw/skin_positions.hpp>
 #include <mkw/toadette_braids.hpp>
@@ -11,11 +13,22 @@
 namespace mkw {
 // Cooked original driver animation: local vertices, matrix palettes, visibility
 // and facial texture tracks. Only the selected character is resident.
+extern const char* driverBankFailure;
 class DriverAnimation {
 public:
     ~DriverAnimation(){reset();}
     bool load(const char* path,const Model& model);
     void reset();
+    // Race loads: while keepReleased(true) (a race's graphics being released
+    // for the next race), a released bank keeps its bytes by path and the next
+    // load of that path reuses them (no read, no decode). A Grand Prix reloads
+    // the same racers every race: this saves their reads and the heap churn
+    // that fragmented the Old 3DS heap. keepOnly frees the kept banks a lineup
+    // doesn't use; dropKept frees the rest (end of the load).
+    static void keepReleased(bool on);
+    static void dropKept();
+    static void keepOnly(const std::vector<std::string>& paths);
+    static unsigned keptCount(),reusedCount();
     // Menu PlayAnmNoBlend replaces the active palette without a gameplay blend.
     void clearPoseTransition(){lastClip_=-1;hasPreviousPose_=false;cachedSettled_=false;}
     void setLookAngles(float yaw,float pitch){
@@ -87,6 +100,9 @@ public:
     // Local player must never hold a pose for adaptive presentation budgeting.
     bool fullRate=false;
 private:
+    void releaseData();
+    bool takeKept(const char* path,size_t& size);
+    std::string path_;size_t size_=0;
     struct Clip { char name[32];unsigned duration,loop,count;const uint8_t* data; };
     struct SourceVertex {float p[3],n[3];uint32_t matrix;};
     struct Range {uint32_t first,count;};

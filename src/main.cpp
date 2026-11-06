@@ -121,6 +121,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <malloc.h>
+#include <new>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <algorithm>
@@ -130,13 +131,15 @@
 #include <functional>
 #include <memory>
 
-// Heap split sized for the smallest launch mode, Old 3DS (64 MB application
-// region): LINEAR 32 MiB leaves about 29 MiB of ordinary heap there. Kinoko's
-// 16 MiB arena lives in that heap, so the racers' animation banks (about
-// 11 MiB) are stored in LINEAR (animation.cpp); a race then peaks near 21 MiB
-// of heap and 25 MiB of LINEAR. Menu texture residency adapts to the free
-// LINEAR space. A New 3DS's larger region goes to the heap. The emulator gives
-// homebrew 96 MB, so it cannot show an Old 3DS shortage.
+// Heap split sized for the smallest launch mode. The CIA asks Old 3DS for its
+// 80 MB mode (RSF SystemMode): LINEAR 32 MiB leaves about 43 MiB of ordinary
+// heap. In the 64 MB mode (what a .3dsx usually gets) it is about 27.5 MiB:
+// too little; the menus no longer finish loading there. Kinoko's arena (16
+// MiB, 14 on Old 3DS) lives in the heap; a twelve-racer race peaks near 39 of
+// the 43 MB, each racer adding 85-220 KB plus its animation bank (animation.cpp
+// moves banks to LINEAR when the heap runs low). Menu texture residency adapts to the free LINEAR
+// space. A New 3DS's larger region goes to the heap. Azahar honours the
+// exheader's mode for a CXI/CIA in Old 3DS mode.
 extern "C" u32 __ctru_linear_heap_size=32u<<20;
 // libctru carves the main thread's stack from the start of that heap (initSystem), 32 KiB
 // by default. main's frame alone is about 26 KiB, so the menu loop's callbacks overran it
@@ -144,6 +147,7 @@ extern "C" u32 __ctru_linear_heap_size=32u<<20;
 extern "C" u32 __stacksize__=128u<<10; // Diagnostic build: QA locals grow main()'s frame by ~9 KB.
 
 namespace K = Kinoko;
+namespace mkw {extern char objectLoadFailure[160];}
 static constexpr const char* DATA = "sdmc:/3ds/mkw-3ds";
 namespace mkw {extern std::atomic<unsigned> fileOpens;extern std::atomic<unsigned long long> fileOpenTicks;}
 // A packed file is found in the pack index without opening it.
@@ -332,6 +336,19 @@ static void report(const char* text) {
 }
 #define LOGF(...) do{char logLine_[256];snprintf(logLine_,sizeof logLine_,__VA_ARGS__);report(logLine_);}while(0)
 #endif
+#ifndef MKW_RELEASE
+// DIAG: a failed operator new (bad_alloc -> abort) leaves no crash dump and,
+// in Azahar, a silent stall. The handler frees a block kept for it (fopen
+// itself needs heap), logs the heap and LINEAR state, then lets new fail.
+static void* outOfHeapReserve=nullptr;
+static void outOfHeap(){
+    std::free(outOfHeapReserve);outOfHeapReserve=nullptr;std::set_new_handler(nullptr);
+    const struct mallinfo m=mallinfo();
+    char text[160];snprintf(text,sizeof text,"FAIL out of heap: used %lu KB, free %lu KB in claimed blocks, unclaimed %lu KB, linear free %lu KB",
+        (unsigned long)m.uordblks/1024,(unsigned long)m.fordblks/1024,(unsigned long)(envGetHeapSize()>size_t(m.arena)?envGetHeapSize()-size_t(m.arena):0)/1024,(unsigned long)linearSpaceFree()/1024);
+    report(text);
+}
+#endif
 // Narrow pause regression trace: the last START/menu transition, timed from
 // START. Held in RAM and written when the race ends; SD writes during the
 // transition would delay the pause menu they measure.
@@ -426,6 +443,9 @@ static void drawCourseLayer(mkw::Renderer& renderer,const mkw::Model& model,
 }
 
 int main() {
+#ifndef MKW_RELEASE
+    outOfHeapReserve=std::malloc(64*1024);std::set_new_handler(outOfHeap);
+#endif
     osSetSpeedupEnable(true); // Supported New 3DS CPU/L2 mode; simulation remains fixed at 60 Hz.
     gfxInitDefault();
     mkw::NotificationLed notificationLed;
@@ -457,12 +477,18 @@ int main() {
     // arithmetic and disable compiler FP contraction; ghost trace is the oracle.
     unsigned fpscr;asm volatile("vmrs %0, fpscr":"=r"(fpscr));
     fpscr=(fpscr&~(3u<<22))|(1u<<24);asm volatile("vmsr fpscr, %0"::"r"(fpscr));
-    void* memory=memalign(32,K::MEMORY_SPACE_SIZE);
+    // Kinoko's arena: 16 MiB, 14 MiB on Old 3DS, whose whole heap is about
+    // 43 MiB. The fullest course at load, Grumble Volcano, leaves 3.8 MB of
+    // the 16 free (12.2 MiB used); the 2 MiB returned keep a Grand Prix's
+    // eleven opponents within the Old 3DS heap (MiniBandit 4006b3f used 13).
+    bool arenaNew3ds=false;APT_CheckNew3DS(&arenaNew3ds);
+    const size_t arenaSize=arenaNew3ds?size_t(K::MEMORY_SPACE_SIZE):size_t(14u<<20);
+    void* memory=memalign(32,arenaSize);
     if(!memory){report("FAIL simulation heap reservation");return startupFailure("Simulation memory allocation failed.");}
-    auto* heap=K::EGG::ExpHeap::create(memory,K::MEMORY_SPACE_SIZE,K::DEFAULT_OPT);
+    auto* heap=K::EGG::ExpHeap::create(memory,arenaSize,K::DEFAULT_OPT);
     if(!heap){report("FAIL simulation heap create");return startupFailure("Simulation heap creation failed.");}
     heap->becomeCurrentHeap();K::EGG::SceneManager::SetRootHeap(heap);
-    char line[256];LOGF("heap_reserved=%lu heap_free=%lu fpscr=%08x",(unsigned long)K::MEMORY_SPACE_SIZE,(unsigned long)heap->getAllocatableSize(),fpscr);
+    char line[256];LOGF("heap_reserved=%lu heap_free=%lu fpscr=%08x",(unsigned long)arenaSize,(unsigned long)heap->getAllocatableSize(),fpscr);
     K::EGG::Vector3f test(3,4,0);
     LOGF("math_length=%.9f bits=%08lx",test.length(),(unsigned long)K::f2u(test.length()));
     if(kQa)setenv("KINOKO_FILESYSTEM_ROOT",assetRoot,1);
@@ -531,11 +557,23 @@ int main() {
     // Persistent renderer state must not consume the ARM11 main stack.
     auto rendererStorage=std::make_unique<mkw::Renderer>();
     auto& renderer=*rendererStorage;
-    // Pipelined race frames (A/B: no-pipeline.txt turns them off).
-    renderer.pipelineFrames=!exists("sdmc:/3ds/mkw-3ds/no-pipeline.txt");
+    // Old 3DS has no core 2: the render thread and job worker would share core 1
+    // with the system (GSP, services) under an 80% time limit, which starves GSP
+    // and made core 1 the bottleneck (SM64DS port; Codiak540's Old 3DS model:
+    // 43 ms frames). There every race frame is recorded and drawn on core 0 and
+    // core 1 keeps only the audio threads (30%). o3ds-core1.txt restores the old layout.
+    bool secondCore=false;APT_CheckNew3DS(&secondCore);
+    if(!secondCore&&exists("sdmc:/3ds/mkw-3ds/o3ds-core1.txt"))secondCore=true;
+    // Pipelined race frames (A/B: no-pipeline.txt turns them off). Only the
+    // render thread uses them: without it their second set of per-frame
+    // buffers would only hold LINEAR.
+    renderer.pipelineFrames=secondCore&&!exists("sdmc:/3ds/mkw-3ds/no-pipeline.txt");
     // Menus record their frames for the render thread, as races do, so the
     // next frame is built while the GPU draws this one (A/B: no-menu-pipeline.txt).
     const bool menuDeferred=!exists("sdmc:/3ds/mkw-3ds/no-menu-pipeline.txt");
+    // A race load reuses the last race's animation banks (DriverAnimation::keepReleased;
+    // A/B: no-bank-keep.txt frees and reads them again).
+    const bool bankKeep=!exists("sdmc:/3ds/mkw-3ds/no-bank-keep.txt");
     const bool ghostTest=kQa&&exists("sdmc:/3ds/mkw-3ds/ghost-test.txt");
     // QA: blue-test.txt "<ticks> [old]" fires a Blue Shell from last place every
     // <ticks> while none is in flight and traces each one's route in runtime.log;
@@ -584,11 +622,13 @@ int main() {
         renderer.setSliderOverride(slider);
         LOGF("stereo capable slider_override=%.2f",slider);
     }else report("stereo unavailable (2D model)");
+    // secondCore: see pipelineFrames above.
+    if(!secondCore)report("Old 3DS: race frames and presentation jobs on core 0");
     // Second-core presentation jobs (racer posing); none run while the race steps.
-    if(!mkw::jobWorker().start())report("job worker unavailable: presentation jobs run on core 0");
+    if(secondCore&&!mkw::jobWorker().start())report("job worker unavailable: presentation jobs run on core 0");
     // Race frames draw on the second core one frame behind their recording
     // (src/render_thread.cpp); menus draw immediately.
-    if(!renderer.startRenderThread())report("render thread unavailable: race frames draw on core 0");
+    if(secondCore&&!renderer.startRenderThread())report("render thread unavailable: race frames draw on core 0");
     mkw::MenuState menu;
     menu.titleRandom=std::uint32_t(svcGetSystemTick())|1u;
     menu.cpuRandom.state=std::uint32_t(svcGetSystemTick());
@@ -1596,6 +1636,11 @@ int main() {
         const auto planStart=svcGetSystemTick();
         mkw::IntroMeshClearance visibleScenery;
         if(Courses[courseChoice].id==K::Course::Dry_Dry_Ruins){
+            // Exact size first: growing by doubling held up to three copies at
+            // once, more than an Old 3DS heap has left at this point.
+            size_t triangles=0;
+            for(const auto& model:track)for(const auto& sub:model->submeshes)if(mkw::playerShadow::receives(sub.flags))triangles+=sub.count/3;
+            visibleScenery.reserve(triangles);
             for(const auto& model:track)for(const auto& sub:model->submeshes){
                 if(!mkw::playerShadow::receives(sub.flags))continue;
                 for(unsigned i=sub.first;i+2<sub.first+sub.count;i+=3)
@@ -2074,7 +2119,8 @@ int main() {
             if(!courseObjects.loadCoconut()){trackLoadFailed=true;report("FAIL Coconut object assets");}
             LOGF("Coconut palms=%u; escalators use live collision transforms",courseObjects.palmCount());
         }
-        if(!courseObjects.loadCourse(unsigned(Courses[courseChoice].id))){trackLoadFailed=true;report("FAIL course object models");}
+        if(!courseObjects.loadCourse(unsigned(Courses[courseChoice].id))){trackLoadFailed=true;
+            char text[220];snprintf(text,sizeof text,"FAIL course object models: %s, %s",mkw::objectLoadFailure,mkw::pack::lastReadFailure);report(text);}
         stage("course objects");
         if(const auto* lighting=mkw::courseLighting(Courses[courseChoice].archive)){retailFog.reset(*lighting);retailFogArea=-1;}
         renderer.setRetailLighting(mkw::courseLighting(Courses[courseChoice].archive),false);
@@ -2155,7 +2201,8 @@ int main() {
         resourceFailure[0]=0;
         auto cleanup=[&](){
             mkw::jobWorker().finishAll();renderer.waitForGpu();
-            releaseRace();menuModels.reset(renderer);menuIcons.reset(renderer);menuRenderer.release(renderer);
+            mkw::DriverAnimation::keepReleased(bankKeep);releaseRace();mkw::DriverAnimation::keepReleased(false);
+            menuModels.reset(renderer);menuIcons.reset(renderer);menuRenderer.release(renderer);
             menuAudio.close();
             if(!finishingMenuCue){
                 auto& sound=mkw::SoundSystem::instance();
@@ -2229,6 +2276,10 @@ int main() {
                 pauseQuads(pauseResident);
                 mkw::pack::cacheReads(true);
                 if(!menuRenderer.prepare(pauseResident)){menuRenderer.release(renderer);pauseResident.clear();}
+                // Old 3DS: a race left with under 3 MiB of LINEAR stalled in Azahar right
+                // after its load (SNES Ghost Valley 2, 1.4 MiB). There the pause menu
+                // loads its textures when it opens instead (releasing the racers if needed).
+                if(!arenaNew3ds&&!pauseResident.empty()&&linearSpaceFree()<(3u<<20)){menuRenderer.release(renderer);pauseResident.clear();report("Old 3DS: pause menu not preloaded (LINEAR)");}
                 mkw::pack::cacheReads(false);
                 renderer.preparePauseControls();
                 pausePinned=!pauseResident.empty();
@@ -2248,7 +2299,9 @@ int main() {
         // race must not need room for both generations of graphics/audio.
         cleanup();stage("race cleanup");
         // A failed attempt retries with the heap the cache held.
-        const bool ok=mkw::loadRequiredResources(attempt,[&](){mkw::pack::dropCache();cleanup();});
+        const bool ok=mkw::loadRequiredResources(attempt,[&](){mkw::pack::dropCache();cleanup();mkw::DriverAnimation::dropKept();});
+        if(bankKeep){char text[64];snprintf(text,sizeof text,"animation banks reused %u, unused %u",mkw::DriverAnimation::reusedCount(),mkw::DriverAnimation::keptCount());report(text);}
+        mkw::DriverAnimation::dropKept();
         trackLoadFailed=!ok;
         return ok;
     };
@@ -2260,6 +2313,8 @@ int main() {
     mkw::pack::enableCache(raceCacheLimit);
     {char text[80];snprintf(text,sizeof text,"heap %lu KB, race cache limit %lu KB",(unsigned long)envGetHeapSize()/1024,(unsigned long)raceCacheLimit/1024);report(text);}
     mkw::renderQuality().setReduced(!new3ds&&!(kQa&&exists("sdmc:/3ds/mkw-3ds/full-quality.txt")));
+    if(kQa&&exists("sdmc:/3ds/mkw-3ds/bottom-every-frame.txt"))mkw::renderQuality().bottomInterval=1;
+    if(kQa&&exists("sdmc:/3ds/mkw-3ds/bottom-rgba8.txt"))mkw::renderQuality().bottomRgba4=false;
     mkw::renderQuality().mipmaps=!exists("sdmc:/3ds/mkw-3ds/diagnose-no-mipmaps.txt");
     // New 3DS draws every opponent at full detail (A/B: racer-lod.txt brings back the distance LOD).
     const bool racerLodFile=exists("sdmc:/3ds/mkw-3ds/racer-lod.txt");
@@ -2539,6 +2594,12 @@ int main() {
                     if(trackLoadFailed)report("FAIL selected course data absent");
                     else{
                         intro.stop(); // Its rail belongs to the scene being replaced.
+                        // Old 3DS: the last race's graphics (about 17 MB of its 43 MB
+                        // heap) go before the scene change, not at "race cleanup"
+                        // after it: the new scene's load ran out of heap on top of
+                        // them and a Grand Prix hung loading its second race.
+                        if(!new3ds&&raceResident){mkw::jobWorker().finishAll();renderer.waitForGpu();
+                            mkw::DriverAnimation::keepReleased(bankKeep);releaseRace();mkw::DriverAnimation::keepReleased(false);}
                         scenes.currentScene()->heap()->enableAllocation();
                         if(scenes.currentSceneId()==0)scenes.createChildScene(2,scenes.currentScene());
                         else scenes.changeSiblingScene(2);
@@ -2979,6 +3040,8 @@ int main() {
                             mkw::SoundSystem::instance().play(mkw::snd::id::SE_RC_PAUSE_EXIT_GAME,0);
                             raceEvents.emit(mkw::RaceEvent::OptionChosen,physicsSteps,results.chosen());
                             LOGF("race end option %s (race %u/%u)",results.chosen()==0?(results.finalRace()?"Next":"Next Race"):"Quit Game",vsSet.race,raceCount());
+                            // Kinoko arena left after racing (Old 3DS runs a 14 MiB arena).
+                            LOGF("race end scene_free=%lu heap_used=%lu linear_free=%lu",(unsigned long)scenes.currentScene()->heap()->getAllocatableSize(),(unsigned long)mallinfo().uordblks,(unsigned long)linearSpaceFree());
                         }
                         if(events&Flow::EventLeave){
                             // The race has faded to black (RaceResultsFlow::Leaving).
@@ -3857,9 +3920,15 @@ int main() {
             // The preview's fade out and the race start's fade in, over everything too.
             const float introFade=fullRace?demo.black():0.f;
             if(fullRace&&introFade>0)renderer.drawScreenFade(introFade,false);
-            if(fullRace&&bottomScreen.active()&&!intro.active()){
+            // Old 3DS redraws the lower LCD every other frame (render_quality.hpp
+            // bottomInterval); citro3d leaves an undrawn screen showing its last
+            // picture. Fades and captures draw every frame.
+            const float bottomFade=std::max(results.leaveFade(),introFade);
+            const unsigned bottomInterval=mkw::renderQuality().bottomInterval;
+            const bool bottomDue=bottomInterval<=1||bottomFade>0||frames%bottomInterval==0||raceCapture;
+            if(fullRace&&bottomScreen.active()&&!intro.active()&&bottomDue){
                 // The lower LCD: the race read, never written (src/race_bottom_screen.cpp).
-                mkw::fillBottomView(bottomView,raceGrid,*raceItems,intro.active(),physicsSteps,std::max(results.leaveFade(),introFade));
+                mkw::fillBottomView(bottomView,raceGrid,*raceItems,intro.active(),physicsSteps,bottomFade);
                 if(battleMode){
                     bottomView.battle=true;
                     bottomView.milliseconds=uint32_t(uint64_t(balloonBattle.durationTicks()-std::min(battleTicks,balloonBattle.durationTicks()))*1000/60);

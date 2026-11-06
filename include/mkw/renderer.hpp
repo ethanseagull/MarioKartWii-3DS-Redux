@@ -264,7 +264,8 @@ public:
     // to 1024) uploaded to VRAM in chunks through an idle LINEAR staging
     // region: no temporary LINEAR or heap allocation. On failure the texture
     // is left empty. Main thread, render thread idle (it waits for the GPU).
-    bool loadVramTexture(Texture& texture,const char* path,GPU_TEXTURE_WRAP_PARAM wrap=GPU_CLAMP_TO_EDGE);
+    // rgba4: an RGBA8 file is stored as RGBA4 (half the VRAM; Old 3DS lower screen).
+    bool loadVramTexture(Texture& texture,const char* path,GPU_TEXTURE_WRAP_PARAM wrap=GPU_CLAMP_TO_EDGE,bool rgba4=false);
     // Moves a loaded single-level LINEAR texture into VRAM (a GPU copy, then
     // its LINEAR block is freed), unless that would leave under `reserve`
     // bytes of VRAM free. False leaves it untouched in LINEAR. Main thread;
