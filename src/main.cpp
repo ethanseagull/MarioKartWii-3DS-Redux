@@ -3236,6 +3236,7 @@ int main() {
 
                 }
                 double us=(svcGetSystemTick()-tick)*1000000.0/SYSCLOCK_ARM11;stepTotal+=us;stepMax=std::max(stepMax,us);mkw::simprof::add(mkw::simprof::TickTotal,tick);physicsSteps++;accumulator-=1;
+                const auto postTickStart=mkw::simprof::now();
                 if(autoplay&&cpuLogEvery&&fullRace){
                     // QA: full simulation tick cost (items, AI, physics) per log window.
                     static double windowTotal=0,windowMax=0;static unsigned windowSteps=0;
@@ -3286,7 +3287,8 @@ int main() {
                 if(fullRace)mkw::driverItemSignals(signals,*raceItems,0);
                 signals.blink=physicsSteps%180==0;
                 driverPose=driverController.step(signals);
-                if(fullRace)opponents.step(physicsSteps,*raceItems);
+                mkw::simprof::add(mkw::simprof::PresPlayer,postTickStart);
+                {MKW_SIM_SCOPE(PresOpponents);if(fullRace)opponents.step(physicsSteps,*raceItems);}
                 if(driver){
                     mkw::DriverLookParameters parameters;const auto& choice=selectedVehicle();
                     const bool available=mkw::driverLookParameters(choice.character,choice.vehicle,parameters);
@@ -3462,6 +3464,7 @@ int main() {
                             mkw::EffectFrame f;f.origin=e.direction;f.scale=1.2f;raceEffects.burstBlueSmoke(fx.blueBlastSmoke,f);
                         }
                     }
+                    const auto kartFxStart=mkw::simprof::now();
                     // KartEffect power-ups for every racer: Star, Bullet, Mega, Lightning and Thunder
                     // Cloud bolts, the shocked crackle and the POW (KartItemEffects). Presentation
                     // reads of this step's kart state and item events only.
@@ -3624,8 +3627,9 @@ int main() {
                         }
                         raceEffects.setGroups(calcGroups,drawGroups);
                     }
-                    if(fullRace){creatureEffects.step(raceEffects);blooperScreenEffects.step(raceEffects,raceItems->hud(0).ink,raceGrid.rank(),raceGrid.count());}
-                    raceEffects.step();
+                    mkw::simprof::add(mkw::simprof::PresKartFx,kartFxStart);
+                    {MKW_SIM_SCOPE(PresParticles);if(fullRace){creatureEffects.step(raceEffects);blooperScreenEffects.step(raceEffects,raceItems->hud(0).ink,raceGrid.rank(),raceGrid.count());}
+                    raceEffects.step();}
                     {mkw::Vec3 eye,target;presentationCamera(eye,target);raceEffects.setCamera(eye,target,{0,1,0});
                      // The clip manager (0x80783344) after the camera: each racer's sphere on
                      // the presented camera, full vertical fovy, the top screen's aspect.
@@ -3639,6 +3643,7 @@ int main() {
                 }
                 // QA captures: present exactly on each capture tick (the remaining
                 // accumulator runs next iteration), so builds compare frame for frame.
+                mkw::simprof::add(mkw::simprof::PostTick,postTickStart);
                 if(autoplay&&!benchmark&&intro.active()&&introTick%90==0)break;
                 if(raceCapture){const bool live=menu.simulates()&&!intro.active();if(live&&!captureLive){++captureRace;captureBase=physicsSteps;raceCaptured=~0u;}captureLive=live;}
                 if(raceCapture&&captureLive&&(physicsSteps-captureBase)%raceCaptureEvery==0)break;
