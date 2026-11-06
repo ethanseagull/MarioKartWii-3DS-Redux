@@ -183,6 +183,10 @@ public:
     /// next checkSphereReplay calls then return its hits.
     [[nodiscard]] bool replayBatched();
     [[nodiscard]] bool checkSphereReplay(f32 *distOut, EGG::Vector3f *fnrmOut, u16 *flagsOut);
+    /// DIAG counts (the sim profile prints and resets them): spheres batched, and
+    /// live queries answered from a batch.
+    static u32 s_batchedSpheres;
+    static u32 s_batchReplays;
 
     [[nodiscard]] static EGG::Vector3f GetVertex(f32 height, const EGG::Vector3f &vertex1,
             const EGG::Vector3f &fnrm, const EGG::Vector3f &enrm3, const EGG::Vector3f &enrm);

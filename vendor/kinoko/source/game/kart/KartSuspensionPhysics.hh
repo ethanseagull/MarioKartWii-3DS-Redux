@@ -148,7 +148,8 @@ public:
     /// mkw-3ds (Old 3DS): KartSub batches the wheels' course prism tests
     /// (KColData::batchSpheresCached) and each wheel keeps its fixed rotated
     /// "down" vector instead of rebuilding it from xRot every tick (same values).
-    /// Off: no-batch-wheels.txt; DIAG ab-alternate.txt bit 4.
+    /// Off by default (more instructions than it saves); on: batch-wheels.txt;
+    /// DIAG ab-alternate.txt bit 4.
     static bool s_batchWheels;
 
 private:

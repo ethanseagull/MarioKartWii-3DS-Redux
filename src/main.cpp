@@ -2365,11 +2365,12 @@ int main() {
     mkw::renderQuality().setReduced(!new3ds&&!(kQa&&exists("sdmc:/3ds/MKWiiDS/full-quality.txt")));
     if(kQa&&exists("sdmc:/3ds/MKWiiDS/bottom-half-rate.txt"))mkw::renderQuality().bottomInterval=2;
     mkw::DriverAnimation::verifyLook=kQa&&exists("sdmc:/3ds/MKWiiDS/look-verify.txt");
-    // Old 3DS Kinoko speed-ups (exact physics), on by default; each has an off-file
-    // (release and DIAG): no-batch-wheels.txt (one prism pass for a kart's wheels),
-    // no-batch-body.txt (one prism pass for a kart's body hitboxes).
-    if(exists("sdmc:/3ds/MKWiiDS/no-batch-wheels.txt"))K::Kart::KartSuspensionPhysics::s_batchWheels=false;
-    if(exists("sdmc:/3ds/MKWiiDS/no-batch-body.txt"))K::Kart::KartCollide::s_batchBody=false;
+    // Old 3DS Kinoko speed-ups (exact physics). Batched prism tests for a kart's wheels
+    // and body hitboxes are off by default (in Azahar and on the PC they cost more
+    // instructions than they save: a kart's narrowed prism list holds only a few
+    // prisms); batch-wheels.txt and batch-body.txt (release and DIAG) turn them on.
+    if(exists("sdmc:/3ds/MKWiiDS/batch-wheels.txt"))K::Kart::KartSuspensionPhysics::s_batchWheels=true;
+    if(exists("sdmc:/3ds/MKWiiDS/batch-body.txt"))K::Kart::KartCollide::s_batchBody=true;
     // DIAG ab-alternate.txt: same-binary A/B in one run. Each 600-step sim profile
     // window runs one combination of the Old 3DS speed-ups (bit 0: head-look subset,
     // bit 1: packed KCL prisms, bit 2: item contact mask, bit 3: phase-major pass 0,
@@ -2920,6 +2921,8 @@ int main() {
                             n+=snprintf(text+n,sizeof text-n," %s %.0f",sp::Names[i],double(sp::data.ticks[i])*1e6/SYSCLOCK_ARM11/sp::data.steps);
                         if(mkw::DriverAnimation::verifyLook&&n>0&&n<int(sizeof text))n+=snprintf(text+n,sizeof text-n," look_checks %u look_mismatches %u",mkw::DriverAnimation::lookChecks,mkw::DriverAnimation::lookMismatches);
                         if(abAlternate&&n>0&&n<int(sizeof text))snprintf(text+n,sizeof text-n," ab %u",unsigned(mkw::DriverAnimation::subsetLook)|unsigned(K::Field::KColData::s_packed)<<1|unsigned(!mkw::RaceItems::fullContactScan)<<2|unsigned(K::Kart::KartObjectManager::s_phaseMajor)<<3|unsigned(K::Kart::KartSuspensionPhysics::s_batchWheels)<<4|unsigned(K::Kart::KartCollide::s_batchBody)<<5);
+                        if(abAlternate&&n>0&&n<int(sizeof text))n+=snprintf(text+n,sizeof text-n," batch_spheres %lu batch_replays %lu",(unsigned long)K::Field::KColData::s_batchedSpheres,(unsigned long)K::Field::KColData::s_batchReplays);
+                        K::Field::KColData::s_batchedSpheres=K::Field::KColData::s_batchReplays=0;
                         ++abWindow;abApply();
                         report(text);sp::data=sp::Data{};
                     }

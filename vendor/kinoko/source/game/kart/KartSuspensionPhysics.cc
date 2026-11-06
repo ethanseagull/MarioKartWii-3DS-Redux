@@ -247,7 +247,7 @@ bool KartSuspensionPhysics::predictCollision(const EGG::Matrix34f &mat,
     return m_tirePhysics->predictCollision(topmostPos + suspTravel * bottomDir, bottomDir, out);
 }
 
-bool KartSuspensionPhysics::s_batchWheels = true;
+bool KartSuspensionPhysics::s_batchWheels = false;
 
 /// @stage All
 /// @brief Calculates linear force and rotation from the kart's suspension.

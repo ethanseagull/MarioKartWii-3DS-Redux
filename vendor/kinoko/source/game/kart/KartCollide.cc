@@ -1588,7 +1588,7 @@ Action KartCollide::handleReactExplosionLoseItem(size_t /*idx*/) {
     return Action::UNK_7;
 }
 
-bool KartCollide::s_batchBody = true;
+bool KartCollide::s_batchBody = false;
 
 std::array<KartCollide::ObjectCollisionHandler, 33> KartCollide::s_objectCollisionHandlers = {{
         &KartCollide::handleReactNone,

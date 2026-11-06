@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <bit>
 #include <cstring>
 
 // Credit: em-eight/mkw
@@ -289,7 +290,6 @@ struct SphereBatch {
         EGG::Vector3f movement;
         f32 radius;
         KCLTypeMask typeMask;
-        const u16 *prismIter;
         u16 count;
         bool valid;
         bool movementCheck;
@@ -298,6 +298,7 @@ struct SphereBatch {
     const KColData *owner = nullptr;
     u32 gen = 0;
     size_t count = 0;
+    size_t next = 0; ///< The entry the next query most likely asks (batch order).
     const Entry *replay = nullptr;
     u16 replayIndex = 0;
     Entry entries[KColData::BATCH_MAX];
@@ -306,10 +307,15 @@ struct SphereBatch {
 SphereBatch s_batch;
 
 bool sameBits(const EGG::Vector3f &a, const EGG::Vector3f &b) {
-    return std::memcmp(&a, &b, sizeof a) == 0;
+    return std::bit_cast<u32>(a.x) == std::bit_cast<u32>(b.x) &&
+            std::bit_cast<u32>(a.y) == std::bit_cast<u32>(b.y) &&
+            std::bit_cast<u32>(a.z) == std::bit_cast<u32>(b.z);
 }
 
 } // namespace
+
+u32 KColData::s_batchedSpheres = 0;
+u32 KColData::s_batchReplays = 0;
 
 void KColData::ClearBatch() {
     s_batch.owner = nullptr;
@@ -322,90 +328,87 @@ void KColData::batchSpheresCached(const BatchSphere *spheres, size_t count) {
     s_batch.owner = this;
     s_batch.gen = m_cacheGen;
     s_batch.count = count;
+    s_batch.next = 0;
     s_batch.replay = nullptr;
 
-    // The query setup of lookupSphereCached, per sphere.
+    // lookupSphereCached's choice, per sphere: only spheres inside the narrowed
+    // prism cache's sphere are batched (they all read its list); the rest run
+    // their own query.
+    size_t batched[BATCH_MAX];
+    size_t n = 0;
     for (size_t i = 0; i < count; ++i) {
         const BatchSphere &in = spheres[i];
         SphereBatch::Entry &e = s_batch.entries[i];
         EGG::Sphere3f sphere1(in.pos, in.radius);
         EGG::Sphere3f sphere2(m_cachedPos, m_cachedRadius);
-        if (!sphere1.isInsideOtherSphere(sphere2)) {
-            e.prismIter = searchBlock(in.pos);
-            e.radius = std::min(m_sphereRadius, in.radius);
-        } else {
-            e.radius = in.radius;
-            e.prismIter = m_cachedPrismArray;
+        e.valid = sphere1.isInsideOtherSphere(sphere2);
+        if (!e.valid) {
+            continue;
         }
+        e.radius = in.radius;
         e.pos = in.pos;
         e.prevPos = in.prevPos;
         e.movement = in.pos - in.prevPos;
         e.typeMask = in.typeMask;
         e.count = 0;
-        e.valid = true;
         e.movementCheck = std::isfinite(in.prevPos.y);
+        batched[n++] = i;
+    }
+    s_batchedSpheres += n;
+    if (n == 0) {
+        return;
     }
 
-    // One pass over each distinct prism list, every sphere on it tested per prism
+    // One pass over the prism list, every batched sphere tested per prism
     // (checkSphere / checkSphereMovement's loop, in the same order).
-    bool done[BATCH_MAX] = {};
-    size_t group[BATCH_MAX];
-    for (size_t i = 0; i < count; ++i) {
-        if (done[i]) {
-            continue;
-        }
-        const u16 *iter = s_batch.entries[i].prismIter;
-        size_t n = 0;
-        for (size_t j = i; j < count; ++j) {
-            if (!done[j] && s_batch.entries[j].prismIter == iter) {
-                done[j] = true;
-                group[n++] = j;
+    for (const u16 *it = m_cachedPrismArray; *++it != 0;) {
+        const PackedPrism &prism = m_packed[parse<u16>(*it)];
+        const u32 attributeMask = KCL_ATTRIBUTE_TYPE_BIT(prism.attribute);
+        for (size_t k = 0; k < n; ++k) {
+            SphereBatch::Entry &e = s_batch.entries[batched[k]];
+            if (!(attributeMask & e.typeMask)) {
+                continue;
             }
-        }
-        if (!iter) {
-            continue;
-        }
-        for (const u16 *it = iter; *++it != 0;) {
-            const PackedPrism &prism = m_packed[parse<u16>(*it)];
-            const u32 attributeMask = KCL_ATTRIBUTE_TYPE_BIT(prism.attribute);
-            for (size_t k = 0; k < n; ++k) {
-                SphereBatch::Entry &e = s_batch.entries[group[k]];
-                if (!(attributeMask & e.typeMask)) {
-                    continue;
-                }
-                const QueryRef q{e.pos, e.movement, e.radius, e.typeMask};
-                f32 dist;
-                const bool hit = e.movementCheck ?
-                        checkCollision<CollisionCheckType::Movement>(q, prism, &dist, nullptr, nullptr) :
-                        checkCollision<CollisionCheckType::Plane>(q, prism, &dist, nullptr, nullptr);
-                if (!hit) {
-                    continue;
-                }
-                if (e.count == BATCH_HITS) {
-                    e.valid = false;
-                    continue;
-                }
-                e.hits[e.count++] = SphereBatch::Hit{dist, &prism.fnrm, prism.attribute};
+            const QueryRef q{e.pos, e.movement, e.radius, e.typeMask};
+            f32 dist;
+            const bool hit = e.movementCheck ?
+                    checkCollision<CollisionCheckType::Movement>(q, prism, &dist, nullptr, nullptr) :
+                    checkCollision<CollisionCheckType::Plane>(q, prism, &dist, nullptr, nullptr);
+            if (!hit) {
+                continue;
             }
+            if (e.count == BATCH_HITS) {
+                e.valid = false;
+                continue;
+            }
+            e.hits[e.count++] = SphereBatch::Hit{dist, &prism.fnrm, prism.attribute};
         }
     }
 }
 
 bool KColData::replayBatched() {
-    if (s_batch.owner != this || s_batch.gen != m_cacheGen) {
+    if (s_batch.owner != this || s_batch.gen != m_cacheGen ||
+            m_prismIter != m_cachedPrismArray) {
         return false;
     }
-    for (size_t i = 0; i < s_batch.count; ++i) {
-        const SphereBatch::Entry &e = s_batch.entries[i];
-        if (e.valid && e.prismIter == m_prismIter && e.typeMask == m_typeMask &&
-                std::memcmp(&e.radius, &m_radius, sizeof m_radius) == 0 && sameBits(e.pos, m_pos) &&
-                sameBits(e.prevPos, m_prevPos)) {
-            s_batch.replay = &e;
-            s_batch.replayIndex = 0;
-            return true;
+    auto matches = [&](const SphereBatch::Entry &e) {
+        return e.valid && e.typeMask == m_typeMask &&
+                std::bit_cast<u32>(e.radius) == std::bit_cast<u32>(m_radius) &&
+                sameBits(e.pos, m_pos) && sameBits(e.prevPos, m_prevPos);
+    };
+    size_t i = s_batch.next;
+    if (i >= s_batch.count || !matches(s_batch.entries[i])) {
+        for (i = 0; i < s_batch.count && !matches(s_batch.entries[i]); ++i) {
+        }
+        if (i == s_batch.count) {
+            return false;
         }
     }
-    return false;
+    s_batch.next = i + 1;
+    s_batch.replay = &s_batch.entries[i];
+    s_batch.replayIndex = 0;
+    ++s_batchReplays;
+    return true;
 }
 
 /// mkw-3ds: checkSphereCollision for a batched query: the kept hits, then false
