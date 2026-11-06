@@ -528,6 +528,10 @@ public:
     // moveToVram widens texture-unit-1 ETC1 textures to ETC1A4 (opaque
     // alpha) instead of leaving them in LINEAR. A/B: no-unit1-vram.txt.
     bool unitOneEtc1a4=false;
+    // The sampled light textures blend through tables (the same bytes) and are
+    // rewritten and flushed only when their bytes change (retailBeginFrame).
+    // A/B: no-light-blend.txt.
+    bool lightTextureSkip=false;
     void setSkyBehind(bool on){skyBehind_=on;}
     uint32_t animationFrame=0;
     // RRGGBB00 added after the model's material colour, preserving texture alpha.
