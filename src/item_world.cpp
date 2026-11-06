@@ -79,7 +79,7 @@ ItemActor& RaceItems::spawn(unsigned player,ItemKind kind,bool backwards,const V
     if(it==actors_.end())it=std::find_if(actors_.begin(),actors_.end(),[](const ItemActor& a){return !a.active;});
     if(it==actors_.end())it=std::max_element(actors_.begin(),actors_.end(),[](const ItemActor& a,const ItemActor& b){return a.age<b.age;});
     forgetReclaimSlot(unsigned(it-actors_.begin()));
-    auto& a=*it;a={};a.kind=kind;a.owner=int8_t(player);a.active=true;a.lifetime=kind==ItemKind::Banana?0:1800;
+    auto& a=*it;a={};a.kind=kind;a.owner=int8_t(player);a.active=true;++actorSerial_;a.lifetime=kind==ItemKind::Banana?0:1800;
     reclaimOrder_[retailObjectId(kind)].add(unsigned(it-actors_.begin()));
     Vec3 direction=normalized(racers_[player].forward,{0,0,1});
     const bool trap=kind==ItemKind::Banana||kind==ItemKind::FakeBox;
@@ -521,8 +521,24 @@ void RaceItems::kartContacts(unsigned player){
     const auto& r=racers_[player];
     boxContacts(player);
     if(r.finished)return;
-    // Actor pool order stands in for the retail entity search order.
-    for(auto& a:actors_)if(a.active&&itemTouchesKart(a,player))actorKartContact(a,player);
+    // Actor pool order stands in for the retail entity search order. Forward
+    // through the mask's slots: one a contact spawns is found in a rebuilt mask
+    // when it lies ahead, as the full scan would.
+    for(unsigned i=0;i<MaxActors;++i){
+        if(fullContactScan){auto& a=actors_[i];if(a.active&&itemTouchesKart(a,player))actorKartContact(a,player);continue;}
+        if(contactMaskSerial_!=actorSerial_)refreshContactMask();
+        unsigned w=i>>5;uint32_t bits=contactMask_[w]&(~0u<<(i&31));
+        while(!bits&&++w<contactMask_.size())bits=contactMask_[w];
+        if(!bits)break;
+        i=w*32+unsigned(__builtin_ctz(bits));
+        auto& a=actors_[i];
+        if(a.active&&itemTouchesKart(a,player))actorKartContact(a,player);
+    }
     heldKartContacts(player);
+}
+void RaceItems::refreshContactMask(){
+    contactMask_={};
+    for(unsigned i=0;i<MaxActors;++i)if(actors_[i].active)contactMask_[i>>5]|=1u<<(i&31);
+    contactMaskSerial_=actorSerial_;
 }
 }

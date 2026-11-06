@@ -258,6 +258,19 @@ private:
     void resolveCourseObjects(ItemActor& actor);
     void resolveHeldCourseObjects(unsigned player);
     std::array<ItemActor,MaxActors> actors_{};
+    // Kart contacts scan only the slots in contactMask_: every actor active when
+    // it was built (a superset; each slot still checks active). Activation goes
+    // through spawn() and the direct generation, which bump actorSerial_; a
+    // changed serial rebuilds the mask, also in the middle of a racer's scan.
+    // Old 3DS: an ItemActor is 376 B, so the full scan read 96 cache lines per
+    // racer per step (~0.25 ms a step at 268 MHz without L2).
+    uint32_t actorSerial_=0,contactMaskSerial_=~0u;
+    std::array<uint32_t,(MaxActors+31)/32> contactMask_{};
+    void refreshContactMask();
+public:
+    // DIAG A/B (ab-alternate.txt): true scans every slot as before.
+    static inline bool fullContactScan=false;
+private:
     std::array<GroundReclaimOrder<MaxActors>,15> reclaimOrder_{};
     int reclaimPressure_=0;
     unsigned reclaimPhase_=0;

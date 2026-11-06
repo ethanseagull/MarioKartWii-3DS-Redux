@@ -122,7 +122,7 @@ bool RaceItems::createCourseDrop(unsigned slot,Vec3 position,Vec3 velocity,uint8
     auto it=std::find_if(actors_.begin(),actors_.end(),[](const ItemActor& a){return !a.active;});
     if(it==actors_.end())return false; // direct generation never evicts a live actor
     forgetReclaimSlot(unsigned(it-actors_.begin()));
-    auto& a=*it;a={};a.active=true;a.kind=kind;a.owner=int8_t(owner);
+    auto& a=*it;a={};a.active=true;++actorSerial_;a.kind=kind;a.owner=int8_t(owner);
     reclaimOrder_[ItemObjects[unsigned(kind)].type].add(unsigned(it-actors_.begin()));
     a.position=a.previous=position;a.velocity=velocity+Vec3{0,timeTrial?35.f:25.f,0};
     a.scattered=true;a.up={0,1,0};a.yaw=std::atan2(velocity.x,velocity.z);
