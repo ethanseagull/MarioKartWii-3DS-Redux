@@ -641,7 +641,8 @@ int main() {
     menu.cpuRandom.state=std::uint32_t(svcGetSystemTick());
     // QA captures compare builds frame for frame: the same CPU lineup every run.
     // Captures and benchmark runs use fixed seeds (the same CPU lineups every run).
-    if(raceCapture||benchmark){menu.titleRandom=1u;menu.cpuRandom.state=0x4d4b5733u;}
+    // DIAG state-digest.txt compares runs, so it fixes them too.
+    if(raceCapture||benchmark||(kQa&&exists("sdmc:/3ds/MKWiiDS/state-digest.txt"))){menu.titleRandom=1u;menu.cpuRandom.state=0x4d4b5733u;}
     mkw::LicenseLoad loaded;
     {mkw::LoadingScope loading;loaded=mkw::loadLicenseSaves(LicenseDirectory,licenseSaves);
     for(unsigned slot=0;slot<4;++slot){
