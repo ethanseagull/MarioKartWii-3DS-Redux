@@ -578,7 +578,7 @@ void DriverAnimation::stepLook(int clip,float frame,unsigned tick,bool active,Ve
     const unsigned step=fullRate?1:animationStep();
     const bool hold=step>1&&cachedSettled_&&cachedClip_==clip&&tick>=cachedTick_&&tick/step==cachedTick_/step;
     if(hold)return;
-    if(!pose(clip,frame,tick,false)){resetLook();return;}
+    if(!(subsetLook?lookPose(clip,frame,tick):pose(clip,frame,tick,false))){resetLook();return;}
     float world[12];for(unsigned row=0;row<3;++row){world[row*4]=seated.r[row].x;world[row*4+1]=seated.r[row].y;world[row*4+2]=seated.r[row].z;world[row*4+3]=seated.r[row].w;}
     auto a=driverLookTargetAngles(world,palette_.data()+lookHead_*21,target);
     const auto angles=lookMotion_.step(active&&a.valid,body,a.yaw,a.pitch,a.kartYaw,
@@ -586,6 +586,69 @@ void DriverAnimation::stepLook(int clip,float frame,unsigned tick,bool active,Ve
     cachedSettled_=false;setLookAngles(angles.yaw,angles.pitch);
 }
 
+bool DriverAnimation::verifyLook=false,DriverAnimation::subsetLook=true;
+unsigned DriverAnimation::lookChecks=0,DriverAnimation::lookMismatches=0;
+// The head-target query reads only the head, the two body-look pivots and the
+// effect root. Each depends only on its own clip track, its own transition
+// blend and the rotations whose slot lists hold it (the pivots are among the
+// same slots), so this evaluates just those, with the same float operations
+// as evaluate() (bit-identical), instead of the whole skeleton: the full pose
+// cost ~0.3 ms a racer a tick on Old 3DS. Other palette slots keep the last
+// rendered pose; stepLook marks the render cache unsettled as before.
+const float* DriverAnimation::lookPose(int clip,float frame,unsigned tick){
+    if(!ready||clip<0||unsigned(clip)>=count_)return nullptr;
+    if(lookHead_>=matrices_)return pose(clip,frame,tick,false);
+    unsigned need[4],n=0;
+    auto add=[&](unsigned s){if(s>=matrices_)return;for(unsigned i=0;i<n;++i)if(need[i]==s)return;need[n++]=s;};
+    add(lookHead_);add(bodyLook_[0].joint);add(bodyLook_[1].joint);if(effectRootSlot_>=0)add(unsigned(effectRootSlot_));
+    // Hair rewrites its nodes' slots: those need the full pose.
+    if(hairClipCount_)for(unsigned h=0;h<hairNodeCount_;++h)for(unsigned i=0;i<n;++i)if(hairNodes_[h].matrix==need[i])return pose(clip,frame,tick,false);
+    float check[4*21];
+    if(verifyLook){
+        // DIAG: the full pose first (it also takes any transition, as the
+        // subset below would), then the subset over it, then compare.
+        if(!pose(clip,frame,tick,false))return nullptr;
+        for(unsigned i=0;i<n;++i)std::memcpy(check+i*21,palette_.data()+need[i]*21,84);
+    }
+    auto sample=[](const Clip& c,float t){return c.loop?std::fmod(std::max(t,0.f),float(c.count)):std::clamp(t,0.f,float(c.count-1));};
+    const auto& c=clips_[clip];frame=sample(c,frame);unsigned a=unsigned(frame),b=a+1<c.count?a+1:(c.loop?0:a);float t=frame-a;
+    if(lastClip_!=clip){hasPreviousPose_=lastClip_>=0;previousPalette_=palette_;if(lookCount_)std::copy_n(beforeLookPalette_.data(),matrices_*21,previousPalette_.data());previousEffectRoot_=effectRoot_;transitionTick_=tick;lastClip_=clip;}
+    const float blend=motionBlendValid_?motionBlendWeight_:(hasPreviousPose_?std::clamp(float(tick-transitionTick_+1)/6.f,0.f,1.f):1.f);
+    const unsigned stride=matrices_*84+shapes_*4;
+    auto x=reinterpret_cast<const float*>(c.data+a*stride);auto y=reinterpret_cast<const float*>(c.data+b*stride);
+    for(unsigned k=0;k<n;++k){const unsigned at=need[k]*21;for(unsigned i=0;i<21;++i)palette_[at+i]=x[at+i]+(y[at+i]-x[at+i])*t;}
+    if(blend<1)for(unsigned k=0;k<n;++k){float result[21];blendPosePair(result,previousPalette_.data()+need[k]*21,palette_.data()+need[k]*21,blend);std::memcpy(palette_.data()+need[k]*21,result,sizeof result);}
+    uint32_t slots[4];
+    auto subset=[&](const uint32_t* list,unsigned count){
+        unsigned m=0;for(unsigned k=0;k<n;++k)for(unsigned j=0;j<count;++j)if(list[j]==need[k]){slots[m++]=need[k];break;}
+        return m;
+    };
+    const auto angles=lookMotion_.angles();
+    const auto& response=vehicleResponse_.angles();
+    unsigned m=subset(bodyLook_[0].slots.data(),bodyLook_[0].count);
+    applyDriverBodyLookPalette(palette_.data(),bodyLook_[0].joint,slots,m,angles.root,response.pitch[0],response.roll[0]);
+    m=subset(bodyLook_[1].slots.data(),bodyLook_[1].count);
+    applyDriverBodyLookPalette(palette_.data(),bodyLook_[1].joint,slots,m,angles.spine,response.pitch[1],response.roll[1]);
+    m=subset(lookSlots_.data(),lookCount_);
+    applyDriverLookPalette(palette_.data(),lookHead_,slots,m,lookYaw_,lookPitch_+response.pitch[2],response.roll[2]);
+    if(effectRootSlot_>=0){
+        const float* r=palette_.data()+unsigned(effectRootSlot_)*21;
+        effectRoot_={r[3],r[7],r[11]};effectRootReady_=true;
+    }else if(effectRootSlot_==-1){
+        const float* p=effectRootTracks_[size_t(&c-clips_.data())];
+        if(p){
+            const auto mix=[&](unsigned axis){return p[a*3+axis]+(p[b*3+axis]-p[a*3+axis])*t;};
+            effectRoot_={mix(0),mix(1),mix(2)};
+            if(blend<1)effectRoot_=previousEffectRoot_+(effectRoot_-previousEffectRoot_)*blend;
+            effectRootReady_=true;
+        }
+    }
+    if(verifyLook){
+        ++lookChecks;
+        for(unsigned i=0;i<n;++i)if(std::memcmp(check+i*21,palette_.data()+need[i]*21,84)){++lookMismatches;break;}
+    }
+    return palette_.data();
+}
 const float* DriverAnimation::pose(int clip,float frame,unsigned tick,bool simulateBraids){
     if(!ready||clip<0||unsigned(clip)>=count_)return nullptr;
     auto sample=[](const Clip& c,float t){return c.loop?std::fmod(std::max(t,0.f),float(c.count)):std::clamp(t,0.f,float(c.count-1));};

@@ -71,6 +71,11 @@ public:
     bool makeRigid(Model& model);
     bool rigid() const {return !rigidParts_.empty();}
     const std::vector<std::vector<RigidPart>>& rigidParts() const {return rigidParts_;}
+    // DIAG look-verify.txt: stepLook also evaluates the full pose and counts
+    // queries whose head/pivot slots differ from the subset (expected 0).
+    static bool verifyLook;static unsigned lookChecks,lookMismatches;
+    // DIAG A/B (ab-alternate.txt): false evaluates the full pose as before.
+    static bool subsetLook;
     // Evaluates the palette for clip/frame, including transition blends.
     const float* pose(int clip,float frame,unsigned tick=0,bool simulateBraids=true);
     // GPU skinning rewrites positions to bone-local space. Lit models keep
@@ -100,6 +105,8 @@ public:
     // Local player must never hold a pose for adaptive presentation budgeting.
     bool fullRate=false;
 private:
+    // stepLook's head query: only the slots it reads (see animation.cpp).
+    const float* lookPose(int clip,float frame,unsigned tick);
     void releaseData();
     bool takeKept(const char* path,size_t& size);
     std::string path_;size_t size_=0;

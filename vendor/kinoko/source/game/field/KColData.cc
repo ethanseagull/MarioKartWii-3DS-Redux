@@ -52,6 +52,7 @@ KColData::KColData(const void *file) {
     preloadPrisms();
     preloadNormals();
     preloadVertices();
+    packPrisms();
 
     computeBBox();
 }
@@ -182,7 +183,12 @@ bool KColData::checkSphere(f32 *distOut, EGG::Vector3f *fnrmOut, u16 *flagsOut) 
 
     // Check collision for all triangles, and continuously call the function until we're out
     while (*++m_prismIter != 0) {
-        const KCollisionPrism &prism = m_prisms[parse<u16>(*m_prismIter)];
+        PackedPrism scratch;
+        const PackedPrism *at = prismAt(parse<u16>(*m_prismIter), scratch);
+        if (!at) {
+            continue;
+        }
+        const PackedPrism &prism = *at;
         if (checkCollision<CollisionCheckType::Plane>(prism, distOut, fnrmOut, flagsOut)) {
             return true;
         }
@@ -207,7 +213,12 @@ bool KColData::checkSphereSingle(f32 *distOut, EGG::Vector3f *fnrmOut, u16 *flag
             continue;
         }
 
-        const KCollisionPrism &prism = m_prisms[parse<u16>(*m_prismIter)];
+        PackedPrism scratch;
+        const PackedPrism *at = prismAt(parse<u16>(*m_prismIter), scratch);
+        if (!at) {
+            continue;
+        }
+        const PackedPrism &prism = *at;
         if (checkCollision<CollisionCheckType::Edge>(prism, distOut, fnrmOut, flagsOut)) {
             return true;
         }
@@ -358,6 +369,46 @@ void KColData::preloadPrisms() {
     }
 }
 
+bool KColData::s_packed = true;
+
+/// mkw-3ds DIAG A/B: with s_packed off, the old layout's reads (the prism, then its
+/// vertex and normals at their own addresses); nullptr when its type check rejects it,
+/// as checkCollision would before reading anything else.
+const KColData::PackedPrism *KColData::prismAt(u16 index, PackedPrism &scratch) const {
+    if (s_packed) {
+        return &m_packed[index];
+    }
+    const KCollisionPrism &prism = m_prisms[index];
+    if (!(KCL_ATTRIBUTE_TYPE_BIT(prism.attribute) & m_typeMask)) {
+        return nullptr;
+    }
+    scratch.attribute = prism.attribute;
+    scratch.height = prism.height;
+    scratch.vertex = m_vertices[prism.pos_i];
+    scratch.enrm1 = m_nrms[prism.enrm1_i];
+    scratch.enrm2 = m_nrms[prism.enrm2_i];
+    scratch.enrm3 = m_nrms[prism.enrm3_i];
+    scratch.fnrm = m_nrms[prism.fnrm_i];
+    return &scratch;
+}
+
+/// mkw-3ds: copies each prism's vertex and normals next to it (see PackedPrism).
+void KColData::packPrisms() {
+    m_packed = owning_span<PackedPrism>(m_prisms.size());
+    for (size_t i = 1; i < m_prisms.size(); ++i) {
+        const KCollisionPrism &prism = m_prisms[i];
+        PackedPrism &packed = m_packed[i];
+        packed.vertex = m_vertices[prism.pos_i];
+        packed.enrm1 = m_nrms[prism.enrm1_i];
+        packed.enrm2 = m_nrms[prism.enrm2_i];
+        packed.enrm3 = m_nrms[prism.enrm3_i];
+        packed.fnrm = m_nrms[prism.fnrm_i];
+        packed.height = prism.height;
+        packed.attribute = prism.attribute;
+        packed.pad = 0;
+    }
+}
+
 /// @brief Creates a copy of the normals in memory.
 /// @details Optimizes for time by copying all of the normals to avoid constant byteswapping.
 /// Memory cost is typically upwards of a few hundred KB, with the worst case being ~750KB.
@@ -396,7 +447,7 @@ void KColData::preloadVertices() {
 /// 2. A collision with the triangle plane (0x807C1514)
 /// 3. A collision such that we are inside the triangle (0x807C0884)
 template <KColData::CollisionCheckType Type>
-bool KColData::checkCollision(const KCollisionPrism &prism, f32 *distOut, EGG::Vector3f *fnrmOut,
+bool KColData::checkCollision(const PackedPrism &prism, f32 *distOut, EGG::Vector3f *fnrmOut,
         u16 *flagsOut) {
     // Responsible for updating the output params
     auto out = [&](f32 dist) {
@@ -404,7 +455,7 @@ bool KColData::checkCollision(const KCollisionPrism &prism, f32 *distOut, EGG::V
             *distOut = dist;
         }
         if (fnrmOut) {
-            *fnrmOut = m_nrms[prism.fnrm_i];
+            *fnrmOut = prism.fnrm;
         }
         if (flagsOut) {
             *flagsOut = prism.attribute;
@@ -419,29 +470,32 @@ bool KColData::checkCollision(const KCollisionPrism &prism, f32 *distOut, EGG::V
         return false;
     }
 
-    const EGG::Vector3f relativePos = m_pos - m_vertices[prism.pos_i];
+    const EGG::Vector3f relativePos = m_pos - prism.vertex;
 
+    // mkw-3ds: the four distances are independent, so all are computed before
+    // the first exit (same expressions, same rounding): on the in-order VFP11
+    // the four dependent chains overlap instead of each waiting for a compare.
     // Edge normals point outside the triangle
-    const EGG::Vector3f &enrm1 = m_nrms[prism.enrm1_i];
-    f32 dist_ca = relativePos.ps_dot(enrm1);
+    const EGG::Vector3f &enrm1 = prism.enrm1;
+    const EGG::Vector3f &enrm2 = prism.enrm2;
+    const EGG::Vector3f &enrm3 = prism.enrm3;
+    const EGG::Vector3f &fnrm = prism.fnrm;
+    const f32 dist_ca = relativePos.ps_dot(enrm1);
+    const f32 dist_ab = relativePos.ps_dot(enrm2);
+    const f32 dist_bc = relativePos.ps_dot(enrm3) - prism.height;
+    const f32 plane_dist = relativePos.ps_dot(fnrm);
     if (m_radius <= dist_ca) {
         return false;
     }
 
-    const EGG::Vector3f &enrm2 = m_nrms[prism.enrm2_i];
-    f32 dist_ab = relativePos.ps_dot(enrm2);
     if (m_radius <= dist_ab) {
         return false;
     }
 
-    const EGG::Vector3f &enrm3 = m_nrms[prism.enrm3_i];
-    f32 dist_bc = relativePos.ps_dot(enrm3) - prism.height;
     if (m_radius <= dist_bc) {
         return false;
     }
 
-    const EGG::Vector3f &fnrm = m_nrms[prism.fnrm_i];
-    f32 plane_dist = relativePos.ps_dot(fnrm);
     f32 dist_in_plane = m_radius - plane_dist;
     if (dist_in_plane <= 0.0f) {
         return false;
@@ -583,35 +637,35 @@ bool KColData::checkCollision(const KCollisionPrism &prism, f32 *distOut, EGG::V
 
 /// @brief This is a combination of two point collision check functions. They only vary based on
 /// whether we are checking movement.
-bool KColData::checkPointCollision(const KCollisionPrism &prism, f32 *distOut,
+bool KColData::checkPointCollision(const PackedPrism &prism, f32 *distOut,
         EGG::Vector3f *fnrmOut, u16 *flagsOut, bool movement) {
     KCLTypeMask attrMask = KCL_ATTRIBUTE_TYPE_BIT(prism.attribute);
     if (!(attrMask & m_typeMask)) {
         return false;
     }
 
-    const EGG::Vector3f relativePos = m_pos - m_vertices[prism.pos_i];
+    const EGG::Vector3f relativePos = m_pos - prism.vertex;
 
-    const EGG::Vector3f &enrm1 = m_nrms[prism.enrm1_i];
-    f32 dist_ca = relativePos.ps_dot(enrm1);
+    const EGG::Vector3f &enrm1 = prism.enrm1;
+    const EGG::Vector3f &enrm2 = prism.enrm2;
+    const EGG::Vector3f &enrm3 = prism.enrm3;
+    const EGG::Vector3f &fnrm = prism.fnrm;
+    const f32 dist_ca = relativePos.ps_dot(enrm1);
+    const f32 dist_ab = relativePos.ps_dot(enrm2);
+    const f32 dist_bc = relativePos.ps_dot(enrm3) - prism.height;
+    const f32 plane_dist = relativePos.ps_dot(fnrm);
     if (dist_ca >= 0.01f) {
         return false;
     }
 
-    const EGG::Vector3f &enrm2 = m_nrms[prism.enrm2_i];
-    f32 dist_ab = relativePos.ps_dot(enrm2);
     if (dist_ab >= 0.01f) {
         return false;
     }
 
-    const EGG::Vector3f &enrm3 = m_nrms[prism.enrm3_i];
-    f32 dist_bc = relativePos.ps_dot(enrm3) - prism.height;
     if (dist_bc >= 0.01f) {
         return false;
     }
 
-    const EGG::Vector3f &fnrm = m_nrms[prism.fnrm_i];
-    f32 plane_dist = relativePos.ps_dot(fnrm);
     f32 dist_in_plane = 0.01f - plane_dist;
     if (dist_in_plane <= 0.0f) {
         return false;
@@ -654,7 +708,12 @@ bool KColData::checkSphereMovement(f32 *distOut, EGG::Vector3f *fnrmOut, u16 *at
 
     // Check collision for all triangles, and continuously call the function until we're out
     while (*++m_prismIter != 0) {
-        const KCollisionPrism &prism = m_prisms[parse<u16>(*m_prismIter)];
+        PackedPrism scratch;
+        const PackedPrism *at = prismAt(parse<u16>(*m_prismIter), scratch);
+        if (!at) {
+            continue;
+        }
+        const PackedPrism &prism = *at;
         if (checkCollision<CollisionCheckType::Movement>(prism, distOut, fnrmOut, attributeOut)) {
             return true;
         }
@@ -674,7 +733,12 @@ bool KColData::checkPoint(f32 *distOut, EGG::Vector3f *fnrmOut, u16 *attributeOu
 
     // Check collision for all triangles, and continuously call the function until we're out
     while (*++m_prismIter != 0) {
-        const KCollisionPrism &prism = m_prisms[parse<u16>(*m_prismIter)];
+        PackedPrism scratch;
+        const PackedPrism *at = prismAt(parse<u16>(*m_prismIter), scratch);
+        if (!at) {
+            continue;
+        }
+        const PackedPrism &prism = *at;
         if (checkPointCollision(prism, distOut, fnrmOut, attributeOut, false)) {
             return true;
         }
@@ -694,7 +758,12 @@ bool KColData::checkPointMovement(f32 *distOut, EGG::Vector3f *fnrmOut, u16 *att
 
     // Check collision for all triangles, and continuously call the function until we're out
     while (*++m_prismIter != 0) {
-        const KCollisionPrism &prism = m_prisms[parse<u16>(*m_prismIter)];
+        PackedPrism scratch;
+        const PackedPrism *at = prismAt(parse<u16>(*m_prismIter), scratch);
+        if (!at) {
+            continue;
+        }
+        const PackedPrism &prism = *at;
         if (checkPointCollision(prism, distOut, fnrmOut, attributeOut, true)) {
             return true;
         }

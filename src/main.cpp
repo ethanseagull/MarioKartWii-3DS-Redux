@@ -12,6 +12,7 @@
 #include <mkw/mii_garage.hpp>
 #include <mkw/course_effect_roots.hpp>
 #include <game/field/CollisionDirector.hh>
+#include <game/field/KColData.hh>
 #include <mkw/driver_item_signals.hpp>
 #include <mkw/driver_look_data.hpp>
 #include <mkw/driver_look_gate.hpp>
@@ -2358,6 +2359,16 @@ int main() {
     {char text[80];snprintf(text,sizeof text,"heap %lu KB, race cache limit %lu KB",(unsigned long)envGetHeapSize()/1024,(unsigned long)raceCacheLimit/1024);report(text);}
     mkw::renderQuality().setReduced(!new3ds&&!(kQa&&exists("sdmc:/3ds/MKWiiDS/full-quality.txt")));
     if(kQa&&exists("sdmc:/3ds/MKWiiDS/bottom-half-rate.txt"))mkw::renderQuality().bottomInterval=2;
+    mkw::DriverAnimation::verifyLook=kQa&&exists("sdmc:/3ds/MKWiiDS/look-verify.txt");
+    // DIAG ab-alternate.txt: same-binary A/B in one run. Each 600-step sim profile
+    // window runs one combination of the Old 3DS speed-ups (bit 0: head-look subset,
+    // bit 1: packed KCL prisms; set = new path), cycling 3,0,1,2; the window's line
+    // ends with "ab <bits>".
+    const bool abAlternate=kQa&&exists("sdmc:/3ds/MKWiiDS/ab-alternate.txt");
+    unsigned abWindow=0;
+    auto abApply=[&]{if(!abAlternate)return;static constexpr unsigned order[4]={3,0,1,2};const unsigned bits=order[abWindow%4];
+        mkw::DriverAnimation::subsetLook=bits&1;K::Field::KColData::s_packed=(bits>>1)&1;};
+    abApply();
     if(kQa&&exists("sdmc:/3ds/MKWiiDS/bottom-rgba8.txt"))mkw::renderQuality().bottomRgba4=false;
     mkw::renderQuality().mipmaps=!exists("sdmc:/3ds/MKWiiDS/diagnose-no-mipmaps.txt");
     // New 3DS draws every opponent at full detail (A/B: racer-lod.txt brings back the distance LOD).
@@ -2481,6 +2492,12 @@ int main() {
     const bool ghostTrace=kQa&&exists("sdmc:/3ds/MKWiiDS/ghost-trace.txt");
     struct GhostTraceRow{unsigned step;float x,y,z,speed,completion;unsigned checkpoint;};
     std::vector<GhostTraceRow> ghostTraceRows;
+    // DIAG (state-digest.txt): a running FNV-1a hash of every kart's position,
+    // velocity, rotation and speed after each physics step, logged every 600
+    // steps ("state digest"). Same seed, same inputs: two builds whose Kinoko
+    // is exact print the same lines (the multi-kart gate for physics changes).
+    const bool stateDigest=kQa&&exists("sdmc:/3ds/MKWiiDS/state-digest.txt");
+    unsigned long long digestHash=1469598103934665603ull;unsigned digestSteps=0;
     mkw::AnimationBudget animationBudget;
     // The presented camera of the current step: drawn each frame and handed to the NW4R
     // effects as their process camera after each step.
@@ -2887,8 +2904,19 @@ int main() {
                         char text[1024];int n=snprintf(text,sizeof text,"sim profile %u ticks, us/tick:",sp::data.steps);
                         for(unsigned i=0;i<sp::Count&&n>0&&n<int(sizeof text);++i)
                             n+=snprintf(text+n,sizeof text-n," %s %.0f",sp::Names[i],double(sp::data.ticks[i])*1e6/SYSCLOCK_ARM11/sp::data.steps);
+                        if(mkw::DriverAnimation::verifyLook&&n>0&&n<int(sizeof text))n+=snprintf(text+n,sizeof text-n," look_checks %u look_mismatches %u",mkw::DriverAnimation::lookChecks,mkw::DriverAnimation::lookMismatches);
+                        if(abAlternate&&n>0&&n<int(sizeof text))snprintf(text+n,sizeof text-n," ab %u",unsigned(mkw::DriverAnimation::subsetLook)|unsigned(K::Field::KColData::s_packed)<<1);
+                        ++abWindow;abApply();
                         report(text);sp::data=sp::Data{};
                     }
+                }
+                if(stateDigest&&sceneStepped&&fullRace){
+                    auto mix=[&](const void* p,size_t n){auto* b=static_cast<const unsigned char*>(p);for(size_t i=0;i<n;++i){digestHash^=b[i];digestHash*=1099511628211ull;}};
+                    const auto* km=K::Kart::KartObjectManager::Instance();
+                    for(size_t i=0;i<km->count();++i){const auto* k=km->object(i);
+                        mix(&k->pos(),sizeof k->pos());mix(&k->velocity(),sizeof k->velocity());mix(&k->fullRot(),sizeof k->fullRot());
+                        const float speed=k->speed();mix(&speed,sizeof speed);}
+                    if(++digestSteps%600==0){char text[96];snprintf(text,sizeof text,"state digest steps %u hash %016llx",digestSteps,digestHash);report(text);}
                 }
                 if(ghostTrace&&sceneStepped&&fullRace&&timeTrial&&staffGhost&&K::Kart::KartObjectManager::Instance()->count()>1){
                     auto* g=K::Kart::KartObjectManager::Instance()->object(1);const auto& gp=g->pos();const auto& rp=K::System::RaceManager::Instance()->player(1);
@@ -3489,7 +3517,12 @@ int main() {
                         if(!kartFxLod.ready){kartFxLod.lod.reset(racers,local,mkw::KartEffectLod::VsMode,mkw::renderQuality().kartEffectScreens);kartFxLod.ready=true;}
                         kartFxLod.lod.update(0,0,local,kartFxLod.clip);
                         uint32_t calcGroups=~0u,drawGroups=~0u;
+                        // One name search a tick, not one per racer (Old 3DS: a strcmp walk
+                        // over every effect resource).
+                        const bool hasRainbowEntry=raceEffects.find("rk_entry")>=0;
                         for(unsigned i=0;i<racers;++i){
+                            namespace sp=mkw::simprof;auto fxAt=sp::now();
+                            auto fxLap=[&](sp::Slot s){sp::add(s,fxAt);fxAt=sp::now();};
                             const auto* racer=K::Kart::KartObjectManager::Instance()->object(i);
                             const auto& m=racer->pose();const auto& status=racer->status();const auto* action=racer->action();
                             auto& in=fxIn[i];
@@ -3497,7 +3530,7 @@ int main() {
                             in.scale=racer->scale().y;in.initialY=racer->bsp().initialYPos;in.bulletOffset=mkw::BulletModelHeight-in.initialY;
                             in.star=status.onBit(St::Star);in.mega=status.onBit(St::Mega);in.bullet=status.onBit(St::Bullet);
                             in.shocked=status.onBit(St::Shocked);in.beforeRespawn=status.onBit(St::BeforeRespawn);
-                            in.hasRainbowEntry=raceEffects.find("rk_entry")>=0;
+                            in.hasRainbowEntry=hasRainbowEntry;
                             in.action=int(action->currentAction());in.actionFrame=action->frame();in.powDodged=action->powDodged();in.powPending=action->powPending();
                             in.spinSerial=action->spinStartCount();in.spinRotations=action->spinRotations();in.spinLeft=action->spinLeft();
                             in.crashSerial=action->crashStartCount();
@@ -3576,21 +3609,26 @@ int main() {
                             in.poihanaThrow=kartContacts[i].poihanaThrow;
                             for(unsigned j=0;j<racers;++j)if(kartContacts[i].bumpedBy&(1u<<j))
                                 in.otherContactFast|=K::Kart::KartObjectManager::Instance()->object(j)->velocity().length()>30.f;
+                            fxLap(sp::FxInput);
                             kartFxSlots.select(i,i==0);kartFx[i].step(in,kartFxSlots,kartFxLod.lod.lod(i));
+                            fxLap(sp::FxKart);
                             mkw::EffectFrame landingFrame;landingFrame.origin=in.position;landingFrame.x=in.right;landingFrame.y=in.up;landingFrame.z=in.forward;landingFrame.scale=in.scale;
                             landingEffects.step(raceEffects,i,i==0,landingFrame,(in.waterRear[0]+in.waterRear[1])*.5f,intro.active(),
                                 in.beforeRespawn||in.bullet,kartFxLod.lod.lod(i),in.bike,in.groundStart,in.hardLanding,
                                 status.onBit(St::DriftManual),in.jumpPad,in.waterKcl||in.diving,status.onBit(St::Wheelie),status.onBit(St::AllWheelsCollision));
+                            fxLap(sp::FxLanding);
                             wheelSpinEffects.step(raceEffects,i,landingFrame,vec(racer->wheelPos(rearL)),vec(racer->wheelPos(rearR)),
                                 in.bike,status.onBit(St::ChargingSSMT),move->ssmtCharged(),status.onBit(St::StickLeft)?-1:status.onBit(St::StickRight)?1:0,
                                 racer->collisionData(rearL).bFloor,racer->collisionData(rearR).bFloor,
                                 intro.active(),in.beforeRespawn||in.bullet,
                                 K::System::RaceConfig::Instance()->raceScenario().players[i].type==K::System::RaceConfig::Player::Type::Ghost,
                                 kartFxLod.lod.lod(i));
+                            fxLap(sp::FxWheelSpin);
                             brakeEffects.step(raceEffects,i,landingFrame,vec(racer->wheelPos(rearR)),
                                 in.bike,i==0,K::System::RaceConfig::Instance()->raceScenario().players[i].type==K::System::RaceConfig::Player::Type::Ghost,
                                 status.onBit(St::Brake),status.onBit(St::Accelerate),unsigned(move->driftState()),status.onBit(St::DriftAuto),
                                 racer->speed(),racer->collisionData(rearR).bFloor,intro.active(),in.beforeRespawn||in.bullet,kartFxLod.lod.lod(i));
+                            fxLap(sp::FxBrake);
                             if(i){
                                 const bool bike=racer->isBike();const unsigned wheels=racer->tireCount();
                                 const unsigned l=bike?1:wheels-2,r=wheels-1;
@@ -3601,6 +3639,7 @@ int main() {
                                     racer->inputs()->currentState().accelerate(),racer->collisionData(l).bFloor,racer->collisionData(r).bFloor,
                                     bike,status.onBit(St::Burnout),in.beforeRespawn||in.bullet,
                                     move->startEffectSerial(),move->startEffectDuration(),kartFxLod.lod.lod(i));
+                                fxLap(sp::FxRemote);
                                 mkw::KartSurfaceEffects::Wheel surfaceWheels[2];
                                 for(unsigned w=0;w<2;++w){const unsigned tire=w?r:l;const auto& c=racer->collisionData(tire);
                                     surfaceWheels[w]={vec(racer->wheelEdgePos(tire)),uint32_t(c.closestFloorFlags),c.closestFloorSettings,c.bFloor};}
@@ -3611,6 +3650,7 @@ int main() {
                                     K::System::RaceManager::Instance()->stage()>=K::System::RaceManager::Stage::Race,
                                     unsigned(move->driftState())>=2,mkw::length(vec(racer->velocity())),move->softSpeedLimit(),
                                     status.onBit(St::ChargingSSMT),remoteSmoke.startActive(i),sandArea,i);
+                                fxLap(sp::FxSurface);
                                 mkw::OpponentDrivingInput driving;
                                 driving.pose=frame;driving.rearLeft=vec(racer->wheelPos(l));driving.rearRight=vec(racer->wheelPos(r));
                                 driving.vehicle=unsigned(K::System::RaceConfig::Instance()->raceScenario().players[i].vehicle);
@@ -3621,6 +3661,7 @@ int main() {
                                 driving.leftFloor=racer->collisionData(l).bFloor;driving.rightFloor=racer->collisionData(r).bFloor;
                                 driving.preview=intro.active();driving.hidden=in.beforeRespawn||in.bullet;
                                 opponentDrivingEffects.step(raceEffects,i,driving,kartFxLod.lod.lod(i));
+                                fxLap(sp::FxOppDrive);
                             }
                             // A racer's group calculates (0x80678818) and draws (0x80678aec)
                             // without +7 or with +9.

@@ -89,6 +89,25 @@ public:
     };
     STATIC_ASSERT(sizeof(KCollisionPrism) == 0x10);
 
+    /// mkw-3ds: one prism with its vertex and normals stored beside it, built
+    /// at load. A test reads one or two sequential cache lines instead of the
+    /// prism, a vertex and four normals at six scattered addresses (the Old
+    /// 3DS has no L2: ~230 ns per miss). Same values, so results are
+    /// bit-identical. After Codiak540's o3ds-performance Kinoko patch.
+    /// The attribute (the type mask is the first exit) comes first, so a
+    /// rejected type reads only the first line.
+    struct PackedPrism {
+        u16 attribute;
+        u16 pad;
+        f32 height;
+        EGG::Vector3f vertex;
+        EGG::Vector3f enrm1;
+        EGG::Vector3f enrm2;
+        EGG::Vector3f enrm3;
+        EGG::Vector3f fnrm;
+    };
+    STATIC_ASSERT(sizeof(PackedPrism) == 0x44);
+
     KColData(const void *file);
     ~KColData();
 
@@ -131,6 +150,9 @@ public:
     }
     /// @endGetters
 
+    /// mkw-3ds DIAG A/B (ab-alternate.txt): false reads the unpacked arrays.
+    static bool s_packed;
+
     [[nodiscard]] static EGG::Vector3f GetVertex(f32 height, const EGG::Vector3f &vertex1,
             const EGG::Vector3f &fnrm, const EGG::Vector3f &enrm3, const EGG::Vector3f &enrm);
 
@@ -138,12 +160,14 @@ private:
     void preloadPrisms();
     void preloadNormals();
     void preloadVertices();
+    void packPrisms();
+    [[nodiscard]] const PackedPrism *prismAt(u16 index, PackedPrism &scratch) const;
 
     template <CollisionCheckType Type>
-    [[nodiscard]] bool checkCollision(const KCollisionPrism &prism, f32 *distOut,
+    [[nodiscard]] bool checkCollision(const PackedPrism &prism, f32 *distOut,
             EGG::Vector3f *fnrmOut, u16 *flagsOut);
 
-    [[nodiscard]] bool checkPointCollision(const KCollisionPrism &prism, f32 *distOut,
+    [[nodiscard]] bool checkPointCollision(const PackedPrism &prism, f32 *distOut,
             EGG::Vector3f *fnrmOut, u16 *flagsOut, bool movement);
     [[nodiscard]] bool checkSphereMovement(f32 *distOut, EGG::Vector3f *fnrmOut, u16 *attributeOut);
     [[nodiscard]] bool checkPointMovement(f32 *distOut, EGG::Vector3f *fnrmOut, u16 *attributeOut);
@@ -182,6 +206,7 @@ private:
     owning_span<KCollisionPrism> m_prisms;
     owning_span<EGG::Vector3f> m_nrms;
     owning_span<EGG::Vector3f> m_vertices;
+    owning_span<PackedPrism> m_packed;
 };
 
 } // namespace Kinoko::Field
