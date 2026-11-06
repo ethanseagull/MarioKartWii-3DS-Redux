@@ -1,3 +1,4 @@
+#include "mkw/console_model.hpp"
 #include <mkw/job_worker.hpp>
 #include <mkw/render_metrics.hpp>
 #include <mkw/skin_positions.hpp>
@@ -12,7 +13,7 @@ bool JobWorker::start(){
     // Same VFP mode (flush-to-zero, default NaN, rounding) as the main thread,
     // so a job computes identical floats on either core.
     fpscr_=__builtin_arm_get_fpscr();
-    bool n3ds=false;APT_CheckNew3DS(&n3ds);
+    bool n3ds=mkw::isNew3ds();
     // Old 3DS core 1 is time sliced with the system; the audio threads there
     // already require a limit (sound_system.cpp). Higher-priority system and
     // audio threads still preempt this one.

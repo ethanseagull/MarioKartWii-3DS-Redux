@@ -1,3 +1,4 @@
+#include "mkw/console_model.hpp"
 #include <mkw/driver_look_target.hpp>
 #include "mkw/animation.hpp"
 #include <mkw/render_metrics.hpp>
@@ -132,7 +133,7 @@ bool DriverAnimation::load(const char* path,const Model& model){
     // sound and the pause menu (with 10, 27 of 29 races ended under the 3 MiB
     // the pause preload must leave). Kept banks (keepReleased) then stay where
     // they are race after race, so the split between the two pools stays put.
-    static const bool new3ds=[]{bool n=false;APT_CheckNew3DS(&n);return n;}();
+    static const bool new3ds=[]{bool n=mkw::isNew3ds();return n;}();
     constexpr size_t LinearReserve=13u<<20;
     auto allocateBank=[&](size_t bytes){
         if(!new3ds&&linearSpaceFree()>=bytes+LinearReserve){

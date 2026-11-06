@@ -23,6 +23,7 @@
 // as a 2D frame would, then the right eye with its own projection and target,
 // reusing every buffer the left eye wrote. Immediate frames in stereo (menus)
 // record the same way and are drawn on their own thread at end().
+#include "mkw/console_model.hpp"
 #include <mkw/diag.hpp>
 #include "mkw/renderer.hpp"
 #include "mkw/menu_ui.hpp"
@@ -174,7 +175,7 @@ bool Renderer::startRenderThread(){
     // Identical VFP mode (flush-to-zero, rounding) to the recording thread:
     // the render thread's matrices and culling match an immediate frame's.
     fpscr_=__builtin_arm_get_fpscr();
-    bool n3ds=false;APT_CheckNew3DS(&n3ds);
+    bool n3ds=mkw::isNew3ds();
     // New 3DS reserves core 2 for rendering and short audio work. Animation
     // jobs share main core 0 at lower priority; Old 3DS retains core 1.
     s32 priority=0x30;svcGetThreadPriority(&priority,CUR_THREAD_HANDLE);

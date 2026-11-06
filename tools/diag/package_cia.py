@@ -17,9 +17,13 @@ import hashlib, json, os, shutil, struct, subprocess, sys
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
-OUT = ROOT / 'build/diag'
+# MKW_DIAG_VARIANT=o3dstest (compile.py): the Old 3DS test build for a New 3DS,
+# title 000400000F4B5E00 "MKWO3DSTEST" from package/diag-o3ds-test.rsf.
+VARIANT = os.environ.get('MKW_DIAG_VARIANT', '')
+OUT = ROOT / ('build/diag-' + VARIANT if VARIANT else 'build/diag')
 ELF = OUT / 'mkw-3ds-diag.elf'
-TITLE = '000400000F4B5D00'
+TITLE, RSF, SUFFIX = {'': ('000400000F4B5D00', 'diag-external-sd.rsf', 'DIAG'),
+                      'o3dstest': ('000400000F4B5E00', 'diag-o3ds-test.rsf', 'O3DSTEST')}[VARIANT]
 WORK = Path(os.environ.get('MKW_WORK', ROOT / 'build/standard'))
 BANNER = Path(os.environ.get('MKW_BANNER', WORK / 'home-banner/production/banner-startgrid.bnr'))
 # tools/build.py records the makerom it found or downloaded.
@@ -42,9 +46,9 @@ def main():
         raise SystemExit(f'{ELF} missing: run tools/diag/compile.py first.')
     if not BANNER.is_file():
         raise SystemExit(f'{BANNER} missing: run tools/build.py first or set MKW_BANNER.')
-    cia = OUT / f'MarioKartWiiDS-v{VERSION}-DIAG.cia'
+    cia = OUT / f'MarioKartWiiDS-v{VERSION}-{SUFFIX}.cia'
     subprocess.run([MAKEROM, '-f', 'cia', '-target', 't', '-exefslogo', '-elf', str(ELF),
-                    '-rsf', str(HERE / 'package/diag-external-sd.rsf'), '-icon', str(HERE / 'package/icon-diag.icn'),
+                    '-rsf', str(HERE / 'package' / RSF), '-icon', str(HERE / 'package/icon-diag.icn'),
                     '-banner', str(BANNER), '-ver', str(TITLE_VERSION), '-DAPP_REMASTER=0', '-o', str(cia)],
                    check=True)
     raw = bytearray(cia.read_bytes())

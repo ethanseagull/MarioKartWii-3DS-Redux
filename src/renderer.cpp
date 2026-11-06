@@ -1,3 +1,4 @@
+#include "mkw/console_model.hpp"
 #include "mkw/env_animation.hpp"
 #include "mkw/road_sampler_policy.hpp"
 #include "mkw/course_phase_ranges.hpp"
@@ -91,8 +92,8 @@ bool readExact(FILE* f,void* p,size_t size) { return std::fread(p,1,size,f)==siz
 // also the console's stereo display settings (config block 0x50005), which
 // Mario Kart 7's stereo camera reads; the defaults stand if they are absent.
 bool stereoScreen(mkw::stereo::Display& display){
-    bool n3ds=false;
-    if(R_FAILED(APT_CheckNew3DS(&n3ds))||!n3ds||R_FAILED(cfguInit()))return false;
+    const bool n3ds=mkw::isNew3ds(); // false in the Old 3DS test build: no stereo there
+    if(!n3ds||R_FAILED(cfguInit()))return false;
     u8 model=CFG_MODEL_N2DSXL,threeD=0;
     const bool ok=R_SUCCEEDED(CFGU_GetSystemModel(&model))&&R_SUCCEEDED(CFGU_GetModelNintendo2DS(&threeD))
         &&threeD&&(model==CFG_MODEL_N3DS||model==CFG_MODEL_N3DSXL);
@@ -2826,7 +2827,7 @@ bool Renderer::capturePausedTop(){
     return true;
 }
 static const char* pauseControlsPath(){
-    bool new3ds=false;APT_CheckNew3DS(&new3ds);
+    bool new3ds=mkw::isNew3ds();
     return new3ds?"textures/pause_controls_new3ds.t3x":"textures/pause_controls_old3ds.t3x";
 }
 bool Renderer::pauseControlsAvailable() const{

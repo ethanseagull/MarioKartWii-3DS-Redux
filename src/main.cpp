@@ -1,3 +1,4 @@
+#include "mkw/console_model.hpp"
 #include <mkw/mii_voice.hpp>
 #include <mkw/notification_led.hpp>
 #include <game/kart/KartAction.hh>
@@ -446,7 +447,7 @@ int main() {
 #ifndef MKW_RELEASE
     outOfHeapReserve=std::malloc(64*1024);std::set_new_handler(outOfHeap);
 #endif
-    osSetSpeedupEnable(true); // Supported New 3DS CPU/L2 mode; simulation remains fixed at 60 Hz.
+    osSetSpeedupEnable(mkw::isNew3ds()); // New 3DS 804 MHz + L2 (off in the Old 3DS test build); simulation remains fixed at 60 Hz.
     gfxInitDefault();
     mkw::NotificationLed notificationLed;
     // Saves are writable SD data for both CIA and external-resource 3DSX.
@@ -481,7 +482,7 @@ int main() {
     // 43 MiB. The fullest course at load, Grumble Volcano, leaves 3.8 MB of
     // the 16 free (12.2 MiB used); the 2 MiB returned keep a Grand Prix's
     // eleven opponents within the Old 3DS heap (MiniBandit 4006b3f used 13).
-    bool arenaNew3ds=false;APT_CheckNew3DS(&arenaNew3ds);
+    bool arenaNew3ds=mkw::isNew3ds();
     const size_t arenaSize=arenaNew3ds?size_t(K::MEMORY_SPACE_SIZE):size_t(14u<<20);
     void* memory=memalign(32,arenaSize);
     if(!memory){report("FAIL simulation heap reservation");return startupFailure("Simulation memory allocation failed.");}
@@ -562,7 +563,7 @@ int main() {
     // and made core 1 the bottleneck (SM64DS port; Codiak540's Old 3DS model:
     // 43 ms frames). There every race frame is recorded and drawn on core 0 and
     // core 1 keeps only the audio threads (30%). o3ds-core1.txt restores the old layout.
-    bool secondCore=false;APT_CheckNew3DS(&secondCore);
+    bool secondCore=mkw::isNew3ds();
     if(!secondCore&&exists("sdmc:/3ds/MKWiiDS/o3ds-core1.txt"))secondCore=true;
     // Pipelined race frames (A/B: no-pipeline.txt turns them off). Only the
     // render thread uses them: without it their second set of per-frame
@@ -624,6 +625,7 @@ int main() {
     }else report("stereo unavailable (2D model)");
     // secondCore: see pipelineFrames above.
     if(!secondCore)report("Old 3DS: race frames and presentation jobs on core 0");
+    if(mkw::old3dsTestBuild){char text[120];snprintf(text,sizeof text,"Old 3DS test build: speedup off, Old 3DS paths, no ZL/ZR/C-stick; application memory %lu KB",(unsigned long)osGetMemRegionSize(MEMREGION_APPLICATION)/1024);report(text);}
     // Second-core presentation jobs (racer posing); none run while the race steps.
     if(secondCore&&!mkw::jobWorker().start())report("job worker unavailable: presentation jobs run on core 0");
     // Race frames draw on the second core one frame behind their recording
@@ -666,7 +668,7 @@ int main() {
      // Low, whatever the file says; the page answers those rows with "Not
      // available". Applied before savedSettings, so the file is rewritten only
      // when Bloom changes. DIAG full-quality.txt lifts it with reduced quality.
-     bool settingsNew3ds=false;APT_CheckNew3DS(&settingsNew3ds);
+     bool settingsNew3ds=mkw::isNew3ds();
      if(!settingsNew3ds&&!(kQa&&exists("sdmc:/3ds/MKWiiDS/full-quality.txt"))){menu.old3dsSettings=true;mkw::lockOld3dsSettings(menu.settings);}}
     mkw::UiSettings savedSettings=menu.settings;
     mkw::MenuRenderer menuRenderer;
@@ -911,7 +913,7 @@ int main() {
                 ready=menuRenderer.prepare(paused);
             }
             while(!ready&&aptMainLoop()){
-                hidScanInput();const unsigned down=hidKeysDown();
+                hidScanInput();const unsigned down=mkw::consoleKeys(hidKeysDown());
                 if(down&(KEY_B|KEY_START)){menu.enter(mkw::UiPage::Race);renderer.releasePausedTop();return mkw::UiAction::ResumeRace;}
                 if(down&KEY_A){menuRenderer.release(renderer);renderer.waitForGpu();ready=menuRenderer.prepare(paused);}
                 renderer.begin({0,0,1000},{0,0,0},{0,1,0});renderer.drawScreenFade(1.f,false);
@@ -979,8 +981,8 @@ int main() {
                     benchmarkSeeded=true;menu.vsCourseIndex=benchmarkStart;menu.selection.course=menu.vsCourseDeck[benchmarkStart];
                     if(benchmarkCourse<32){menu.vsCourseDeck.fill(benchmarkCourse);menu.selection.course=benchmarkCourse;}}}
             menuProfile->begin(unsigned(menu.page),transition.active());
-            hidScanInput();unsigned down=hidKeysDown();
-            unsigned navigation=down|hidKeysDownRepeat();
+            hidScanInput();unsigned down=mkw::consoleKeys(hidKeysDown());
+            unsigned navigation=down|mkw::consoleKeys(hidKeysDownRepeat());
             mkw::UiInput input{bool(navigation&(KEY_DUP|KEY_CPAD_UP)),bool(navigation&(KEY_DDOWN|KEY_CPAD_DOWN)),bool(navigation&(KEY_DLEFT|KEY_CPAD_LEFT)),bool(navigation&(KEY_DRIGHT|KEY_CPAD_RIGHT)),bool(down&KEY_A),bool(down&KEY_B),bool(down&KEY_START),bool(down&KEY_Y)};
             if(!revealed){
                 if(menu.page==mkw::UiPage::Error&&(input.back||input.accept))return leave(mkw::UiAction::Exit);
@@ -2345,7 +2347,7 @@ int main() {
     };
     // Old 3DS draws reduced detail; full-quality.txt keeps every draw for QA.
     // Set before the first race loads: some reductions apply at load.
-    bool new3ds=false;APT_CheckNew3DS(&new3ds);
+    bool new3ds=mkw::isNew3ds();
     // Race-load RAM cache: New 3DS only (the Old 3DS heap has no room). A/B: no-race-cache.txt.
     const size_t raceCacheLimit=new3ds&&!exists("sdmc:/3ds/MKWiiDS/no-race-cache.txt")?mkw::pack::cacheLimitFor(envGetHeapSize()):0;
     mkw::pack::enableCache(raceCacheLimit);
@@ -2553,7 +2555,7 @@ int main() {
         // count. citro3d counts it before libctru sets the (sticky) VBlank0 event,
         // so a stale event costs one recheck and no refresh is ever missed.
         if(fullRace)for(unsigned waits=0;C3D_FrameCounter(0)==lastRefresh&&waits<3;++waits)gspWaitForEvent(GSPGPU_EVENT_VBlank0,false);
-        hidScanInput();auto held=hidKeysHeld(),down=hidKeysDown();
+        hidScanInput();auto held=mkw::consoleKeys(hidKeysHeld()),down=mkw::consoleKeys(hidKeysDown());
         const bool endMenu=menu.page==mkw::UiPage::Results&&results.phase()==mkw::RaceFlowPhase::Menu;
         gyroTrick.read(fullRace&&!qaMode&&!autoplay&&!replay&&dataReady&&
                        menu.page==mkw::UiPage::Race&&!intro.active()&&!results.active());
@@ -2589,7 +2591,7 @@ int main() {
                 // Once the RaceHUD page has ended START no longer pauses.
                 if(down&(KEY_A|KEY_B|KEY_START))resultsInput.advance=true;
                 if(endMenu){
-                    const u32 nav=down|(autoplay?0u:hidKeysDownRepeat());
+                    const u32 nav=down|(autoplay?0u:mkw::consoleKeys(hidKeysDownRepeat()));
                     const unsigned oldCursor=menu.cursor;
                     if(nav&(KEY_DUP|KEY_CPAD_UP))menu.input({true});
                     else if(nav&(KEY_DDOWN|KEY_CPAD_DOWN))menu.input({false,true});

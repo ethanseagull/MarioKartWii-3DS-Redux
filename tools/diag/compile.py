@@ -23,7 +23,10 @@ WORK = Path(os.environ.get('MKW_WORK', ROOT / 'build/standard')).resolve() / 'co
 if not (WORK / 'generated').is_dir():
     raise SystemExit(f'{WORK / "generated"} missing: run tools/build.py first (or set MKW_WORK).')
 GEN = WORK / 'generated'
-OUT = ROOT / 'build/diag'
+# MKW_DIAG_VARIANT=o3dstest: the Old 3DS test build for a New 3DS (include/mkw/console_model.hpp),
+# in build/diag-o3dstest/ (its own objects, so the two builds don't rebuild each other).
+VARIANT = os.environ.get('MKW_DIAG_VARIANT', '')
+OUT = ROOT / ('build/diag-' + VARIANT if VARIANT else 'build/diag')
 NAME = 'mkw-3ds-diag'
 SHADER = WORK / 'shader'
 # devkitPro's shells set DEVKITPRO=/opt/devkitpro, which Windows Python cannot open.
@@ -39,6 +42,7 @@ FLAGS = ARCH + ['-O2', '-g', '-mword-relocations', '-ffunction-sections', '-fdat
                 '-std=gnu++23', '-D__3DS__', '-DREVOLUTION', '-DMKW_AUTO_PROFILE', '-DMKW_WRAP_ROMFS_MOUNT', '-DKINOKO_QUIET',
                 '-fno-exceptions', '-fno-rtti', '-fcheck-new', '-fno-strict-aliasing',
                 '-ffile-prefix-map=' + ROOT.as_posix() + '/=']
+FLAGS += {'': [], 'o3dstest': ['-DMKW_OLD3DS_TEST']}[VARIANT]
 FLAGS += ['-I' + p.as_posix() for p in [SHADER, ROOT / 'vendor/kinoko/include', ROOT / 'vendor/kinoko/source', ROOT / 'include',
                                         ROOT / 'vendor/cfl-mii/include', ROOT / 'vendor/citro3d/include', SDK / 'libctru/include', GEN]]
 
