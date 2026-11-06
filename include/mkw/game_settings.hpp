@@ -17,6 +17,9 @@ struct UiSettings {
  unsigned opponentDetail=0;
  bool operator==(const UiSettings&)const=default;
 };
+// Old 3DS (268 MHz, one core, 43 MB heap): the three heavy options stay at
+// their light values (MenuState::old3dsSettings refuses to switch them).
+inline void lockOld3dsSettings(UiSettings& s){s.textureQuality=1;s.dynamicShadows=false;s.opponentDetail=1;}
 namespace settings_file {
 inline std::uint32_t crc(const unsigned char* b,unsigned n){
  std::uint32_t c=~0u;

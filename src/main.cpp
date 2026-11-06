@@ -661,7 +661,13 @@ int main() {
      // Whole-game settings (the Settings page). The first boot takes Dynamic
      // Shadows from the last license, where it used to be stored.
      if(!mkw::loadGameSettings(SettingsFile,menu.settings)&&licenseSaves[last].occupied)
-         menu.settings.dynamicShadows=licenseSaves[last].settings.dynamicShadows;}
+         menu.settings.dynamicShadows=licenseSaves[last].settings.dynamicShadows;
+     // Old 3DS: Texture Quality Low, Dynamic Shadows Off and Opponent Detail
+     // Low, whatever the file says; the page answers those rows with "Not
+     // available". Applied before savedSettings, so the file is rewritten only
+     // when Bloom changes. DIAG full-quality.txt lifts it with reduced quality.
+     bool settingsNew3ds=false;APT_CheckNew3DS(&settingsNew3ds);
+     if(!settingsNew3ds&&!(kQa&&exists("sdmc:/3ds/MKWiiDS/full-quality.txt"))){menu.old3dsSettings=true;mkw::lockOld3dsSettings(menu.settings);}}
     mkw::UiSettings savedSettings=menu.settings;
     mkw::MenuRenderer menuRenderer;
     struct LicensePortraitCache {mkw::NativeMii identity{};bool checked=false;std::vector<std::uint8_t> rgba;};
@@ -2345,7 +2351,7 @@ int main() {
     mkw::pack::enableCache(raceCacheLimit);
     {char text[80];snprintf(text,sizeof text,"heap %lu KB, race cache limit %lu KB",(unsigned long)envGetHeapSize()/1024,(unsigned long)raceCacheLimit/1024);report(text);}
     mkw::renderQuality().setReduced(!new3ds&&!(kQa&&exists("sdmc:/3ds/MKWiiDS/full-quality.txt")));
-    if(kQa&&exists("sdmc:/3ds/MKWiiDS/bottom-every-frame.txt"))mkw::renderQuality().bottomInterval=1;
+    if(kQa&&exists("sdmc:/3ds/MKWiiDS/bottom-half-rate.txt"))mkw::renderQuality().bottomInterval=2;
     if(kQa&&exists("sdmc:/3ds/MKWiiDS/bottom-rgba8.txt"))mkw::renderQuality().bottomRgba4=false;
     mkw::renderQuality().mipmaps=!exists("sdmc:/3ds/MKWiiDS/diagnose-no-mipmaps.txt");
     // New 3DS draws every opponent at full detail (A/B: racer-lod.txt brings back the distance LOD).
@@ -3952,8 +3958,8 @@ int main() {
             // The preview's fade out and the race start's fade in, over everything too.
             const float introFade=fullRace?demo.black():0.f;
             if(fullRace&&introFade>0)renderer.drawScreenFade(introFade,false);
-            // Old 3DS redraws the lower LCD every other frame (render_quality.hpp
-            // bottomInterval); citro3d leaves an undrawn screen showing its last
+            // DIAG bottom-half-rate.txt redraws the lower LCD every other frame
+            // (render_quality.hpp bottomInterval); citro3d leaves an undrawn screen showing its last
             // picture. Fades and captures draw every frame.
             const float bottomFade=std::max(results.leaveFade(),introFade);
             const unsigned bottomInterval=mkw::renderQuality().bottomInterval;

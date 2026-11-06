@@ -200,6 +200,8 @@ void MenuState::confirmRaceMii(unsigned weight,unsigned character){
 }
 
 void MenuState::toggleSetting(unsigned row){
+ // Old 3DS: Texture Quality, Dynamic Shadows and Opponent Detail are fixed.
+ if(old3dsSettings&&row!=2){unavailable=true;return;}
  switch(row){
  case 0:settings.textureQuality=settings.textureQuality?0:1;break;
  case 1:settings.dynamicShadows=!settings.dynamicShadows;break;

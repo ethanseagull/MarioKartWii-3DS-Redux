@@ -92,8 +92,9 @@ Old 3DS only:
 (with an 80% CPU time limit), as before; by default every race frame is
 recorded and drawn on core 0 and core 1 keeps only audio (`runtime.log`:
 `Old 3DS: race frames and presentation jobs on core 0`).
-`bottom-every-frame.txt` redraws the race's lower screen on every frame; by
-default Old 3DS redraws it on every second frame (15 Hz).
+`bottom-half-rate.txt` redraws the race's lower screen on every second frame
+(15 Hz on Old 3DS); by default it redraws every frame (30 Hz there, like the
+upper screen).
 `bottom-rgba8.txt` keeps the lower screen's UI atlas in RGBA8; by default Old 3DS
 stores it as RGBA4 (256 KB less VRAM, so more course textures leave LINEAR).
 `full-quality.txt` turns off every Old 3DS detail reduction.
