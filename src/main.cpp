@@ -127,6 +127,9 @@
 #include <malloc.h>
 #include <new>
 #include <sys/stat.h>
+#ifdef MKW_PGO_GEN
+extern "C" void __gcov_dump(void);
+#endif
 #include <unistd.h>
 #include <algorithm>
 #include <cmath>
@@ -556,6 +559,10 @@ int main() {
     auto finishAutoplay=[&](){
         if(!menuProfile->enabled())return;
         menuProfile->write("sdmc:/3ds/MKWiiDS/menu-performance.csv");
+#ifdef MKW_PGO_GEN
+        // DIAG PGO run (tools/diag/compile.py MKW_PGO=gen): Kinoko's counters to sdmc:/3ds/MKWiiDS/pgo/.
+        if(autoplay){mkdir("sdmc:/3ds/MKWiiDS/pgo",0777);__gcov_dump();}
+#endif
         if(autoplay)if(FILE* f=fopen("sdmc:/3ds/MKWiiDS/menu-autoplay-result.json","w")){fprintf(f,"{\"pass\":%s,\"races\":%u,\"start\":%u,\"stuck\":[%s],\"failure\":\"%s\"}\n",autopilot->passed()?"true":"false",autopilot->racesStarted(),benchmarkStart,autopilot->stuckRaces(),autopilot->failure());fclose(f);}
     };
     // Persistent renderer state must not consume the ARM11 main stack.
