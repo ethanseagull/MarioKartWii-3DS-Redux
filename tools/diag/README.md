@@ -105,7 +105,9 @@ LINEAR (`runtime.log`: `Old 3DS: pause menu not preloaded (LINEAR)`). A failed
 Render CPU switches (each change is exact unless noted; both consoles unless
 noted): `no-light-blend.txt` blends the course light textures with the
 reference loop and rewrites and flushes them every frame, instead of through
-tables and only when their bytes change.
+tables and only when their bytes change. `no-bloom-list.txt` builds bloom's
+GPU commands every frame instead of copying the commands recorded on the
+race's first bloom frame (immediate mono frames: Old 3DS).
 
 ## Repacked packs
 

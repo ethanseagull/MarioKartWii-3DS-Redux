@@ -528,6 +528,10 @@ public:
     // moveToVram widens texture-unit-1 ETC1 textures to ETC1A4 (opaque
     // alpha) instead of leaving them in LINEAR. A/B: no-unit1-vram.txt.
     bool unitOneEtc1a4=false;
+    // Immediate mono frames (Old 3DS): bloom's GPU commands, the same every
+    // frame of a race, are recorded once and copied into later frames
+    // (applyBloomNow). A/B: no-bloom-list.txt.
+    bool bloomList=false;
     // The sampled light textures blend through tables (the same bytes) and are
     // rewritten and flushed only when their bytes change (retailBeginFrame).
     // A/B: no-light-blend.txt.
@@ -766,6 +770,17 @@ private:
     void freeBloom();
     void bloomPass(C3D_RenderTarget* target,unsigned width,unsigned height);
     void bloomQuad(const C3D_Tex& source,unsigned sourceWidth,unsigned sourceHeight,float width,float height,float du,float dv,unsigned secondWidth=0,unsigned secondHeight=0,const C3D_Tex* secondSource=nullptr,float secondDu=0,float secondDv=0);
+    void bloomPasses();
+    // bloomList: what the recorded commands depend on, the commands, and the
+    // vertex slots and counters the passes leave.
+    struct BloomListKey {
+        const CourseBloom* settings=nullptr;const void* scene=nullptr;const void* bloom[4]{};const C3D_RenderTarget* top=nullptr;
+        const Vertex* vertices=nullptr;unsigned first=0,rounds=0;bool merge=false;
+        bool operator==(const BloomListKey&) const=default;
+    };
+    BloomListKey bloomListKey_{};bool bloomListValid_=false;
+    std::vector<uint32_t> bloomListWords_;std::vector<Vertex> bloomListVertices_;
+    C3D_BufInfo bloomListBuffer_{};unsigned bloomListDraws_=0,bloomListTriangles_=0;
     void freeStadiumScreen();
     void captureStadiumScreenNow();
     C3D_Tex stadiumTex_[2]{};

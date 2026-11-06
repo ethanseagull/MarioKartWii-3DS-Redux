@@ -601,6 +601,7 @@ int main() {
     renderer.fastVertex=!exists("sdmc:/3ds/MKWiiDS/no-fast-vertex.txt");
     renderer.unitOneEtc1a4=!exists("sdmc:/3ds/MKWiiDS/no-unit1-vram.txt");
     renderer.lightTextureSkip=!exists("sdmc:/3ds/MKWiiDS/no-light-blend.txt");
+    renderer.bloomList=!exists("sdmc:/3ds/MKWiiDS/no-bloom-list.txt");
     // unit1-alternate.txt (above): set before every race load.
     auto alternateUnitOne=[&](){
         if(!unitOneAlternate)return;
