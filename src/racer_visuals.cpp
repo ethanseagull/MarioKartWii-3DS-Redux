@@ -43,6 +43,9 @@ struct RacerVisuals::Impl {
         struct Clock {int clip=-1;unsigned start=0;} bodyClock;
         std::array<Clock,9> extraClocks;
         bool ghost=false;
+        // Set by the last drawn frame (prepareRacer): the animated driver (LOD 1)
+        // was in view. Reduced quality (Old 3DS) aims heads only for those.
+        bool headShown=true;
     };
     std::array<std::unique_ptr<Racer>,11> racers;
     unsigned count=0;
@@ -157,7 +160,10 @@ void RacerVisuals::step(unsigned tick,const RaceItems& items){
         driverItemSignals(s,items,i+1);
         s.blink=(tick+i*13)%180==0;
         {MKW_SIM_SCOPE(OppController);r->pose=r->controller.step(s);}
-        if(r->animation){MKW_SIM_SCOPE(OppLook);
+        // Reduced quality: a racer drawn with its static low-detail driver, or not
+        // drawn at all, shows no head aim; its look filters resume (from where they
+        // stopped) once it is drawn up close again. ~0.18 ms a racer a tick on Old 3DS.
+        if(r->animation&&(r->headShown||!renderQuality().reduced)){MKW_SIM_SCOPE(OppLook);
             DriverLookParameters parameters;
             const bool available=driverLookParameters(r->choice->character,r->choice->vehicle,parameters);
             C3D_Mtx seated=r->vehicle.body();Mtx_Translate(&seated,0,r->choice->seatY,r->choice->seatZ,true);
@@ -178,6 +184,7 @@ void RacerVisuals::step(unsigned tick,const RaceItems& items){
 void RacerVisuals::Impl::prepareRacer(unsigned i){
     auto& out=prepared[i];out=Prepared{};
     auto* r=racers[i].get();if(!r)return;
+    r->headShown=false;
     if(!r->body||!r->driver||!r->animation)return;
     const auto& items=*frame.items;const unsigned tick=frame.tick;const auto& view=frame.view;
     if(items.hud(i+1).bullet)return;
@@ -213,6 +220,7 @@ void RacerVisuals::Impl::prepareRacer(unsigned i){
     auto frustum=view.model(seated);
     out.draw=K::Kart::KartObjectManager::Instance()->object(i+1)->move()->battleVisible();out.body=transform;out.seated=seated;
     if(r->luma&&out.lod<4)r->luma->prepare(view,r->vehicle,tick);
+    r->headShown=out.lod==1;
     if(out.lod==1){r->animation->setBraidWorld(seated);
     out.driverVisible=!tiny(*r->driver,seated)&&r->animation->apply(*r->driver,r->animation->find(name),frame,tick,expression,faceFrame,&frustum);
     }else if(out.lod<4)out.driverVisible=view.visible(*r->driverLod,seated);

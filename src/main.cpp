@@ -629,7 +629,11 @@ int main() {
     // secondCore: see pipelineFrames above.
     if(!secondCore)report("Old 3DS: race frames and presentation jobs on core 0");
     // DIAG: memory latency and core-1 share, once, when running as an Old 3DS (mkw/hw_probe.hpp).
-    if(kQa&&!mkw::isNew3ds()){char text[256];mkw::hwprobe::run(text,sizeof text);report(text);}
+    // DIAG sim-profile.txt (or ab-alternate.txt): the per-tick sim profile and this
+    // probe. Off otherwise: the profile's ~140 clock syscalls a tick and the probe's
+    // 1 s core-1 spin would slow the Old 3DS play builds.
+    const bool simProfileWanted=kQa&&(exists("sdmc:/3ds/MKWiiDS/sim-profile.txt")||exists("sdmc:/3ds/MKWiiDS/ab-alternate.txt"));
+    if(simProfileWanted&&!mkw::isNew3ds()){char text[256];mkw::hwprobe::run(text,sizeof text);report(text);}
     if(mkw::old3dsTestBuild){char text[120];snprintf(text,sizeof text,"Old 3DS test build: speedup off, Old 3DS paths, no ZL/ZR/C-stick; application memory %lu KB",(unsigned long)osGetMemRegionSize(MEMREGION_APPLICATION)/1024);report(text);}
     // Second-core presentation jobs (racer posing); none run while the race steps.
     if(secondCore&&!mkw::jobWorker().start())report("job worker unavailable: presentation jobs run on core 0");
@@ -2901,7 +2905,7 @@ int main() {
                     // DIAG physics breakdown (mkw/sim_profile.hpp): per-tick averages
                     // of Kinoko's engines and kart step, every 600 ticks of racing.
                     namespace sp=mkw::simprof;
-                    sp::data.on=kQa&&fullRace&&!intro.active();
+                    sp::data.on=simProfileWanted&&fullRace&&!intro.active();
                     {MKW_SIM_SCOPE(Kinoko);scenes.calc();}
                     if(sp::data.on&&++sp::data.steps>=600){
                         char text[1024];int n=snprintf(text,sizeof text,"sim profile %u ticks, us/tick:",sp::data.steps);
