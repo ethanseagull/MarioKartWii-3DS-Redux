@@ -8,9 +8,20 @@ from cook_roster import data_partition
 from unpack_szs import unpack
 from cook_course_objects import mdl0_names
 
+# Models left in --output are reused only if they came from this code: a
+# changed exporter, cook_model or material translation recooks them all.
+PROFILE_SOURCES=['tools/cook_vehicle_lod.py','tools/cook_model.py','tools/gx_material.py',
+                 'tools/award_face_textures.py','tools/t3x_check.py','build/export_brres.mjs']
+def cook_profile():
+ h=hashlib.sha256()
+ for name in PROFILE_SOURCES:h.update(name.encode()+b'\0'+(ROOT/name).read_bytes().replace(b'\r\n',b'\n'))
+ return h.hexdigest()
+
 def main():
  p=argparse.ArgumentParser();p.add_argument('--disc',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--work',type=Path,required=True);p.add_argument('--garage',type=Path,default=ROOT/'build/roster/models/garage.json');a=p.parse_args();a.work.mkdir(parents=True,exist_ok=True)
  rows=json.loads(a.garage.read_text())['choices'];inv=json.loads((ROOT/'data/extracted/disc-files.json').read_text());files={f['name']:f for f in inv['files']};disc=Disc(a.disc);assert disc.read(0,6).decode()==inv['identity']['game_id'];part=data_partition(disc);cache={};receipt=[]
+ profile=cook_profile();profile_file=a.work/'profile.txt'
+ reuse=profile_file.is_file() and profile_file.read_text().strip()==profile
  try:
   for row in rows:
    variants=['']+(['red_','blue_'] if row['vehicle'] in [0,1,2,18,19,20] else [])
@@ -26,7 +37,7 @@ def main():
      override=brres;brres=a.work/'archives'/Path(key.replace('_'+team[:-1]+'-','-')).stem/'kart_model.brres'
      assert brres.exists()
     digest=hashlib.sha256(brres.read_bytes()+(override.read_bytes() if override else b'')).hexdigest()
-    if digest not in cache:
+    if digest not in cache and reuse:
      existing={}
      for role in ['body','body_rear','handle','handle_rear']:
       path=a.output/'models'/('vlod_'+digest[:12]+'_'+role+'_000.gmdl')
@@ -96,5 +107,5 @@ def main():
  assert len(flags)==36
  header='#pragma once\nnamespace mkw {\nstruct VehicleLodParts {bool wheels,handle;};\ninline constexpr VehicleLodParts VehicleLodLayout[]={\n'+''.join('{'+','.join(str(v).lower() for v in flags[i])+'},\n' for i in range(36))+'};\n}\n'
  (ROOT/'include/mkw/vehicle_lod_layout.hpp').write_text(header)
- (a.work/'receipt.json').write_text(json.dumps(receipt,indent=2));print('Vehicle LOD',len(receipt),'unique',len(cache),flush=True)
+ (a.work/'receipt.json').write_text(json.dumps(receipt,indent=2));profile_file.write_text(profile+'\n');print('Vehicle LOD',len(receipt),'unique',len(cache),flush=True)
 if __name__=='__main__':main()

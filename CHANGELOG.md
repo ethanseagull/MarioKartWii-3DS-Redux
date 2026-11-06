@@ -101,6 +101,7 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.9.4 (merged 
 
 - `tools/build.py` builds the CIA and SD folder from your disc in one command, downloading the pinned converters and tools it needs.
 - After a `git pull`, `tools/build.py` cooks again each stage whose tool or input files changed, and the stages after it, instead of keeping their old output.
+- Rebuilds no longer keep stale textures and models from an earlier cook: the menu text, course mipmap and vehicle LOD cooks check that what they reuse came from the current code (size, format, padding, cook version), so a rebuilt work folder gives the same packs as a fresh clone.
 - The HOME banner plays the game's Starting Grid jingle.
 - The SD folder no longer holds loose copies of models that are already packed, or the cook receipts (`.json`), which the game never reads.
 - Windows path, menu movie and menu texture fixes in the packaging tools.

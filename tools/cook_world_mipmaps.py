@@ -18,6 +18,13 @@ OUT=ROOT/'build/world-mipmaps'
 
 def digest(data):return hashlib.sha256(data).hexdigest()
 
+# Reused encodes must come from this cook as it is now: a changed or reverted
+# cook (encoder flags, alpha handling) recooks every texture. Line endings
+# are ignored so a fresh clone and a working tree agree.
+def cook_profile():
+    code=Path(__file__).read_bytes().replace(b'\r\n',b'\n')
+    return digest(code+Path(tool('tex3ds')).name.encode())
+
 def select():
     used,animated,models,per_course=set(),set(),{},{}
     catalog=json.loads((ASSETS/'models/course-catalog.json').read_text())
@@ -57,6 +64,8 @@ def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--jobs',type=int,default=3);args=p.parse_args()
     selected,animated,models,course_sets=select();(OUT/'textures').mkdir(parents=True,exist_ok=True)
     old_receipt=json.loads((OUT/'receipt.json').read_text()) if (OUT/'receipt.json').is_file() else {}
+    profile=cook_profile()
+    if old_receipt.get('profile')!=profile:old_receipt={}
     encoder=str(tool('tex3ds'))
     def cook(name):
         relative='textures/'+name+'.t3x';source=ASSETS/relative
@@ -93,7 +102,7 @@ def main():
             if result:textures[result[0]]=result[1]
             if (i+1)%100==0:print('World mipmaps: %d / %d'%(i+1,len(selected)),flush=True)
     course_bytes={key:sum(textures['textures/'+name+'.t3x']['extraGpuBytes'] for name in names if 'textures/'+name+'.t3x' in textures) for key,names in course_sets.items()}
-    receipt={'version':1,'textures':textures,'models':models,'animatedExcluded':sorted(animated),
+    receipt={'version':1,'profile':profile,'textures':textures,'models':models,'animatedExcluded':sorted(animated),
              'extraGpuBytes':sum(info['extraGpuBytes'] for info in textures.values()),'extraGpuBytesByCourse':course_bytes,
              'maxExtraGpuBytesPerCourse':max(course_bytes.values()),'nearLevelsUnchanged':True,'filter':'box mipmaps / GPU trilinear'}
     (OUT/'receipt.json').write_text(json.dumps(receipt,indent=2)+'\n')
