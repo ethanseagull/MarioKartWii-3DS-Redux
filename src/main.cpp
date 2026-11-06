@@ -1,4 +1,5 @@
 #include "mkw/console_model.hpp"
+#include "mkw/sim_profile.hpp"
 #include <mkw/mii_voice.hpp>
 #include <mkw/notification_led.hpp>
 #include <game/kart/KartAction.hh>
@@ -2871,7 +2872,19 @@ int main() {
                 // warm-up frames after a race load hold the intro too: stepping
                 // through them desynced Peach Beach's staff ghost.
                 const bool sceneStepped=!(fullRace&&timeTrial&&(intro.active()||raceWarmupFrames));
-                if(sceneStepped)scenes.calc();
+                if(sceneStepped){
+                    // DIAG physics breakdown (mkw/sim_profile.hpp): per-tick averages
+                    // of Kinoko's engines and kart step, every 600 ticks of racing.
+                    namespace sp=mkw::simprof;
+                    sp::data.on=kQa&&fullRace&&!intro.active();
+                    {MKW_SIM_SCOPE(Kinoko);scenes.calc();}
+                    if(sp::data.on&&++sp::data.steps>=600){
+                        char text[512];int n=snprintf(text,sizeof text,"sim profile %u ticks, us/tick:",sp::data.steps);
+                        for(unsigned i=0;i<sp::Count&&n>0&&n<int(sizeof text);++i)
+                            n+=snprintf(text+n,sizeof text-n," %s %.0f",sp::Names[i],double(sp::data.ticks[i])*1e6/SYSCLOCK_ARM11/sp::data.steps);
+                        report(text);sp::data=sp::Data{};
+                    }
+                }
                 if(ghostTrace&&sceneStepped&&fullRace&&timeTrial&&staffGhost&&K::Kart::KartObjectManager::Instance()->count()>1){
                     auto* g=K::Kart::KartObjectManager::Instance()->object(1);const auto& gp=g->pos();const auto& rp=K::System::RaceManager::Instance()->player(1);
                     ghostTraceRows.push_back({physicsSteps,gp.x,gp.y,gp.z,g->speed(),rp.raceCompletion(),unsigned(rp.checkpointId())});

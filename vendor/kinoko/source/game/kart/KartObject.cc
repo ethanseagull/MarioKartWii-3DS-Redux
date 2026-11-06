@@ -1,4 +1,5 @@
 #include "KartObject.hh"
+#include <mkw/sim_profile.hpp>
 
 #include "game/kart/KartParam.hh"
 #include "game/kart/KartSub.hh"
@@ -169,7 +170,7 @@ void KartObject::calcSub() {
 /// @addr{0x8058EEBC}
 void KartObject::calc() {
     sub()->calcPass1();
-    model()->calc();
+    {MKW_SIM_SCOPE(K1Model);model()->calc();}
 }
 
 const KartAccessor *KartObject::accessor() const {

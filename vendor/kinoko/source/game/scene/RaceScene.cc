@@ -1,4 +1,5 @@
 #include "RaceScene.hh"
+#include <mkw/sim_profile.hpp>
 
 #include "game/field/BoxColManager.hh"
 #include "game/field/CollisionDirector.hh"
@@ -107,12 +108,13 @@ void RaceScene::initEngines() {
 /// this function is really the base game's `calcEnginesUnpaused` located at `0x80554AD4`.
 void RaceScene::calcEngines() {
     auto *raceMgr = System::RaceManager::Instance();
-    raceMgr->calc();
-    Field::BoxColManager::Instance()->calc();
-    Field::ObjectDirector::Instance()->calc();
-    Kart::KartObjectManager::Instance()->calc();
-    Field::JugemDirector::Instance()->calc();
-    Item::ItemDirector::Instance()->calc();
+    // DIAG timing per engine (include/mkw/sim_profile.hpp); off by default.
+    {MKW_SIM_SCOPE(RaceMgr);raceMgr->calc();}
+    {MKW_SIM_SCOPE(BoxCol);Field::BoxColManager::Instance()->calc();}
+    {MKW_SIM_SCOPE(Objects);Field::ObjectDirector::Instance()->calc();}
+    {MKW_SIM_SCOPE(Karts);Kart::KartObjectManager::Instance()->calc();}
+    {MKW_SIM_SCOPE(Jugem);Field::JugemDirector::Instance()->calc();}
+    {MKW_SIM_SCOPE(Items);Item::ItemDirector::Instance()->calc();}
     raceMgr->random().next();
 }
 
