@@ -59,6 +59,10 @@ public:
     // calcPart1 returns false when the step ended there (respawn).
     bool calcPart1();
     void calcPart2();
+    // mkw-3ds: calcPart1 in two halves (KartObjectManager::s_pass0Split); calcPart1A
+    // returns false when the step ended there (respawn), and then calcPart1B is skipped.
+    bool calcPart1A();
+    void calcPart1B();
     void beginBattleProtection();
     void loseAllBalloons();
     void calcBattleRecovery();

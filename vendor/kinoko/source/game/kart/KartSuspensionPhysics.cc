@@ -216,7 +216,7 @@ void KartSuspensionPhysics::calcCollision(f32 dt, const EGG::Vector3f &gravity,
 
 /// mkw-3ds: the wheel's topmost position and down direction for this wheel matrix
 /// (calcCollision's expressions). The local down vector depends only on the BSP's
-/// xRot, so with s_batchWheels it is built once and kept.
+/// xRot, so with s_keepWheelDown it is built once and kept.
 void KartSuspensionPhysics::wheelFrame(const EGG::Matrix34f &mat, EGG::Vector3f &topmostPos,
         EGG::Vector3f &bottomDir) {
     EGG::Vector3f scaledRelPos = m_bspWheel->relPosition * scale();
@@ -225,7 +225,7 @@ void KartSuspensionPhysics::wheelFrame(const EGG::Matrix34f &mat, EGG::Vector3f 
     }
 
     topmostPos = mat.ps_multVector(scaledRelPos);
-    if (!s_batchWheels || !m_localBottomReady) {
+    if (!s_keepWheelDown || !m_localBottomReady) {
         EGG::Matrix34f mStack_60;
         EGG::Vector3f euler_angles(m_bspWheel->xRot * DEG2RAD, 0.0f, 0.0f);
         mStack_60.makeR(euler_angles);
@@ -248,6 +248,7 @@ bool KartSuspensionPhysics::predictCollision(const EGG::Matrix34f &mat,
 }
 
 bool KartSuspensionPhysics::s_batchWheels = false;
+bool KartSuspensionPhysics::s_keepWheelDown = true;
 
 /// @stage All
 /// @brief Calculates linear force and rotation from the kart's suspension.

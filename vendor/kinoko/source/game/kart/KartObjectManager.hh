@@ -36,6 +36,11 @@ public:
 
     /// mkw-3ds: pass 0 phase-major (default on; DIAG ab-alternate.txt switches it).
     static bool s_phaseMajor;
+    /// mkw-3ds (Old 3DS): with s_phaseMajor, pass 0 in four parts instead of two
+    /// (KartMove's first half split after calcDirs, the second half after the pull
+    /// path), each run for every kart of a group in turn. Off: no-pass0-split.txt;
+    /// DIAG ab-alternate.txt bit 6.
+    static bool s_pass0Split;
 
     static KartObjectManager *CreateInstance();
     static void DestroyInstance();

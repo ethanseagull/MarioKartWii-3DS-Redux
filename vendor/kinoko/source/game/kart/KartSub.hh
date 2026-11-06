@@ -22,9 +22,14 @@ public:
     void resetPhysics();
 
     void calcPass0();
-    // mkw-3ds: calcPass0 in two halves (see KartObjectManager::calc).
+    // mkw-3ds: calcPass0 in two halves (see KartObjectManager::calc), and each half
+    // in two parts (KartObjectManager::s_pass0Split): A = A1 + A2, B = B1 + B2.
     void calcPass0A();
     void calcPass0B();
+    void calcPass0A1();
+    void calcPass0A2();
+    void calcPass0B1();
+    void calcPass0B2();
     void calcPass1();
     void resizeAABB(f32 radiusScale);
     void addFloor(const CollisionData &, bool);

@@ -108,6 +108,16 @@ void KartSub::calcPass0() {
 }
 
 void KartSub::calcPass0A() {
+    calcPass0A1();
+    calcPass0A2();
+}
+
+void KartSub::calcPass0B() {
+    calcPass0B1();
+    calcPass0B2();
+}
+
+void KartSub::calcPass0A1() {
     auto &status = KartObjectProxy::status();
 
     if (status.onBit(eStatus::CannonStart)) {
@@ -134,13 +144,20 @@ void KartSub::calcPass0A() {
     dynamics()->setAngVel0YFactor(0.9f);
 
     {MKW_SIM_SCOPE(K0State);state()->calcInput();}
-    {MKW_SIM_SCOPE(K0Move);m_pass0MoveDone=!move()->calcPart1();}
+    {MKW_SIM_SCOPE(K0Move);m_pass0MoveDone=!move()->calcPart1A();}
 }
 
-void KartSub::calcPass0B() {
-    auto &status = KartObjectProxy::status();
+void KartSub::calcPass0A2() {
+    {MKW_SIM_SCOPE(K0Move);if(!m_pass0MoveDone)move()->calcPart1B();}
+}
+
+void KartSub::calcPass0B1() {
     {MKW_SIM_SCOPE(K0Move);if(!m_pass0MoveDone)move()->calcPart2();}
     {MKW_SIM_SCOPE(K0Action);action()->calc();collide()->pullPath().calc();}
+}
+
+void KartSub::calcPass0B2() {
+    auto &status = KartObjectProxy::status();
 
     if (status.onBit(eStatus::SkipWheelCalc)) {
         for (size_t tireIdx = 0; tireIdx < tireCount(); ++tireIdx) {

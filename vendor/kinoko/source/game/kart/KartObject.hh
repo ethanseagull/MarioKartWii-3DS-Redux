@@ -26,6 +26,10 @@ public:
     void calcSub();
     void calcSubA();
     void calcSubB();
+    void calcSubA1();
+    void calcSubA2();
+    void calcSubB1();
+    void calcSubB2();
     void calc();
 
     [[nodiscard]] const KartAccessor *accessor() const;

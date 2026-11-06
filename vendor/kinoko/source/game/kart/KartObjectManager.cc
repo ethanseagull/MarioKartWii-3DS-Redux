@@ -42,7 +42,26 @@ void KartObjectManager::calc() {
         // and before any higher kart's, as in the retail order. Pass 0 does not narrow
         // the KCL prism cache (pass 1 does), so no query depends on the kart order.
         const size_t slip = System::RaceManager::Instance()->timer() % m_count;
+        // With s_pass0Split, four parts: A1 (state, input, KartMove to calcDirs),
+        // A2 (the rest of KartMove's first half, slipstream included), B1 (its second
+        // half, action, pull path), B2 (physics, hitboxes). Each part reads and writes
+        // only its own kart, as A and B do, so the finer split keeps the result.
         auto group = [&](size_t begin, size_t end) {
+            if (s_pass0Split) {
+                for (size_t i = begin; i < end; ++i) {
+                    m_objects[i]->calcSubA1();
+                }
+                for (size_t i = begin; i < end; ++i) {
+                    m_objects[i]->calcSubA2();
+                }
+                for (size_t i = begin; i < end; ++i) {
+                    m_objects[i]->calcSubB1();
+                }
+                for (size_t i = begin; i < end; ++i) {
+                    m_objects[i]->calcSubB2();
+                }
+                return;
+            }
             for (size_t i = begin; i < end; ++i) {
                 m_objects[i]->calcSubA();
             }
@@ -152,5 +171,6 @@ Abstract::g3d::ResAnmChr *KartObjectManager::s_megaScaleDownAnmChr = nullptr;
 Abstract::g3d::ResAnmChr *KartObjectManager::s_pressScaleUpAnmChr = nullptr;
 KartObjectManager *KartObjectManager::s_instance = nullptr;
 bool KartObjectManager::s_phaseMajor = true;
+bool KartObjectManager::s_pass0Split = true;
 
 } // namespace Kinoko::Kart

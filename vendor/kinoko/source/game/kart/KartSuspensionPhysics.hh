@@ -146,11 +146,14 @@ public:
             Field::KColData::BatchSphere &out);
 
     /// mkw-3ds (Old 3DS): KartSub batches the wheels' course prism tests
-    /// (KColData::batchSpheresCached) and each wheel keeps its fixed rotated
-    /// "down" vector instead of rebuilding it from xRot every tick (same values).
+    /// (KColData::batchSpheresCached).
     /// Off by default (more instructions than it saves); on: batch-wheels.txt;
     /// DIAG ab-alternate.txt bit 4.
     static bool s_batchWheels;
+    /// mkw-3ds (Old 3DS): each wheel keeps its fixed rotated down vector instead of
+    /// rebuilding it (makeR: three sines and cosines) from the BSP xRot every tick:
+    /// same inputs, same values. Off: no-wheel-down-cache.txt; DIAG ab-alternate.txt bit 7.
+    static bool s_keepWheelDown;
 
 private:
     void wheelFrame(const EGG::Matrix34f &mat, EGG::Vector3f &topmostPos,
