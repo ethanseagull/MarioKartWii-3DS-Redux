@@ -2366,19 +2366,22 @@ int main() {
     if(kQa&&exists("sdmc:/3ds/MKWiiDS/bottom-half-rate.txt"))mkw::renderQuality().bottomInterval=2;
     mkw::DriverAnimation::verifyLook=kQa&&exists("sdmc:/3ds/MKWiiDS/look-verify.txt");
     // Old 3DS Kinoko speed-ups (exact physics), on by default; each has an off-file
-    // (release and DIAG): no-batch-wheels.txt (one prism pass for a kart's wheels).
+    // (release and DIAG): no-batch-wheels.txt (one prism pass for a kart's wheels),
+    // no-batch-body.txt (one prism pass for a kart's body hitboxes).
     if(exists("sdmc:/3ds/MKWiiDS/no-batch-wheels.txt"))K::Kart::KartSuspensionPhysics::s_batchWheels=false;
+    if(exists("sdmc:/3ds/MKWiiDS/no-batch-body.txt"))K::Kart::KartCollide::s_batchBody=false;
     // DIAG ab-alternate.txt: same-binary A/B in one run. Each 600-step sim profile
     // window runs one combination of the Old 3DS speed-ups (bit 0: head-look subset,
     // bit 1: packed KCL prisms, bit 2: item contact mask, bit 3: phase-major pass 0,
-    // bit 4: batched wheel prisms; set = new path), cycling all new, all old, then
-    // each one off alone (31,0,30,29,27,23,15); the window's line ends with "ab <bits>".
+    // bit 4: batched wheel prisms, bit 5: batched body prisms; set = new path),
+    // cycling all new, all old, then each one off alone; the window's line ends
+    // with "ab <bits>".
     const bool abAlternate=kQa&&exists("sdmc:/3ds/MKWiiDS/ab-alternate.txt");
     unsigned abWindow=0;
-    auto abApply=[&]{if(!abAlternate)return;constexpr unsigned abBits=5,all=(1u<<abBits)-1;const unsigned slot=abWindow%(abBits+2);
+    auto abApply=[&]{if(!abAlternate)return;constexpr unsigned abBits=6,all=(1u<<abBits)-1;const unsigned slot=abWindow%(abBits+2);
         const unsigned bits=slot==0?all:slot==1?0u:all&~(1u<<(slot-2));
         mkw::DriverAnimation::subsetLook=bits&1;K::Field::KColData::s_packed=(bits>>1)&1;mkw::RaceItems::fullContactScan=!((bits>>2)&1);
-        K::Kart::KartObjectManager::s_phaseMajor=(bits>>3)&1;K::Kart::KartSuspensionPhysics::s_batchWheels=(bits>>4)&1;};
+        K::Kart::KartObjectManager::s_phaseMajor=(bits>>3)&1;K::Kart::KartSuspensionPhysics::s_batchWheels=(bits>>4)&1;K::Kart::KartCollide::s_batchBody=(bits>>5)&1;};
     abApply();
     if(kQa&&exists("sdmc:/3ds/MKWiiDS/bottom-rgba8.txt"))mkw::renderQuality().bottomRgba4=false;
     mkw::renderQuality().mipmaps=!exists("sdmc:/3ds/MKWiiDS/diagnose-no-mipmaps.txt");
@@ -2916,7 +2919,7 @@ int main() {
                         for(unsigned i=0;i<sp::Count&&n>0&&n<int(sizeof text);++i)
                             n+=snprintf(text+n,sizeof text-n," %s %.0f",sp::Names[i],double(sp::data.ticks[i])*1e6/SYSCLOCK_ARM11/sp::data.steps);
                         if(mkw::DriverAnimation::verifyLook&&n>0&&n<int(sizeof text))n+=snprintf(text+n,sizeof text-n," look_checks %u look_mismatches %u",mkw::DriverAnimation::lookChecks,mkw::DriverAnimation::lookMismatches);
-                        if(abAlternate&&n>0&&n<int(sizeof text))snprintf(text+n,sizeof text-n," ab %u",unsigned(mkw::DriverAnimation::subsetLook)|unsigned(K::Field::KColData::s_packed)<<1|unsigned(!mkw::RaceItems::fullContactScan)<<2|unsigned(K::Kart::KartObjectManager::s_phaseMajor)<<3|unsigned(K::Kart::KartSuspensionPhysics::s_batchWheels)<<4);
+                        if(abAlternate&&n>0&&n<int(sizeof text))snprintf(text+n,sizeof text-n," ab %u",unsigned(mkw::DriverAnimation::subsetLook)|unsigned(K::Field::KColData::s_packed)<<1|unsigned(!mkw::RaceItems::fullContactScan)<<2|unsigned(K::Kart::KartObjectManager::s_phaseMajor)<<3|unsigned(K::Kart::KartSuspensionPhysics::s_batchWheels)<<4|unsigned(K::Kart::KartCollide::s_batchBody)<<5);
                         ++abWindow;abApply();
                         report(text);sp::data=sp::Data{};
                     }

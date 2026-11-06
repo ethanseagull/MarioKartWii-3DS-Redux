@@ -79,6 +79,10 @@ public:
     void FUN_805B72B8(f32 param_1, f32 param_2, bool lockXZ, bool addExtVelY);
     void calcBodyCollision(f32 totalScale, f32 sinkDepth, const EGG::Quatf &rot,
             const EGG::Vector3f &scale);
+    /// mkw-3ds (Old 3DS): calcBodyCollision batches its hitboxes' course prism
+    /// tests (KColData::batchSpheresCached). Off: no-batch-body.txt; DIAG
+    /// ab-alternate.txt bit 5.
+    static bool s_batchBody;
     void calcFloorEffect();
     void calcTriggers(Field::KCLTypeMask *mask, const EGG::Vector3f &pos, bool twoPoint);
     void handleTriggers(Field::KCLTypeMask *mask);

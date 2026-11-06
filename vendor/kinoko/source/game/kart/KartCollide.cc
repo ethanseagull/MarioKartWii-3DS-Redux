@@ -535,13 +535,36 @@ void KartCollide::calcBodyCollision(f32 totalScale, f32 sinkDepth, const EGG::Qu
     minMax.setZero();
     bool bVar1 = false;
 
-    for (u16 hitboxIdx = 0; hitboxIdx < hitboxGroup->hitboxCount(); ++hitboxIdx) {
+    auto bodyTypeMask = [&](const Hitbox &hitbox) {
         Field::KCLTypeMask flags = KCL_TYPE_DRIVER_SOLID_SURFACE;
         if(m_sinkholeFall&&status().onBit(eStatus::BeforeRespawn))flags&=~KCL_TYPE_FLOOR;
-        Hitbox &hitbox = hitboxGroup->hitbox(hitboxIdx);
-
         if (hitbox.bspHitbox()->wallsOnly != 0) {
             flags = 0x4A109000;
+        }
+        return flags;
+    };
+
+    // mkw-3ds (Old 3DS): every hitbox's course query is predicted and tested in one
+    // pass over the prism list; the loop below replays a query's hits only when it
+    // asks exactly that query (KColData::batchSpheresCached).
+    const size_t hitboxCount = hitboxGroup->hitboxCount();
+    const bool batched = s_batchBody && hitboxCount >= 2;
+    if (batched) {
+        Field::KColData::BatchSphere spheres[Field::KColData::BATCH_MAX];
+        const size_t count = std::min(hitboxCount, Field::KColData::BATCH_MAX);
+        for (size_t i = 0; i < count; ++i) {
+            const Hitbox &hitbox = hitboxGroup->hitbox(i);
+            spheres[i] = {hitbox.calcRelPos(totalScale, sinkDepth, scale, rot) + pos(),
+                    hitbox.lastPos(), hitbox.radius(), bodyTypeMask(hitbox)};
+        }
+        Field::CourseColMgr::Instance()->batchSpheresCached(spheres, count);
+    }
+
+    for (u16 hitboxIdx = 0; hitboxIdx < hitboxGroup->hitboxCount(); ++hitboxIdx) {
+        Hitbox &hitbox = hitboxGroup->hitbox(hitboxIdx);
+        const Field::KCLTypeMask flags = bodyTypeMask(hitbox);
+
+        if (hitbox.bspHitbox()->wallsOnly != 0) {
             Field::CourseColMgr::Instance()->setNoBounceWallInfo(&noBounceWallInfo);
         }
 
@@ -565,6 +588,9 @@ void KartCollide::calcBodyCollision(f32 totalScale, f32 sinkDepth, const EGG::Qu
                 processBody(collisionData, hitbox, &colInfo, &maskOut);
             }
         }
+    }
+    if (batched) {
+        Field::KColData::ClearBatch();
     }
 
     if (bVar1) {
@@ -1561,6 +1587,8 @@ Action KartCollide::handleReactCrushRespawn(size_t /*idx*/) {
 Action KartCollide::handleReactExplosionLoseItem(size_t /*idx*/) {
     return Action::UNK_7;
 }
+
+bool KartCollide::s_batchBody = true;
 
 std::array<KartCollide::ObjectCollisionHandler, 33> KartCollide::s_objectCollisionHandlers = {{
         &KartCollide::handleReactNone,
