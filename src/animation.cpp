@@ -578,7 +578,11 @@ void DriverAnimation::stepLook(int clip,float frame,unsigned tick,bool active,Ve
     const unsigned step=fullRate?1:animationStep();
     const bool hold=step>1&&cachedSettled_&&cachedClip_==clip&&tick>=cachedTick_&&tick/step==cachedTick_/step;
     if(hold)return;
-    if(!(subsetLook?lookPose(clip,frame,tick):pose(clip,frame,tick,false))){resetLook();return;}
+    const bool reuse=staggerLook&&!body&&!fullRate&&lookPoseValid_&&lastClip_==clip&&((tick+lookPhase)&1);
+    if(!reuse){
+        if(!(subsetLook?lookPose(clip,frame,tick):pose(clip,frame,tick,false))){resetLook();return;}
+        lookPoseValid_=true;
+    }
     float world[12];for(unsigned row=0;row<3;++row){world[row*4]=seated.r[row].x;world[row*4+1]=seated.r[row].y;world[row*4+2]=seated.r[row].z;world[row*4+3]=seated.r[row].w;}
     auto a=driverLookTargetAngles(world,palette_.data()+lookHead_*21,target);
     const auto angles=lookMotion_.step(active&&a.valid,body,a.yaw,a.pitch,a.kartYaw,
@@ -586,7 +590,7 @@ void DriverAnimation::stepLook(int clip,float frame,unsigned tick,bool active,Ve
     cachedSettled_=false;setLookAngles(angles.yaw,angles.pitch);
 }
 
-bool DriverAnimation::verifyLook=false,DriverAnimation::subsetLook=true;
+bool DriverAnimation::verifyLook=false,DriverAnimation::subsetLook=true,DriverAnimation::staggerLook=false;
 unsigned DriverAnimation::lookChecks=0,DriverAnimation::lookMismatches=0;
 // The head-target query reads only the head, the two body-look pivots and the
 // effect root. Each depends only on its own clip track, its own transition

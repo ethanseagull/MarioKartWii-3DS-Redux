@@ -38,7 +38,7 @@ public:
     void stepLook(int clip,float frame,unsigned tick,bool active,Vec3 target,
         const C3D_Mtx& seated,bool body,const DriverLookParameters& parameters,
         const DriverPose& motion,bool handleRelativeBike,float xAxisY,float zAxisY);
-    void resetLook(){motionBlendValid_=false;vehicleResponse_.reset();lookMotion_.reset();lookTickValid_=false;cachedSettled_=false;setLookAngles(0,0);}
+    void resetLook(){motionBlendValid_=false;vehicleResponse_.reset();lookMotion_.reset();lookTickValid_=false;lookPoseValid_=false;cachedSettled_=false;setLookAngles(0,0);}
     DriverLookMotion::Angles lookAngles() const {return lookMotion_.angles();}
     int find(const char* name) const;
     // Vehicle-part clips chosen every tick, resolved at load (-1 if absent).
@@ -76,6 +76,12 @@ public:
     static bool verifyLook;static unsigned lookChecks,lookMismatches;
     // DIAG A/B (ab-alternate.txt): false evaluates the full pose as before.
     static bool subsetLook;
+    // Old 3DS (no-look-stagger.txt turns it off): an opponent's head query poses
+    // its skeleton on every 2nd tick only (staggered by lookPhase); the tick between
+    // reuses the last posed head on the current seat. The look filters still step
+    // every tick, so head speed is unchanged. The player always poses.
+    static bool staggerLook;
+    unsigned lookPhase=0;
     // Evaluates the palette for clip/frame, including transition blends.
     const float* pose(int clip,float frame,unsigned tick=0,bool simulateBraids=true);
     // GPU skinning rewrites positions to bone-local space. Lit models keep
@@ -107,6 +113,7 @@ public:
 private:
     // stepLook's head query: only the slots it reads (see animation.cpp).
     const float* lookPose(int clip,float frame,unsigned tick);
+    bool lookPoseValid_=false;
     void releaseData();
     bool takeKept(const char* path,size_t& size);
     std::string path_;size_t size_=0;

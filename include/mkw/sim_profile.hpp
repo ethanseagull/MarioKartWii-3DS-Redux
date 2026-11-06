@@ -22,6 +22,8 @@ enum Slot : unsigned {
     PresPlayer, PresOpponents, PresKartFx, PresParticles, PostTick, // main: presentation in the same tick, after it
     OppVehicle, OppController, OppLook,                      // RacerVisuals::step, all 11 opponents
     FxInput, FxKart, FxLanding, FxWheelSpin, FxBrake, FxRemote, FxSurface, FxOppDrive, // pres_kart_fx split
+    ItGrid, ItSnapshot, ItActors, ItHolders,                 // port_items_after split
+    AuFill, AuStep,                                          // port_audio split
     Count
 };
 inline constexpr const char* Names[Count]={
@@ -32,7 +34,8 @@ inline constexpr const char* Names[Count]={
     "port_items_before","port_ai","port_items_after","port_camera","port_lakitu","port_audio","tick_total",
     "pres_player","pres_opponents","pres_kart_fx","pres_particles","post_tick",
     "opp_vehicle","opp_controller","opp_look",
-    "fx_input","fx_kart","fx_landing","fx_wheelspin","fx_brake","fx_remote","fx_surface","fx_oppdrive"};
+    "fx_input","fx_kart","fx_landing","fx_wheelspin","fx_brake","fx_remote","fx_surface","fx_oppdrive",
+    "it_grid","it_snapshot","it_actors","it_holders","au_fill","au_step"};
 struct Data {unsigned long long ticks[Count]{};unsigned steps=0;bool on=false;};
 inline Data data{};
 #if defined(__3DS__)

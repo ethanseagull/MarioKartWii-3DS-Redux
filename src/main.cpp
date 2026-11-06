@@ -578,6 +578,10 @@ int main() {
     // A race load reuses the last race's animation banks (DriverAnimation::keepReleased;
     // A/B: no-bank-keep.txt frees and reads them again).
     const bool bankKeep=!exists("sdmc:/3ds/MKWiiDS/no-bank-keep.txt");
+    // Old 3DS: opponents pose their head query every 2nd tick (DriverAnimation::staggerLook).
+    mkw::DriverAnimation::staggerLook=!mkw::isNew3ds()&&!exists("sdmc:/3ds/MKWiiDS/no-look-stagger.txt");
+    // Old 3DS: opponents take their vehicle snapshot only on the tick before a drawn frame.
+    const bool oppFrameSnapshot=!mkw::isNew3ds()&&!exists("sdmc:/3ds/MKWiiDS/no-opp-frame-snapshot.txt");
     const bool ghostTest=kQa&&exists("sdmc:/3ds/MKWiiDS/ghost-test.txt");
     // QA: blue-test.txt "<ticks> [old]" fires a Blue Shell from last place every
     // <ticks> while none is in flight and traces each one's route in runtime.log;
@@ -1763,7 +1767,8 @@ int main() {
     auto raceEffectsStorage=std::make_unique<mkw::RaceEffects>();
     auto& raceEffects=*raceEffectsStorage;
     auto effectTextures=std::make_unique<std::vector<mkw::Texture>>();
-    struct EffectIds{int flame,flameBurst,wheelie,itemBox,trick,speedLines,chip[6],shellTail[3],shellBreak[2],bombBlast,blueBlast,bananaBreak,blueBlastSmoke;} fx{};
+    struct EffectIds{int flame,flameBurst,wheelie,itemBox,trick,speedLines,chip[6],shellTail[3],shellBreak[2],bombBlast,blueBlast,bananaBreak,blueBlastSmoke;
+        int start[3],startMiss,driftSmoke,entry;} fx{}; // the last four: looked up per race, not per tick (Old 3DS: each find is a strcmp walk)
     // Every racer's KartEffect power-up emitters (docs/POWERUPS_SOURCE.md); player 0 is local.
     mkw::KartFxSlots kartFxSlots;
     // Heap, like the other presentation state above: the slipstream timers grew it and
@@ -1819,6 +1824,8 @@ int main() {
          raceEffects.find("rk_driftSpark2R_Chip00"),raceEffects.find("rk_driftSpark1LB_Chip00"),raceEffects.find("rk_driftSpark1RB_Chip00")},
         {raceEffects.find("rk_kouraTailG"),raceEffects.find("rk_kouraTailR"),raceEffects.find("rk_kouraTailB")},
         {raceEffects.find("rk_kouraBrkG"),raceEffects.find("rk_kouraBrkR")},raceEffects.find("rk_bombHei"),raceEffects.find("rk_haneKoura"),raceEffects.find("rk_bananaSmk"),raceEffects.find("rk_bombBlue")};
+        for(unsigned layer=0;layer<3;++layer){const char* name[3]={"rk_start0","rk_start1","rk_start2"};fx.start[layer]=raceEffects.find(name[layer]);}
+        fx.startMiss=raceEffects.find("rk_startMiss");fx.driftSmoke=raceEffects.find("rk_driftSmoke");fx.entry=raceEffects.find("rk_entry");
         for(int spec:{fx.flame,fx.flameBurst,fx.wheelie,fx.itemBox,fx.trick,fx.speedLines,
                       fx.chip[0],fx.chip[1],fx.chip[2],fx.chip[3],fx.chip[4],fx.chip[5],
                       fx.shellTail[0],fx.shellTail[1],fx.shellTail[2],fx.shellBreak[0],fx.shellBreak[1],
@@ -2370,6 +2377,9 @@ int main() {
     // bit 1: packed KCL prisms, bit 2: item contact mask, bit 3: phase-major pass 0;
     // set = new path), cycling 15,0,14,13,11,7 (all new, all old, then each one off
     // alone); the window's line ends with "ab <bits>".
+    // DIAG full-item-scan.txt: the item step and its readers walk every actor slot
+    // (RaceItems::nextActorSlot off), for a same-binary state-digest exactness check.
+    if(kQa&&exists("sdmc:/3ds/MKWiiDS/full-item-scan.txt"))mkw::RaceItems::fullContactScan=true;
     const bool abAlternate=kQa&&exists("sdmc:/3ds/MKWiiDS/ab-alternate.txt");
     unsigned abWindow=0;
     auto abApply=[&]{if(!abAlternate)return;static constexpr unsigned order[6]={15,0,14,13,11,7};const unsigned bits=order[abWindow%6];
@@ -2839,12 +2849,14 @@ int main() {
                     {
                         // Landed traps for the CPU obstacle avoider.
                         std::array<mkw::Vec3,mkw::CpuAi::MaxHazards> hazards{};std::array<float,mkw::CpuAi::MaxHazards> radii{};unsigned n=0;
-                        for(const auto& a:raceItems->actors()){
-                            if(n>=hazards.size())break;
-                            if(!a.active||a.explosion||!a.settled)continue;
-                            if(a.kind!=mkw::ItemKind::Banana&&a.kind!=mkw::ItemKind::FakeBox&&a.kind!=mkw::ItemKind::Bobomb)continue;
-                            hazards[n]=a.position;radii[n]=a.radius;++n;
-                        }
+                        const auto& pool=raceItems->actors();
+                        raceItems->forEachActorSlot([&](unsigned slot){
+                            const auto& a=pool[slot];
+                            if(n>=hazards.size())return false;
+                            if(!a.active||a.explosion||!a.settled)return true;
+                            if(a.kind!=mkw::ItemKind::Banana&&a.kind!=mkw::ItemKind::FakeBox&&a.kind!=mkw::ItemKind::Bobomb)return true;
+                            hazards[n]=a.position;radii[n]=a.radius;++n;return true;
+                        });
                         raceGrid.ai().setHazards(hazards.data(),radii.data(),n);
                     }
                     // Resolve item activation/expiry before choosing this tick's
@@ -2976,7 +2988,7 @@ int main() {
                 if(intro.active()&&!raceWarmupFrames){intro.step();++introTick;}
                 if(fullRace){
                     if(kQa&&blueTestEvery){raceItems->qaBlueTrace=true;raceItems->qaNearestItemPoints=blueTestOld;}
-                    {MKW_SIM_SCOPE(PortItemsAfter);raceGrid.afterStep();raceItems->afterStepNative(raceGrid.itemCount());}
+                    {MKW_SIM_SCOPE(PortItemsAfter);{MKW_SIM_SCOPE(ItGrid);raceGrid.afterStep();}raceItems->afterStepNative(raceGrid.itemCount());}
                     if(kQa&&blueTestEvery){
                         if(raceItems->frame()%blueTestEvery==0)raceItems->qaFireBlueFromLast();
                         for(const auto& line:raceItems->qaBlueLines)report(line.c_str());
@@ -3226,6 +3238,7 @@ int main() {
                         audio.star=st.onBit(St::Star);audio.mega=st.onBit(St::Mega);audio.shocked=st.onBit(St::Shocked);
                         audio.introShot=intro.active()?intro.shot():-1;audio.hudRank=fullRace&&!battleMode&&!intro.active()?raceGrid.rank():0;
                         const uint16_t coinCues=coinBattle.takeCues(),coinArrivalCues=coinBattle.takeArrivalCues();
+                        const auto auFillStart=mkw::simprof::now();
                         if(raceSound.active()){
                             const mkw::Vec3 eye=intro.active()?intro.eye():view.eye,look=intro.active()?intro.target():view.target;
                             actors.traceObjects=menuTrace;
@@ -3241,7 +3254,8 @@ int main() {
                             for(unsigned i=0;i<std::min<unsigned>(raceGrid.count(),kartContacts.size());++i)
                                 K::Kart::KartObjectManager::Instance()->object(i)->move()->takeSoundCues();
                         }
-                        raceSound.step(audio,&actors);
+                        mkw::simprof::add(mkw::simprof::AuFill,auFillStart);
+                        {MKW_SIM_SCOPE(AuStep);raceSound.step(audio,&actors);}
                         mkw::simprof::add(mkw::simprof::PortAudio,audioStart);
                         // The audio thread only writes a bounded SPSC queue. Disk logging stays here.
                         mkw::RaceAudioLayer::ObjectTrace ot;
@@ -3326,7 +3340,10 @@ int main() {
                 signals.blink=physicsSteps%180==0;
                 driverPose=driverController.step(signals);
                 mkw::simprof::add(mkw::simprof::PresPlayer,postTickStart);
-                {MKW_SIM_SCOPE(PresOpponents);if(fullRace)opponents.step(physicsSteps,*raceItems);}
+                {MKW_SIM_SCOPE(PresOpponents);if(fullRace)opponents.step(physicsSteps,*raceItems,
+                    // Old 3DS: opponents' vehicle snapshot only before a drawn frame (the loop's
+                    // last tick; QA capture breaks draw after any tick).
+                    !oppFrameSnapshot||accumulator<1||raceCapture||(autoplay&&!benchmark&&intro.active()));}
                 if(driver){
                     mkw::DriverLookParameters parameters;const auto& choice=selectedVehicle();
                     const bool available=mkw::driverLookParameters(choice.character,choice.vehicle,parameters);
@@ -3384,8 +3401,8 @@ int main() {
                     // retail callback/input path; drift/off-road/landing thresholds
                     // below still need their separate original comparisons.
                     {
-                        const int startSpec[3]={raceEffects.find("rk_start0"),raceEffects.find("rk_start1"),raceEffects.find("rk_start2")};
-                        const int startMiss=raceEffects.find("rk_startMiss"),driftSmoke=raceEffects.find("rk_driftSmoke");
+                        const int* startSpec=fx.start;
+                        const int startMiss=fx.startMiss,driftSmoke=fx.driftSmoke;
                         const auto stageNow=K::System::RaceManager::Instance()->stage();
                         const bool grounded=kart->status().onBit(K::Kart::eStatus::TouchingGround);
                         // Original simultaneous rear-wheel layers and input/duration
@@ -3469,14 +3486,18 @@ int main() {
                     // thrown shell near the camera, one point per frame.
                     if(fullRace){
                         const auto& actors=raceItems->actors();
+                        // Each ribbon slot a takes the first live shell among pool slots a, a+16, ...
+                        // (one ascending pass over the live slots finds the same ones).
+                        std::array<int,16> tailOf,ownerOf;tailOf.fill(-1);ownerOf.fill(-1);std::array<mkw::Vec3,16> tailAt{};
+                        raceItems->forEachActorSlot([&](unsigned n){
+                            const unsigned a=n%16;if(ownerOf[a]>=0)return true;
+                            const auto& actor=actors[n];
+                            const int kind=actor.kind==mkw::ItemKind::GreenShell?0:actor.kind==mkw::ItemKind::RedShell?1:actor.kind==mkw::ItemKind::BlueShell?2:-1;
+                            if(!actor.active||actor.explosion||kind<0||mkw::length(actor.position-kp)>9000.f)return true;
+                            tailOf[a]=fx.shellTail[kind];ownerOf[a]=int(n);tailAt[a]=actor.visualPosition();return true;
+                        });
                         for(unsigned a=0;a<16;++a){
-                            int tail=-1,owner=-1;mkw::EffectFrame f;
-                            for(unsigned n=a;n<actors.size();n+=16){
-                                const auto& actor=actors[n];
-                                const int kind=actor.kind==mkw::ItemKind::GreenShell?0:actor.kind==mkw::ItemKind::RedShell?1:actor.kind==mkw::ItemKind::BlueShell?2:-1;
-                                if(!actor.active||actor.explosion||kind<0||mkw::length(actor.position-kp)>9000.f)continue;
-                                tail=fx.shellTail[kind];owner=int(n);f.origin=actor.visualPosition();break;
-                            }
+                            const int tail=tailOf[a],owner=ownerOf[a];mkw::EffectFrame f;if(owner>=0)f.origin=tailAt[a];
                             // A slot that switches shells starts a new ribbon instead of joining them.
                             if(owner!=tailActor[a]){raceEffects.attach(16+a,-1,f,false);tailActor[a]=owner;}
                             raceEffects.attach(16+a,tail,f,tail>=0);
@@ -3526,7 +3547,7 @@ int main() {
                         uint32_t calcGroups=~0u,drawGroups=~0u;
                         // One name search a tick, not one per racer (Old 3DS: a strcmp walk
                         // over every effect resource).
-                        const bool hasRainbowEntry=raceEffects.find("rk_entry")>=0;
+                        const bool hasRainbowEntry=fx.entry>=0;
                         for(unsigned i=0;i<racers;++i){
                             namespace sp=mkw::simprof;auto fxAt=sp::now();
                             auto fxLap=[&](sp::Slot s){sp::add(s,fxAt);fxAt=sp::now();};

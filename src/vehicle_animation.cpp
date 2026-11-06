@@ -73,10 +73,25 @@ float VehicleAnimation::advanceRoll(float phase,float signedDistance,float radiu
     if(!std::isfinite(signedDistance)||!std::isfinite(radius)||radius<=.0001f)return phase;
     return std::remainder(phase+signedDistance/radius,2*Pi);
 }
-void VehicleAnimation::step(Kinoko::Kart::KartObject& kart){
+void VehicleAnimation::step(Kinoko::Kart::KartObject& kart,bool snapshot){
     bike_=kart.param()->isBike();count_=std::min(4u,unsigned(kart.param()->tireCount()));
-    const unsigned vehicle=unsigned(Kinoko::System::RaceConfig::Instance()->raceScenario().players[kart.param()->playerIdx()].vehicle);
-    if(vehicle_!=vehicle){roll_={};wheelMotion_={};readParameters(vehicle);}
+    const auto& player=Kinoko::System::RaceConfig::Instance()->raceScenario().players[kart.param()->playerIdx()];
+    const unsigned vehicle=unsigned(player.vehicle);
+    if(vehicle_!=vehicle){roll_={};wheelMotion_={};readParameters(vehicle);snapshot=true;}
+    // Luma follows the pose every tick.
+    if(unsigned(player.character)==23)snapshot=true;
+    if(!snapshot){
+        // Roll needs this tick's speed and effective radius only.
+        using S=Kinoko::Kart::eStatus;const auto& status=kart.status();
+        const float speed=wheelMotion_.step({
+            unsigned(Kinoko::System::RaceManager::Instance()->stage()),
+            kart.move()->speed(),kart.state()->startBoostCharge(),display_[2],display_[1],
+            status.onBit(S::Accelerate),status.onBit(S::Brake),status.onBit(S::TouchingGround),
+            status.onBit(S::WallCollision,S::Wall3Collision),status.onBit(S::InAction),
+            status.onBit(S::ChargingSSMT),status.onBit(S::Burnout),status.onBit(S::ChargeStartBoost)});
+        for(unsigned i=0;i<count_;++i){radii_[i]=kart.tirePhysics(i)->effectiveRadius();roll_[i]=advanceRoll(roll_[i],speed,radii_[i]);}
+        return;
+    }
     base_=fromSource(kart.body()->visualPose());kartScale_=vec(kart.scale());
     steering_=std::clamp(kart.model()->steeringInput(),-1.f,1.f);
     const auto& bsp=kart.param()->bsp();
@@ -105,6 +120,9 @@ void VehicleAnimation::step(Kinoko::Kart::KartObject& kart){
         status.onBit(S::Accelerate),status.onBit(S::Brake),status.onBit(S::TouchingGround),
         status.onBit(S::WallCollision,S::Wall3Collision),status.onBit(S::InAction),
         status.onBit(S::ChargingSSMT),status.onBit(S::Burnout),status.onBit(S::ChargeStartBoost)});
+    // KartBody::wheelMatrix ignores the wheel for karts (one makeQT of the body's
+    // rotation and position); only bikes' handle wheel differs. Build it once.
+    C3D_Mtx kartWheel;if(!bike_&&count_)kartWheel=fromSource(kart.body()->wheelMatrix(0));
     for(unsigned i=0;i<count_;++i){
         auto* physics=kart.tirePhysics(i);
         const unsigned bspIndex=bike_?i:(count_==3?(i+1)/2:i/2);
@@ -114,7 +132,7 @@ void VehicleAnimation::step(Kinoko::Kart::KartObject& kart){
         // effective radius at WheelPhysics+0x6c. Scaling only affects the
         // rendered mesh below, not the roll denominator a second time.
         roll_[i]=advanceRoll(roll_[i],speed,radii_[i]);
-        wheelSources_[i]=fromSource(kart.body()->wheelMatrix(i));
+        wheelSources_[i]=bike_?fromSource(kart.body()->wheelMatrix(i)):kartWheel;
         bspRadii_[i]=bsp.wheels[bspIndex].wheelRadius;
     }
     if(bike_)handleSource_=count_?wheelSources_[0]:fromSource(kart.body()->wheelMatrix(0));

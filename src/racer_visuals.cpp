@@ -135,10 +135,10 @@ void RacerVisuals::resetAnimation(){
         r->vehicle.reset();r->vehicle.step(*K::Kart::KartObjectManager::Instance()->object(i+1));
     }
 }
-void RacerVisuals::step(unsigned tick,const RaceItems& items){
+void RacerVisuals::step(unsigned tick,const RaceItems& items,bool drawNext){
     for(unsigned i=0;i<11;++i)if(auto* r=impl_->racers[i].get()){
         auto* kart=K::Kart::KartObjectManager::Instance()->object(i+1);auto& status=kart->status();
-        {MKW_SIM_SCOPE(OppVehicle);r->vehicle.step(*kart);}DriverSignals s;
+        {MKW_SIM_SCOPE(OppVehicle);r->vehicle.step(*kart,drawNext||r->headShown);}DriverSignals s;
         s.bike=kart->param()->isBike();s.handleRelativeBike=kart->param()->stats().body==K::Kart::KartParam::Stats::Body::Handle_Relative_Bike;s.wheelie=status.onBit(K::Kart::eStatus::Wheelie);
         s.airborne=status.offBit(K::Kart::eStatus::TouchingGround);s.hopping=status.onBit(K::Kart::eStatus::Hop);
         s.steering=kart->move()->cpuSteer()?kart->move()->cpuStick():kart->inputs()->currentState().stick.x;
@@ -167,6 +167,7 @@ void RacerVisuals::step(unsigned tick,const RaceItems& items){
             DriverLookParameters parameters;
             const bool available=driverLookParameters(r->choice->character,r->choice->vehicle,parameters);
             C3D_Mtx seated=r->vehicle.body();Mtx_Translate(&seated,0,r->choice->seatY,r->choice->seatZ,true);
+            r->animation->lookPhase=i;
             r->animation->stepLook(r->animation->find(driverVehicleClipName(r->pose.clipName,r->choice->bike)),r->pose.frame,tick,
                 available&&s.hasLookTarget&&driverLookAllowed(r->pose.clipName,
                     status.onBit(K::Kart::eStatus::InATrick),status.onBit(K::Kart::eStatus::OverZipper)),

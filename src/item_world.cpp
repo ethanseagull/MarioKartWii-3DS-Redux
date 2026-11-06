@@ -224,7 +224,7 @@ void RaceItems::syncReclaimOrder(){
             if(!a.active||retailObjectId(a.kind)!=type)h.remove(slot);else ++i;
         }
     }
-    for(unsigned i=0;i<MaxActors;++i){
+    for(unsigned i=nextActorSlot(0);i<MaxActors;i=nextActorSlot(i+1)){
         const auto& a=actors_[i];if(!a.active)continue;
         auto& h=reclaimOrder_[retailObjectId(a.kind)];h.add(i);
         if(a.settled&&(a.scattered||a.kind==ItemKind::Banana))h.land(i);
@@ -261,7 +261,7 @@ void RaceItems::updateActors(ItemWorldQuery query){
             resolveCourseObjects(a);if(!a.active)continue;
             for(unsigned owner=0;owner<count_&&a.active;++owner)
                 for(unsigned slot=0;slot<3&&a.active;++slot)resolveActorHeld(a,owner,slot);
-            for(unsigned other=0;other<MaxActors&&a.active;++other)
+            for(unsigned other=nextActorSlot(0);other<MaxActors&&a.active;other=nextActorSlot(other+1))
                 if(other!=order[k]&&actors_[other].active)resolveActorPair(a,actors_[other]);
         }
     }

@@ -270,6 +270,25 @@ private:
 public:
     // DIAG A/B (ab-alternate.txt): true scans every slot as before.
     static inline bool fullContactScan=false;
+    // Calls f(slot) for the actor slots in ascending order, as a scan of actors()
+    // would visit them, but only those in the contact mask (a superset of the
+    // active ones: f still checks active). f returns false to stop. Tick thread
+    // only (it may rebuild the mask). fullContactScan visits every slot.
+    template<class F> void forEachActorSlot(F&& f) const {
+        for(unsigned i=nextActorSlot(0);i<MaxActors;i=nextActorSlot(i+1))if(!f(i))return;
+    }
+    // The first slot >= i in the contact mask (MaxActors if none), rebuilding the
+    // mask first when an actor was activated since: an ascending walk over it
+    // sees the same active actors as a full scan, also ones activated during the
+    // walk. Old 3DS: each actor is 376 B, so a full scan of the 96 slots read 96
+    // cache lines; the item step ran ~50 such scans a tick. fullContactScan: every slot.
+    unsigned nextActorSlot(unsigned i) const {
+        if(fullContactScan||i>=MaxActors)return i<MaxActors?i:MaxActors;
+        if(contactMaskSerial_!=actorSerial_)const_cast<RaceItems*>(this)->refreshContactMask();
+        unsigned w=i>>5;uint32_t bits=contactMask_[w]&(~0u<<(i&31));
+        while(!bits&&++w<contactMask_.size())bits=contactMask_[w];
+        return bits?w*32+unsigned(__builtin_ctz(bits)):MaxActors;
+    }
 private:
     std::array<GroundReclaimOrder<MaxActors>,15> reclaimOrder_{};
     int reclaimPressure_=0;

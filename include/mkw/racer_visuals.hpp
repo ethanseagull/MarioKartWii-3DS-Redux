@@ -14,7 +14,9 @@ public:
     bool load();
     void reset();
     void resetAnimation();
-    void step(unsigned tick,const RaceItems& items);
+    // drawNext false (Old 3DS): no frame is drawn before the next step, so racers
+    // not shown up close keep last tick's vehicle snapshot (VehicleAnimation::step).
+    void step(unsigned tick,const RaceItems& items,bool drawNext=true);
     // Poses and culls every opponent for this frame, on the job worker where
     // possible. Call after Renderer::begin; race state must not change until draw.
     void prepare(const Renderer& renderer,const RaceItems& items,Vec3 viewer,unsigned tick,bool fullDetail=false);

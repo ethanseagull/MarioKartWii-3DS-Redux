@@ -16,7 +16,10 @@ class VehicleAnimation {
 public:
     VehicleAnimation(){reset();}
     void reset();
-    void step(Kinoko::Kart::KartObject& kart);
+    // snapshot false (Old 3DS, a tick no frame is drawn after): steps only the
+    // per-tick motion (wheel roll, wheel motion, Luma) and keeps the last pose,
+    // wheel and suspension snapshot; the next snapshot step catches up exactly.
+    void step(Kinoko::Kart::KartObject& kart,bool snapshot=true);
     // Complete visual input, without retaining a KartObject or race heap.
     // Positions and wheel frames are world-space; display is the original
     // kartPartsDispParam/bikePartsDispParam row, decoded to host floats.

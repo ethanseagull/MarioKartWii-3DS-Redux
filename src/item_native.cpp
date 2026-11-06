@@ -1,4 +1,5 @@
 #include "mkw/race_items.hpp"
+#include "mkw/sim_profile.hpp"
 #include "mkw/item_box.hpp"
 #include "mkw/item_road_follow.hpp"
 #include "mkw/item_rules.hpp"
@@ -398,7 +399,7 @@ void RaceItems::beforeStepNative(const ItemInput* inputs,unsigned count,bool act
 void RaceItems::afterStepNative(unsigned count){
     // Retail Item globals read RaceManager +0x20, not the active-item clock.
     reclaimPhase_=K::System::RaceManager::Instance()->timer()&7;nativeReclaimPhase_=true;
-    std::array<ItemRacer,MaxRacers> states;snapshotNative(count,states);
+    std::array<ItemRacer,MaxRacers> states;{MKW_SIM_SCOPE(ItSnapshot);snapshotNative(count,states);}
     for(unsigned i=0;i<std::min(count,MaxRacers);++i)
         states[i].inkCleaningBoost=kart(i)->move()->takeFloorInkClear()||states[i].inkCleaningBoost;
     afterStep(states.data(),count,nativeSurface);
