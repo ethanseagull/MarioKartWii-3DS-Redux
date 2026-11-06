@@ -33,7 +33,8 @@ VENV_PYTHON = VENV / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
 BUILD_PYTHON = (3, 12)
 # Packages needed beyond requirements.txt are listed there too (gltflib for the banner).
 DEPENDENCIES = [('noclip', 'noclip'), ('gclib', 'gclib'), ('cfl_tool', 'cfl-tool'), ('pycgfx', 'pycgfx')]
-TITLE_ID = '000400000F4B5700'
+TITLE_ID = '000400000F4B6000'
+GAME_3DSX = 'MarioKartWiiDS.3dsx'  # shipped name; the compile stage's own file stays mkw-3ds.3dsx
 CXX_STD = 'c++23'
 
 
@@ -685,7 +686,7 @@ class Builder:
         icon = Image.open(self.root / 'tools/release/artwork/icon.png').convert('RGBA')
         for n in (48, 24):
             icon.resize((n, n), Image.Resampling.LANCZOS).save(art / f'icon{n}.png')
-        self.run('banner-icon', [self.tools['bannertool'], 'makesmdh', '-s', 'Mario Kart Wii 3DS', '-l', 'Mario Kart Wii 3DS Redux',
+        self.run('banner-icon', [self.tools['bannertool'], 'makesmdh', '-s', 'Mario Kart WiiDS', '-l', 'Mario Kart WiiDS',
                                  '-p', 'Redux', '-i', art / 'icon48.png', '-si', art / 'icon24.png', '-o', art / 'icon.icn'])
         self.banner_sound(art)
 
@@ -848,7 +849,7 @@ class Builder:
         held = set(mpk_index(menu)) | set(mpk_index(stage / 'race.pak'))
         loose = {'menu': [], 'race': [], 'stream': []}
         for name, source in sorted(listing.items()):
-            if name in held or name in ('menu.pak', 'race.pak', 'mkw-3ds.3dsx'):
+            if name in held or name in ('menu.pak', 'race.pak', GAME_3DSX):
                 continue
             pack = 'stream' if name.startswith(('movies/', 'audio/')) else 'menu' if name.startswith('mii/') else 'race'
             loose[pack].append(f'{name}={source}')
@@ -878,7 +879,7 @@ class Builder:
             self.run('pakpack-' + name, [pakpack, *args, stage / f'{name}-order.txt', archives[-1], '@' + str(stage / f'{name}-loose.txt')])
 
         # SD folder: the three packs and the 3DSX.
-        sd = out / 'sd/3ds/mkw-3ds'
+        sd = out / 'sd/3ds/MKWiiDS'
         if (out / 'sd').exists():
             shutil.rmtree(out / 'sd')
         sd.mkdir(parents=True)
@@ -889,19 +890,20 @@ class Builder:
                 if name in packed:
                     raise BuildError(f'{name} is in two packs')
                 packed[name] = archive.name
-        unpacked = sorted(set(listing) - set(packed) - {'menu.pak', 'race.pak', 'mkw-3ds.3dsx'})
+        unpacked = sorted(set(listing) - set(packed) - {'menu.pak', 'race.pak', GAME_3DSX})
         if unpacked:
             raise BuildError('Files left out of the packs: ' + ', '.join(unpacked[:10]))
-        shutil.copy2(listing['mkw-3ds.3dsx'], sd / 'mkw-3ds.3dsx')
+        shutil.copy2(listing[GAME_3DSX], sd / GAME_3DSX)
         manifest = {name: {'storage': 'packed', 'archive': archive} for name, archive in packed.items()}
-        for name in ('menu.pak', 'race.pak', 'stream.pak', 'mkw-3ds.3dsx'):
+        for name in ('menu.pak', 'race.pak', 'stream.pak', GAME_3DSX):
             manifest[name] = {'storage': 'loose', 'bytes': (sd / name).stat().st_size, 'sha256': digest(sd / name)}
         write_json(out / 'sd-manifest.json', dict(sorted(manifest.items())))
         self.py('slim-check', 'slim_sd_models.py', sd)
         report = (self.logs / 'slim-check.log').read_text()
         if not report.startswith('0 packed duplicates'):
             raise BuildError('Loose copies of packed files remain in the SD folder: ' + report.splitlines()[0])
-        shutil.copy2(self.compile_dir / 'mkw-3ds.3dsx', out / 'mkw-3ds.3dsx')
+        (out / 'mkw-3ds.3dsx').unlink(missing_ok=True)  # builds before the rename
+        shutil.copy2(self.compile_dir / 'mkw-3ds.3dsx', out / GAME_3DSX)
         shutil.copy2(self.compile_dir / 'mkw-3ds.elf', out / 'mkw-3ds.elf')
         for name in ('LICENSE', 'NOTICE'):
             shutil.copy2(REPO / name, out / name)
@@ -917,7 +919,7 @@ class Builder:
             raise BuildError('tools/release/mkw-3ds.rsf no longer has the expected RomFs block.')
         # External-SD title: an empty embedded RomFS would hide the SD resources.
         (self.work / 'package/external-sd.rsf').write_text(rsf.replace(block, ''))
-        cia = out / f'MarioKartWii-3DS-Redux-v{version}.cia'
+        cia = out / f'MarioKartWiiDS-v{version}.cia'
         want = title_version()
         self.run('makerom', [self.tools['makerom'], '-f', 'cia', '-target', 't', '-exefslogo', '-elf', self.compile_dir / 'mkw-3ds.elf',
                              '-rsf', self.work / 'package/external-sd.rsf', '-icon', art / 'icon.icn', '-banner', art / 'banner-startgrid.bnr',
@@ -1178,7 +1180,7 @@ class Builder:
         log(f'\nDone (this run: {(time.monotonic() - began) / 60:.0f} min):\n'
             f'  CIA:        {self.cia_path}\n'
             f'  SD folder:  {self.output / "sd"}  (copy its 3ds folder to the SD card root)\n'
-            f'  3DSX:       {self.output / "mkw-3ds.3dsx"}')
+            f'  3DSX:       {self.output / GAME_3DSX}')
 
 
 def disc_identity(path, previous):

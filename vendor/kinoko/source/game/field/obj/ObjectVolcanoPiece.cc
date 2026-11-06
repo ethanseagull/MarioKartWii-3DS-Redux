@@ -1,14 +1,26 @@
 #include "game/field/obj/ObjectVolcanoPiece.hh"
 
+#include "game/system/RaceConfig.hh"
 #include "game/system/RaceManager.hh"
 
 namespace Kinoko::Field {
 
+/// USA80805104..80805148: the course gives three (rest, shake) pairs in
+/// seconds: settings 1-2 for 150cc, 3-4 for 100cc, 5-6 for 50cc. Block Plaza
+/// (course 0x21, its bricks) always uses the first pair.
+static u16 TimingSetting() {
+    const auto &scenario = System::RaceConfig::Instance()->raceScenario();
+    if (scenario.course == Course::Block_Plaza) {
+        return 1;
+    }
+    return scenario.engineClass == 1 ? 3 : scenario.engineClass == 0 ? 5 : 1;
+}
+
 /// @addr{0x80817DE8}
 ObjectVolcanoPiece::ObjectVolcanoPiece(const System::MapdataGeoObj &params)
     : ObjectKCL(params), m_initialPos(pos()), m_initialRot(rot()),
-      m_restDuration(params.setting(1) * 60),
-      m_shakeDuration(m_restDuration + params.setting(2) * 60),
+      m_restDuration(params.setting(TimingSetting()) * 60),
+      m_shakeDuration(m_restDuration + params.setting(TimingSetting() + 1) * 60),
       m_quakeDuration(m_shakeDuration + params.setting(7) + 1), m_colMgrB(nullptr),
       m_colMgrC(nullptr) {
     snprintf(m_modelName, sizeof(m_modelName), static_cast<u16>(id()) == 0x20d ? "bblock%hd" : "VolcanoPiece%hd",

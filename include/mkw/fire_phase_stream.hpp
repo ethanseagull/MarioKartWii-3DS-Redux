@@ -62,12 +62,8 @@ public:
                 if(!(block_=allocate(bytes,blockLinear_)))continue;
                 bool ok=false;uint32_t h[10]{};
                 if(stored>0&&stored<fileBytes){
-                    bool inLinear=false;
-                    if(auto* in=allocate(size_t(stored),inLinear)){
-                        ok=pack::readStored(path,in,size_t(stored))&&
-                           pack::decodeLz4Frames(in,size_t(stored),size_t(fileBytes),reinterpret_cast<unsigned char*>(h),sizeof h,oneFrame,step,allFrames/step,block_);
-                        release(in,inLinear);
-                    }
+                    // Streamed from the card: the 6.2 MB entry never sits in memory whole.
+                    ok=pack::decodeLz4Frames(path,size_t(fileBytes),reinterpret_cast<unsigned char*>(h),sizeof h,oneFrame,step,allFrames/step,block_);
                 }else if(stored==fileBytes){
                     ok=pack::readRange(path,0,h,sizeof h);
                     for(unsigned i=0;ok&&i<allFrames/step;++i)ok=pack::readRange(path,sizeof h+size_t(i)*step*oneFrame,block_+size_t(i)*oneFrame,oneFrame);

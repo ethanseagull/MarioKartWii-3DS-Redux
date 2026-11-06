@@ -1,6 +1,6 @@
 #pragma once
 // Whole-game options from the Settings page (the license screen's corner
-// button): sd:/3ds/mkw-3ds/settings.dat, 16 bytes: "MKWS0001", the four
+// button): sd:/3ds/MKWiiDS/settings.dat, 16 bytes: "MKWS0001", the four
 // values, two spare bytes, then a CRC-32 of the first 12 bytes.
 #include <array>
 #include <cstdint>
@@ -8,8 +8,8 @@
 #include <cstring>
 namespace mkw {
 struct UiSettings {
- // 0 High: every texture at its cooked size. 1 Standard: textures over
- // 256x256 texels load from their first mip level (Texture::loadMemory).
+ // 0 High: every texture at its cooked size. 1 Low: textures of
+ // 256x256 texels or more load from their first mip level (Texture::loadMemory).
  unsigned textureQuality=0;
  bool dynamicShadows=true,bloom=true;
  // 0 Full: every opponent keeps full detail. 1 Low: opponents switch to

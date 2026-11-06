@@ -326,11 +326,15 @@ void RaceBottomScreen::draw(Renderer& renderer,const BottomView& view){
     const unsigned mapFirst=m.count;
     if(mapTexture&&m.count<QuadCapacity){
         auto& q=m.base[m.count++];
-        const float wx0=cx-mapCenterX*upp,wx1=cx+(ScreenW-mapCenterX)*upp,wz0=cz-ScreenH*.5f*upp,wz1=cz+ScreenH*.5f*upp;
+        // World x at the screen's left and right edges: the inverse of screenX,
+        // so in Mirror the map flips about mapCenterX like the markers do (a
+        // UV swap flipped it about the screen centre, which the standings
+        // column moves away from MapCX).
+        const float s=view.mirror?-1.f:1.f;
+        const float wx0=cx-s*mapCenterX*upp,wx1=cx+s*(ScreenW-mapCenterX)*upp,wz0=cz-ScreenH*.5f*upp,wz1=cz+ScreenH*.5f*upp;
         const float u0=(wx0-course.x0)/frameW,u1=(wx1-course.x0)/frameW,v0=(wz0-course.z0)/frameH,v1=(wz1-course.z0)/frameH;
         q.x[0]=0;q.y[0]=0;q.x[1]=ScreenW;q.y[1]=0;q.x[2]=0;q.y[2]=ScreenH;q.x[3]=ScreenW;q.y[3]=ScreenH;
         q.u[0]=u0;q.v[0]=v0;q.u[1]=u1;q.v[1]=v0;q.u[2]=u0;q.v[2]=v1;q.u[3]=u1;q.v[3]=v1;
-        if(view.mirror){std::swap(q.u[0],q.u[1]);std::swap(q.u[2],q.u[3]);}
         for(auto& c:q.color)c=0xffffffffu;
     }
     const unsigned mapCount=m.count-mapFirst;
@@ -425,7 +429,8 @@ void RaceBottomScreen::draw(Renderer& renderer,const BottomView& view){
             const auto& silhouette=RaceMapFaceShadows[std::min<unsigned>(r.character,23)];
             const uint32_t outline=(r.team==RaceTeam::Red?0xff000000u:r.team==RaceTeam::Blue?0x0000ff00u:0u)|alpha;
             auto portrait=[&](const RaceMapRect& rect,float half,uint32_t color){
-                const float c=std::cos(r.hitAngle),sn=std::sin(r.hitAngle);float xs[4],ys[4];
+                const float angle=view.mirror?-r.hitAngle:r.hitAngle; // spins turn the other way in Mirror
+                const float c=std::cos(angle),sn=std::sin(angle);float xs[4],ys[4];
                 for(unsigned j=0;j<4;++j){const float dx=(j&1)?half:-half,dy=(j&2)?half:-half;
                     xs[j]=x+c*dx-sn*dy;ys[j]=y+sn*dx+c*dy;}
                 m.addCorners(rect,xs,ys,color);

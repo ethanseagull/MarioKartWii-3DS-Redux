@@ -2,7 +2,7 @@
 
     python tools/diag/package_cia.py
 
-build/diag/mkw-3ds-diag.elf -> build/diag/MarioKartWii-3DS-Redux-v<VERSION>-DIAG.cia,
+build/diag/mkw-3ds-diag.elf -> build/diag/MarioKartWiiDS-v<VERSION>-DIAG.cia,
 title 000400000F4B5D00 "MKW3DSDIAG". It installs beside the release title and
 shares its SD data.
 
@@ -42,7 +42,7 @@ def main():
         raise SystemExit(f'{ELF} missing: run tools/diag/compile.py first.')
     if not BANNER.is_file():
         raise SystemExit(f'{BANNER} missing: run tools/build.py first or set MKW_BANNER.')
-    cia = OUT / f'MarioKartWii-3DS-Redux-v{VERSION}-DIAG.cia'
+    cia = OUT / f'MarioKartWiiDS-v{VERSION}-DIAG.cia'
     subprocess.run([MAKEROM, '-f', 'cia', '-target', 't', '-exefslogo', '-elf', str(ELF),
                     '-rsf', str(HERE / 'package/diag-external-sd.rsf'), '-icon', str(HERE / 'package/icon-diag.icn'),
                     '-banner', str(BANNER), '-ver', str(TITLE_VERSION), '-DAPP_REMASTER=0', '-o', str(cia)],

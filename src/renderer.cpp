@@ -144,12 +144,12 @@ bool Texture::loadMemory(const void* data,size_t size,bool vram,int halveLarge) 
     auto t=Tex3DS_TextureImport(data,size,&gpu,nullptr,vram);
     if(!t){gpu={};return false;}
     Tex3DS_TextureFree(t);
-    // Old 3DS and Texture Quality: Standard: textures over 256x256 texels
+    // Old 3DS and Texture Quality: Low: textures of 256x256 texels or more
     // (course roads, shadows, a few objects) start at their first mip level,
     // about the size they had before the texel budgets. Skies have no mips and
     // stay. Level 1 onward is already laid out as a complete chain, so it
     // moves into a smaller allocation.
-    if((halveLarge<0?renderQuality().halfLargeTextures:halveLarge>0)&&!vram&&gpu.maxLevel&&gpu.width*gpu.height>256*256){
+    if((halveLarge<0?renderQuality().halfLargeTextures:halveLarge>0)&&!vram&&gpu.maxLevel&&gpu.width*gpu.height>=256*256){
         C3D_Tex small{};
         const C3D_TexInitParams params{u16(gpu.width/2),u16(gpu.height/2),u8(gpu.maxLevel-1),gpu.fmt,GPU_TEX_2D,false};
         if(C3D_TexInitWithParams(&small,nullptr,params)){
@@ -2431,7 +2431,7 @@ void Renderer::effectListNow(const RaceEffects& effects,const ef::DrawList& list
         constexpr const char* diagnosed[]={"rk_itemBox","rk_bananaSmk","rk_miniTurbo","rk_spinHalfL","rk_spinHalfR","rk_spinL","rk_spinR","rk_driftSpark1LB_Spark00","rk_driftSpark1LB_Spark01","rk_driftSpark1RB_Spark00","rk_driftSpark1RB_Spark01","rk_driftSpark1CB_Spark00","rk_driftSpark1CB_Spark01"};
         for(unsigned i=0;i<std::size(diagnosed);++i)if(!std::strcmp(b.res->name,diagnosed[i])&&!(state.diagnosticMask&(1u<<i))){
             state.diagnosticMask|=1u<<i;
-            if(FILE* log=std::fopen("sdmc:/3ds/mkw-3ds/effects-state.txt","a")){
+            if(FILE* log=std::fopen("sdmc:/3ds/MKWiiDS/effects-state.txt","a")){
                 std::fprintf(log,"draw generation=%u root=%s vertices=%lu missingTexture=%u linear=%lu\n",effects.generation(),b.res->name,(unsigned long)count,missing,(unsigned long)linearSpaceFree());
                 std::fclose(log);
             }

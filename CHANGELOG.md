@@ -4,6 +4,11 @@
 
 Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.9.4 (merged Nov 4, 2026; earlier fork changes were made on 0.8.14).
 
+# Title and SD folder
+
+- The game installs as its own title (`000400000F4B6000`), next to upstream's instead of over it, and keeps its data and saves in `sd:/3ds/MKWiiDS/` instead of `sd:/3ds/mkw-3ds/`. Move your saves across by hand (see the README).
+- The HOME Menu shows it as "Mario Kart WiiDS", and the build's files are `MarioKartWiiDS-v<version>.cia` and `MarioKartWiiDS.3dsx` (the DIAG build's `MarioKartWiiDS-v<version>-DIAG.cia`).
+
 # Performance (New 3DS)
 
 - Pipelined race frames: the CPU builds the next frame while the GPU draws the last one.
@@ -33,9 +38,13 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.9.4 (merged 
 - Blue Shells no longer turn back along the track at merges. When the leader's predicted route entered the next merge point from another branch, the shell took that branch backwards; it now keeps heading to the merge point.
 - Cutouts that keep only fully opaque texels (Moonview Highway's guardrails and bridge lattice) test half coverage instead. The Wii's one-bit mip levels pass that test at every distance; ours carry partial alpha, so the rails broke up and vanished with distance.
 - Wario's Gold Mine minecarts are clipped at each cart's own position. They were all hidden whenever the cart manager's placement was beyond draw distance, and the distant model used the near model's animation index.
+- Mirror: the lower screen's map lines up with the racers again. It was flipped about the screen's centre while the racers were flipped about the map's centre, which the standings column moves off-centre.
+- The first pause of a race no longer flashes black: while the pause page finishes loading, the race's last image stays on screen.
 - No menu banners over a paused race: the Time Trials pause and the "Quit this race?" question drew the menu's header, footer and Back button.
 - Time Trials start as on the Wii: no course preview, straight to the camera swinging round the kart and the countdown.
 - Staff and saved ghosts replay their recorded run. Course objects and the karts kept moving through the course preview and the race's first two frames, so a ghost met Wario's Gold Mine's carts and other moving objects out of step with its run. Ghosts saved before this may not replay on courses with moving objects.
+- Grumble Volcano's staff ghost finishes its 2:28.237 run. The lava fire snakes bounced along the wrong axis once they landed (Kinoko took the rest heading from the matrix's third column; the Wii uses the first), so on lap 2 a snake hit the ghost and it fell into the lava. All 64 staff ghosts and Kinoko's 56 reference ghosts now replay with every lap split exact in Kinoko on the PC.
+- Grumble Volcano's falling ground follows the engine class, as on the Wii: each piece has its own times for 150cc, 100cc and 50cc (50cc falls latest). Every class used the 150cc times.
 - GCN Peach Beach's Cataquacks walk their set paths in every Time Trial, as on the Wii, instead of chasing the racer, which could throw the ghost off its run.
 - Menus: the Ghost page's time labels follow their own row (they all took the Staff Ghost row's press animation), the VS and Battle Rules OK button keeps its shape so "OK" is readable, and Settings values keep their letter spacing inside the buttons.
 - Building no longer needs CFL_Res.dat: the game reads the console's own Mii resource. `--cfl` still packages a copy if you want.
@@ -43,7 +52,7 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.9.4 (merged 
 # Settings
 
 - The Wii's Settings button is back on the license screen, in the lower screen's top right corner as on the Wii (Up from the top row or Right from the right column). It opens the Wii's Settings page (its buttons, background and music) with this port's options, saved for the whole game in `settings.dat`:
-  - Texture Quality: High keeps every texture at its cooked size; Low loads textures over 256x256 one mip level down.
+  - Texture Quality: High keeps every texture at its cooked size; Low loads textures of 256x256 or more one mip level down.
   - Dynamic Shadows (moved here from License Settings; the first start takes the last license's choice).
   - Bloom: On or Off. Off also leaves bloom's VRAM to the course.
   - Opponent Detail: Full, or Low (distant opponents use the Wii's split-screen models).

@@ -138,12 +138,12 @@ Archive* lookup(Archives& all,const char* path,const Entry** entry){
   all.tried=true;for(auto& a:all.list)load(a);
 #ifndef MKW_RELEASE
   // DIAG A/B: no-sector-reads.txt reads entries exactly as stored.
-  if(std::FILE* off=std::fopen("sdmc:/3ds/mkw-3ds/no-sector-reads.txt","rb")){std::fclose(off);all.sectorReads=false;}
+  if(std::FILE* off=std::fopen("sdmc:/3ds/MKWiiDS/no-sector-reads.txt","rb")){std::fclose(off);all.sectorReads=false;}
   // no-read-ahead.txt: sector reads of the entry alone.
-  if(std::FILE* off=std::fopen("sdmc:/3ds/mkw-3ds/no-read-ahead.txt","rb")){std::fclose(off);all.readAhead=false;}
-  if(!all.trace)if(std::FILE* on=std::fopen("sdmc:/3ds/mkw-3ds/pack-trace.txt","rb")){std::fclose(on);all.trace=std::fopen("sdmc:/3ds/mkw-3ds/pack-trace.csv","a");}
+  if(std::FILE* off=std::fopen("sdmc:/3ds/MKWiiDS/no-read-ahead.txt","rb")){std::fclose(off);all.readAhead=false;}
+  if(!all.trace)if(std::FILE* on=std::fopen("sdmc:/3ds/MKWiiDS/pack-trace.txt","rb")){std::fclose(on);all.trace=std::fopen("sdmc:/3ds/MKWiiDS/pack-trace.csv","a");}
   // no-prefetch.txt: no background reads.
-  if(std::FILE* off=std::fopen("sdmc:/3ds/mkw-3ds/no-prefetch.txt","rb")){std::fclose(off);all.prefetch=false;}
+  if(std::FILE* off=std::fopen("sdmc:/3ds/MKWiiDS/no-prefetch.txt","rb")){std::fclose(off);all.prefetch=false;}
 #endif
   startPrefetch(all);
  }
@@ -433,8 +433,12 @@ bool readStored(const char* path,void* destination,size_t bytes){
  const bool ok=a&&e->stored==bytes&&readAt(all,*a,e->offset,destination,bytes);
  LightLock_Unlock(&all.lock);return ok;
 }
-bool decodeLz4Frames(const unsigned char* in,size_t n,size_t size,unsigned char* header,size_t head,
-                     size_t frameBytes,unsigned stride,unsigned count,unsigned char* out){
+namespace {
+// The LZ4 block decoder behind both decodeLz4Frames forms. next(b) gives the
+// next input byte (false at the end of the input).
+template<class Next>
+bool decodeLz4FramesFrom(Next&& next,size_t size,unsigned char* header,size_t head,
+                         size_t frameBytes,unsigned stride,unsigned count,unsigned char* out){
  if(!frameBytes||!stride)return false;
  // LZ4 matches reach back at most 65535 bytes: a 64 KiB ring holds every
  // byte a match can copy, so the whole output never has to exist.
@@ -452,23 +456,54 @@ bool decodeLz4Frames(const unsigned char* in,size_t n,size_t size,unsigned char*
   }
   ++pos;
  };
- const unsigned char* const end=in+n;
- while(in<end){
-  const unsigned token=*in++;size_t literals=token>>4;
-  if(literals==15){unsigned b;do{if(in==end)return false;b=*in++;literals+=b;}while(b==255);}
-  if(literals>size_t(end-in)||literals>size-pos)return false;
-  for(size_t i=0;i<literals;++i)put(in[i]);
-  in+=literals;
-  if(in==end)break;
-  if(end-in<2)return false;
-  const size_t distance=in[0]|in[1]<<8;in+=2;
+ unsigned char token;
+ while(next(token)){
+  size_t literals=token>>4;unsigned char b;
+  if(literals==15){do{if(!next(b))return false;literals+=b;}while(b==255);}
+  if(literals>size-pos)return false;
+  for(size_t i=0;i<literals;++i){if(!next(b))return false;put(b);}
+  unsigned char lo,hi;
+  if(!next(lo))break; // the last sequence ends after its literals
+  if(!next(hi))return false;
+  const size_t distance=lo|size_t(hi)<<8;
   size_t length=token&15;
-  if(length==15){unsigned b;do{if(in==end)return false;b=*in++;length+=b;}while(b==255);}
+  if(length==15){do{if(!next(b))return false;length+=b;}while(b==255);}
   length+=4;
   if(!distance||distance>pos||length>size-pos)return false;
   for(size_t i=0;i<length;++i)put(ring[(pos-distance)&0xffff]);
  }
  return pos==size;
+}
+}
+bool decodeLz4Frames(const unsigned char* in,size_t n,size_t size,unsigned char* header,size_t head,
+                     size_t frameBytes,unsigned stride,unsigned count,unsigned char* out){
+ const unsigned char* const end=in+n;
+ return decodeLz4FramesFrom([&](unsigned char& b){if(in==end)return false;b=*in++;return true;},size,header,head,frameBytes,stride,count,out);
+}
+bool decodeLz4Frames(const char* path,size_t size,unsigned char* header,size_t head,
+                     size_t frameBytes,unsigned stride,unsigned count,unsigned char* out){
+ // The stored entry read 64 KiB at a time: no buffer the size of the entry
+ // (6.2 MB for the firebar stream, more than a fragmented Old 3DS heap holds).
+ const long stored=storedSize(path);if(stored<=0)return false;
+ constexpr size_t Chunk=65536;
+ std::unique_ptr<unsigned char[]> chunk(new(std::nothrow) unsigned char[Chunk]);if(!chunk){lastReadFailure="lz4 chunk allocation";return false;}
+ size_t offset=0,have=0,at=0;bool readFailed=false;
+ auto next=[&](unsigned char& b){
+  if(at==have){
+   if(offset>=size_t(stored))return false;
+   const size_t bytes=std::min(Chunk,size_t(stored)-offset);
+   auto& all=archives();LightLock_Lock(&all.lock);
+   const Entry* e=nullptr;Archive* a=lookup(all,path,&e);
+   const bool ok=a&&e->stored==size_t(stored)&&readAt(all,*a,e->offset+std::uint32_t(offset),chunk.get(),bytes);
+   LightLock_Unlock(&all.lock);
+   if(!ok){readFailed=true;return false;}
+   offset+=bytes;have=bytes;at=0;
+  }
+  b=chunk[at++];return true;
+ };
+ const bool ok=decodeLz4FramesFrom(next,size,header,head,frameBytes,stride,count,out);
+ if(!ok)lastReadFailure=readFailed?"lz4 chunk read":"lz4 stream decode";
+ return ok&&!readFailed;
 }
 bool readRange(const char* path,size_t offset,void* destination,size_t bytes){
  auto& all=archives();LightLock_Lock(&all.lock);
@@ -558,7 +593,7 @@ size_t lz11(const unsigned char* in,size_t n,unsigned char* out){
 // destination alignment; then real entries as read now and sector-rounded.
 static void alignmentBench(Bench& b,unsigned char* buffer){
  FS_Archive sdmc=0;Handle file=0;
- if(R_FAILED(FSUSER_OpenArchive(&sdmc,ARCHIVE_SDMC,fsMakePath(PATH_EMPTY,"")))||R_FAILED(FSUSER_OpenFile(&file,sdmc,fsMakePath(PATH_ASCII,"/3ds/mkw-3ds/race.pak"),FS_OPEN_READ,0))){b.line("FAIL FSUSER open");return;}
+ if(R_FAILED(FSUSER_OpenArchive(&sdmc,ARCHIVE_SDMC,fsMakePath(PATH_EMPTY,"")))||R_FAILED(FSUSER_OpenFile(&file,sdmc,fsMakePath(PATH_ASCII,"/3ds/MKWiiDS/race.pak"),FS_OPEN_READ,0))){b.line("FAIL FSUSER open");return;}
  u64 fileSize=0;FSFILE_GetSize(file,&fileSize);
  b.line("race.pak %llu bytes",(unsigned long long)fileSize);
  struct Case {const char* name;std::uint32_t head,tail,dest;bool deep;};
@@ -633,7 +668,7 @@ void readBench(const char* resultPath,void(*log)(const char*),int mode){
  }else b.line("FAIL fopen race.pak");
  // 2. The FS service directly.
  FS_Archive sdmc=0;Handle file=0;
- if(R_FAILED(FSUSER_OpenArchive(&sdmc,ARCHIVE_SDMC,fsMakePath(PATH_EMPTY,"")))||R_FAILED(FSUSER_OpenFile(&file,sdmc,fsMakePath(PATH_ASCII,"/3ds/mkw-3ds/race.pak"),FS_OPEN_READ,0))){
+ if(R_FAILED(FSUSER_OpenArchive(&sdmc,ARCHIVE_SDMC,fsMakePath(PATH_EMPTY,"")))||R_FAILED(FSUSER_OpenFile(&file,sdmc,fsMakePath(PATH_ASCII,"/3ds/MKWiiDS/race.pak"),FS_OPEN_READ,0))){
   b.line("FAIL FSUSER open");std::free(buffer);if(b.out)std::fclose(b.out);return;
  }
  auto fsRead=[&](u64 offset,void* to,std::uint32_t bytes){std::uint32_t got=0;return R_SUCCEEDED(FSFILE_Read(file,&got,offset,to,bytes))&&got==bytes;};

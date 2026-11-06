@@ -128,11 +128,12 @@ bool DriverAnimation::load(const char* path,const Model& model){
     constexpr size_t HeapReserve=4u<<20;
     auto heapFree=[]{const struct mallinfo m=mallinfo();const size_t total=envGetHeapSize();
         return (total>size_t(m.arena)?total-size_t(m.arena):0)+size_t(m.fordblks);};
-    // Old 3DS: LINEAR first while it keeps 10 MiB free for meshes, textures,
-    // sound and the pause menu. Kept banks (keepReleased) then stay where they
-    // are race after race, so the split between the two pools stays put.
+    // Old 3DS: LINEAR first while it keeps 13 MiB free for meshes, textures,
+    // sound and the pause menu (with 10, 27 of 29 races ended under the 3 MiB
+    // the pause preload must leave). Kept banks (keepReleased) then stay where
+    // they are race after race, so the split between the two pools stays put.
     static const bool new3ds=[]{bool n=false;APT_CheckNew3DS(&n);return n;}();
-    constexpr size_t LinearReserve=10u<<20;
+    constexpr size_t LinearReserve=13u<<20;
     auto allocateBank=[&](size_t bytes){
         if(!new3ds&&linearSpaceFree()>=bytes+LinearReserve){
             data_=static_cast<uint8_t*>(linearAlloc(bytes));

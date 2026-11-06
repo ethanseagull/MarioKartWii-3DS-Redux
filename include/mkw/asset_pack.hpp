@@ -40,6 +40,9 @@ bool readStored(const char* path,void* destination,size_t bytes);
 // count frames (into out, packed). Memory: a 64 KiB window, not `size`.
 bool decodeLz4Frames(const unsigned char* in,size_t n,size_t size,unsigned char* header,size_t head,
                      size_t frameBytes,unsigned stride,unsigned count,unsigned char* out);
+// The same, reading the pack entry `path` (an LZ4 block) 64 KiB at a time.
+bool decodeLz4Frames(const char* path,size_t size,unsigned char* header,size_t head,
+                     size_t frameBytes,unsigned stride,unsigned count,unsigned char* out);
 // Race-load RAM cache (asset_pack.cpp): the races of a VS set or Grand Prix
 // re-read the same racers, items, effects and pause menu textures. enableCache sets the most it
 // may keep (0: off; cacheLimitFor gives it for a heap size). While
