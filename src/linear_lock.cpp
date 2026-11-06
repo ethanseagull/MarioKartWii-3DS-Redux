@@ -116,18 +116,6 @@ Result __wrap_romfsMountFromTitle(u64 tid,FS_MediaType mediatype,const char* nam
 }
 #endif
 FILE* __wrap_fopen(const char* path,const char* mode){
-#ifdef MKW_PGO_GEN
- // devkitARM's Windows GCC names each counter file "<-fprofile-generate dir>\<host
- // object path>.gcda" with backslashes and the drive: write it flat instead, as
- // pgo/<path below objects, backslash -> '#'>.gcda (tools/diag/compile.py MKW_PGO=use reads it back).
- static constexpr char prefix[]="sdmc:/3ds/MKWiiDS/pgo\\";
- if(path&&!std::strncmp(path,prefix,sizeof prefix-1)){
-  const char* rest=std::strstr(path,"objects\\");rest=rest?rest+8:path+sizeof prefix-1;
-  char flat[256];int n=std::snprintf(flat,sizeof flat,"sdmc:/3ds/MKWiiDS/pgo/");
-  for(;*rest&&n<int(sizeof flat)-1;++rest)flat[n++]=*rest=='\\'||*rest=='/'||*rest==':'?'#':*rest;
-  flat[n]=0;return __real_fopen(flat,mode);
- }
-#endif
 #ifndef MKW_RELEASE
  if(path&&cflFallbackTest()){
   if(!std::strcmp(path,"mii/CFL_Res.dat")){cflFallbackLog("test: packed mii/CFL_Res.dat hidden\n");return nullptr;}

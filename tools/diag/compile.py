@@ -52,43 +52,11 @@ FLAGS += ['-I' + p.as_posix() for p in [SHADER, ROOT / 'vendor/kinoko/include', 
 sources = [ROOT / s.strip() for s in (ROOT / 'docs/MANUAL-PROGRAM-SOURCES.txt').read_text().splitlines()
            if s.strip() and not s.startswith('#')]
 
-# Profile-guided optimization of Kinoko (the .cc sources) for the Old 3DS builds:
-#   MKW_PGO=gen  instruments Kinoko; the game writes its counters to
-#                sdmc:/3ds/MKWiiDS/pgo/ when the autoplay run ends (MKW_PGO_GEN).
-#   MKW_PGO=use  MKW_PGO_DIR=<those .gcda files copied back> optimizes with them;
-#                code the run never reached keeps its normal optimization.
-# Names drop the objects folder (-fprofile-prefix-path), so one profile serves
-# o3dstest and o3dsplay. The profile must come from the same Kinoko source.
-PGO = os.environ.get('MKW_PGO', '')
-if PGO == 'gen':
-    OUT = OUT.with_name(OUT.name + '-pgogen')  # its own objects: instrumented Kinoko
-PGO_FLAGS = {'': [],
-             'gen': ['-fprofile-generate=sdmc:/3ds/MKWiiDS/pgo', '-fprofile-update=single'],
-             'use': ['-fprofile-use', '-fprofile-partial-training', '-Wno-missing-profile']}[PGO]
-if PGO == 'gen':
-    # The game's fopen wrapper (src/linear_lock.cpp) writes the counters flat:
-    # sdmc:/3ds/MKWiiDS/pgo/vendor#kinoko#...#File.gcda.
-    FLAGS += ['-DMKW_PGO_GEN']
-if PGO == 'use':
-    # Each flat .gcda goes beside its object, where -fprofile-use looks; the
-    # profile's hash joins the flags so a new profile recompiles Kinoko.
-    pgo_dir = Path(os.environ['MKW_PGO_DIR'])
-    pgo_files = sorted(pgo_dir.glob('*.gcda'))
-    if not pgo_files:
-        raise SystemExit(f'no .gcda files in {pgo_dir}')
-    pgo_hash = hashlib.sha256()
-    for f in pgo_files:
-        target = OUT / 'objects' / Path(*f.name.split('#'))
-        target.parent.mkdir(parents=True, exist_ok=True)
-        data = f.read_bytes(); target.write_bytes(data); pgo_hash.update(f.name.encode() + data)
-    PGO_FLAGS += ['-DMKW_PGO_PROFILE=' + pgo_hash.hexdigest()[:16]]
-    print(f'PGO: {len(pgo_files)} profiles from {pgo_dir}', flush=True)
-
 
 def compile_one(src, signature):
     obj = OUT / 'objects' / src.relative_to(ROOT).with_suffix('.o')
     obj.parent.mkdir(parents=True, exist_ok=True)
-    flags = FLAGS + (['-flto=auto'] + PGO_FLAGS if src.suffix == '.cc' else [])
+    flags = FLAGS + (['-flto=auto'] if src.suffix == '.cc' else [])
     digest = hashlib.sha256(src.read_bytes() + signature + ' '.join(flags).encode()).hexdigest()
     name = str(obj.relative_to(OUT / 'objects').with_suffix(src.suffix))
     stamp = obj.with_suffix('.sha256')
@@ -123,7 +91,7 @@ def main():
                 'romfsMountFromTitle']  # DIAG: logs the Mii resource fallback (cfl-fallback-test.txt)
     if PLAY:
         wrappers.remove('romfsMountFromTitle')
-    subprocess.run([str(CXX), *ARCH, '-flto=auto', *PGO_FLAGS, '-specs=3dsx.specs', '-Wl,--gc-sections', '-Wl,-Map=' + str(OUT / (NAME + '.map')),
+    subprocess.run([str(CXX), *ARCH, '-flto=auto', '-specs=3dsx.specs', '-Wl,--gc-sections', '-Wl,-Map=' + str(OUT / (NAME + '.map')),
                     *['-Wl,--wrap=' + w for w in wrappers], '@' + str(rsp), str(WORK / 'libCFL.a'), str(WORK / 'libcitro3d.a'),
                     '-L' + str(SDK / 'libctru/lib'), '-lctru', '-lm', '-o', str(OUT / (NAME + '.elf'))], env=env, check=True)
     subprocess.run([str(SDK / 'devkitARM/bin/arm-none-eabi-size'), str(OUT / (NAME + '.elf'))], env=env, check=True)
