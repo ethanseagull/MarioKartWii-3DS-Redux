@@ -592,6 +592,7 @@ int main() {
     mkw::RaceBottomScreen::skipCoveredFill=!exists("sdmc:/3ds/MKWiiDS/no-bottom-cover.txt");
     // Shadow volumes shade only their projected rectangle (A/B: no-shadow-rect.txt).
     renderer.shadowRects=!exists("sdmc:/3ds/MKWiiDS/no-shadow-rect.txt");
+    renderer.effectStateSkip=!exists("sdmc:/3ds/MKWiiDS/no-effect-state-skip.txt");
     // The local racer's textures take VRAM before the course's (A/B: no-player-vram.txt).
     const bool playerTexturesVram=!exists("sdmc:/3ds/MKWiiDS/no-player-vram.txt");
     // Course textures take VRAM by coverage, not file order (A/B: no-vram-priority.txt).
@@ -678,10 +679,11 @@ int main() {
      // Shadows from the last license, where it used to be stored.
      if(!mkw::loadGameSettings(SettingsFile,menu.settings)&&licenseSaves[last].occupied)
          menu.settings.dynamicShadows=licenseSaves[last].settings.dynamicShadows;
-     // Old 3DS: Texture Quality Low, Dynamic Shadows Off and Opponent Detail
-     // Low, whatever the file says; the page answers those rows with "Not
-     // available". Applied before savedSettings, so the file is rewritten only
-     // when Bloom changes. DIAG full-quality.txt lifts it with reduced quality.
+     // Old 3DS: Texture Quality Low, Dynamic Shadows Off, Bloom Off and
+     // Opponent Detail Low, whatever the file says; the page answers every row
+     // with "Not available". Applied before savedSettings, so the Old 3DS title
+     // never rewrites the file the New 3DS game shares. DIAG full-quality.txt
+     // lifts it with reduced quality.
      bool settingsNew3ds=mkw::isNew3ds();
      if(!settingsNew3ds&&!(kQa&&exists("sdmc:/3ds/MKWiiDS/full-quality.txt"))){menu.old3dsSettings=true;mkw::lockOld3dsSettings(menu.settings);}}
     mkw::UiSettings savedSettings=menu.settings;
@@ -4027,12 +4029,12 @@ int main() {
             // A staff ghost blends over everything opaque, the player's shadow included.
             if(fullRace&&timeTrial){renderer.diagPass(mkw::diag::PassOpponents);opponents.drawGhosts(renderer);}
             renderer.diagPass(mkw::diag::PassEffects);
-            renderer.drawSparks(driftEffects,sparkTexture);
+            {MKW_SIM_SCOPE(EfSparks);renderer.drawSparks(driftEffects,sparkTexture);}
             renderer.drawEffects(raceEffects,effectTextures->data());
             renderer.diagPass(mkw::diag::PassNone);
             renderer.markIntroWorldEnd();
-            mkw::jobWorker().finishAll();
-            renderer.applyBloom();
+            {MKW_SIM_SCOPE(EfFinish);mkw::jobWorker().finishAll();}
+            {MKW_SIM_SCOPE(EfBloom);renderer.applyBloom();}
             if(fullRace)renderer.drawScreenFade(lightningFlash.opacity(),lightningFlash.white);
             profiler->mark(Profile::Effects);
             // Stereo layers (Mario Kart 7's): the HUD and result boards 4 px

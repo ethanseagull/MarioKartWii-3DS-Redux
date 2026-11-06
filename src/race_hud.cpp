@@ -354,12 +354,14 @@ void RaceHud::stepWorld(const RaceItems& items,Vec3 cameraBackward,bool started)
     {
         auto& m=*impl_;int kind=-1;float nearest=ShellWarningDistance;Vec3 position{};
         const auto& p=Kinoko::Kart::KartObjectManager::Instance()->object(0)->pos();
-        if(started)for(const auto& a:items.actors()){
+        if(started)items.forEachActorSlotRead([&](unsigned slot){
+            const auto& a=items.actors()[slot];
             if(!a.active||a.target!=0||a.explosion||a.scattered||
-               (a.kind!=ItemKind::RedShell&&a.kind!=ItemKind::BlueShell))continue;
+               (a.kind!=ItemKind::RedShell&&a.kind!=ItemKind::BlueShell))return true;
             const float distance=length(a.visualPosition()-Vec3{p.x,p.y,p.z});
             if(distance<=nearest){nearest=distance;kind=int(a.kind);position=a.visualPosition();}
-        }
+            return true;
+        });
         // CtrlRaceChase 807e7260..7324 and807e8f18..9048 also warn of
         // powered racers behind us: Star, Bullet, Mega, then Thunder Cloud.
         // Keep targeted shells above this fallback, and omit team-mates.

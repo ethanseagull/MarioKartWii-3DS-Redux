@@ -24,6 +24,7 @@ enum Slot : unsigned {
     FxInput, FxKart, FxLanding, FxWheelSpin, FxBrake, FxRemote, FxSurface, FxOppDrive, // pres_kart_fx split
     ItGrid, ItSnapshot, ItActors, ItHolders,                 // port_items_after split
     AuFill, AuStep,                                          // port_audio split
+    EfSparks, EfBuild, EfSubmit, EfFinish, EfBloom,          // render: the effects stage (per drawn frame, shown per tick)
     Count
 };
 inline constexpr const char* Names[Count]={
@@ -35,7 +36,8 @@ inline constexpr const char* Names[Count]={
     "pres_player","pres_opponents","pres_kart_fx","pres_particles","post_tick",
     "opp_vehicle","opp_controller","opp_look",
     "fx_input","fx_kart","fx_landing","fx_wheelspin","fx_brake","fx_remote","fx_surface","fx_oppdrive",
-    "it_grid","it_snapshot","it_actors","it_holders","au_fill","au_step"};
+    "it_grid","it_snapshot","it_actors","it_holders","au_fill","au_step",
+    "ef_sparks","ef_build","ef_submit","ef_finish","ef_bloom"};
 struct Data {unsigned long long ticks[Count]{};unsigned steps=0;bool on=false;};
 inline Data data{};
 #if defined(__3DS__)

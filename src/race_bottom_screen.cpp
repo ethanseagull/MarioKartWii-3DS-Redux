@@ -202,8 +202,9 @@ void fillBottomView(BottomView& v,const RaceGrid& grid,const RaceItems& items,bo
         }
     }
     {const auto& f=K::Kart::KartObjectManager::Instance()->object(0)->move()->smoothedForward();v.headingX=f.x;v.headingZ=f.z;}
-    for(const auto& a:items.actors()){
-        if(!a.active||v.items>=v.item.size())continue;
+    items.forEachActorSlotRead([&](unsigned slot){
+        const auto& a=items.actors()[slot];
+        if(!a.active||v.items>=v.item.size())return true;
         int marker=-1;
         if(a.explosion)marker=a.kind==ItemKind::BlueShell?int(BottomMarker::BlastBlue):a.kind==ItemKind::Bobomb?int(BottomMarker::BlastRed):-1;
         else if(a.kind==ItemKind::Banana)marker=int(BottomMarker::Banana);
@@ -212,10 +213,11 @@ void fillBottomView(BottomView& v,const RaceGrid& grid,const RaceItems& items,bo
         else if(a.kind==ItemKind::BlueShell)marker=int(BottomMarker::SpinyShell);
         else if(a.kind==ItemKind::Bobomb)marker=int(BottomMarker::Bobomb);
         else if(a.kind==ItemKind::FakeBox)marker=int(BottomMarker::FakeBox);
-        if(marker<0)continue;
+        if(marker<0)return true;
         const auto p=a.visualPosition();auto& it=v.item[v.items++];
         it.x=p.x;it.z=p.z;it.marker=uint8_t(marker);it.radius=a.radius; // a blast's live retail radius
-    }
+        return true;
+    });
     const unsigned stage=unsigned(race->stage());
     const auto& me=race->player(0);
     const auto& timer=me.finished()?me.raceTimer():race->timerManager().currentTimer();

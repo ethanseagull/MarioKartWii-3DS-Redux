@@ -4,6 +4,7 @@
 #include "mkw/course_phase_ranges.hpp"
 #include "mkw/rainbow_shadow.hpp"
 #include "mkw/renderer.hpp"
+#include "mkw/sim_profile.hpp"
 #include "mkw/diag.hpp"
 #include <mkw/normal_matrix.hpp>
 #include "mkw/castle_regions.hpp"
@@ -2331,8 +2332,8 @@ void Renderer::buildEffectList(RaceEffects& effects,const C3D_Mtx& viewMatrix,ef
 // The immediate path; recorded frames build the list in drawEffects (render_thread.cpp).
 void Renderer::drawEffectsImmediate(RaceEffects& effects,const Texture* textures){
     updateEffectState(effects);
-    buildEffectList(effects,view_,effectDraw_->list);
-    effectListNow(effects,effectDraw_->list,textures);
+    {MKW_SIM_SCOPE(EfBuild);buildEffectList(effects,view_,effectDraw_->list);}
+    MKW_SIM_SCOPE(EfSubmit);effectListNow(effects,effectDraw_->list,textures);
 }
 EffectLayerBuffer::~EffectLayerBuffer(){
     if(vertices)linearFree(vertices);
@@ -2406,14 +2407,25 @@ void Renderer::effectListNow(const RaceEffects& effects,const ef::DrawList& list
     C3D_TexEnvBufColor(0);
     // Unit 0 in projection mode for projected layers; bound by pointer until the draw.
     C3D_Tex projected{};
+    // Consecutive batches often share their emitter resource (material, blend, depth,
+    // alpha compare) and textures: only what differs from the last drawn batch is set
+    // again (same GPU state, fewer citro3d updates and commands). no-effect-state-skip.txt: every batch sets everything.
+    const ef::DrawBatch* last=nullptr;
     for(const ef::DrawBatch& b:list.batches){
         if(b.first>=vertexCount)break;
         const uint32_t count=ef::drawBatchVertexCount(b,vertexCount);
         if(!count)continue;
         const ef::Material& m=state.materials[b.res->index];
         const ef::DrawSetting& d=b.res->desc.draw;
+        const bool sameRes=effectStateSkip&&last&&last->res->index==b.res->index;
+        const bool sameTextures=sameRes&&last->texture[0]==b.texture[0]&&last->texture[1]==b.texture[1]&&last->wrap[0]==b.wrap[0]&&last->wrap[1]==b.wrap[1];
+        const bool sameCombiner=sameRes&&!std::memcmp(last->constant,b.constant,sizeof b.constant);
+        if(sameTextures&&sameCombiner&&last->alphaRef0==b.alphaRef0&&last->alphaRef1==b.alphaRef1&&last->cull==b.cull){
+            C3D_DrawArrays(GPU_TRIANGLES,int(b.first),int(count));
+            stats_.triangles+=count/3;++stats_.drawCalls;last=&b;continue;
+        }
         bool missing=false;
-        for(int u=0;u<2;++u){
+        if(!sameTextures)for(int u=0;u<2;++u){
             const uint32_t t=b.texture[u];
             if(t==0xffffffffu||t>=effects.textures.size()){C3D_TexBind(u,nullptr);continue;}
             const Texture& tex=textures[t];
@@ -2438,7 +2450,8 @@ void Renderer::effectListNow(const RaceEffects& effects,const ef::DrawList& list
             }
         }
 #endif
-        if(missing)continue;
+        if(missing){last=nullptr;continue;}
+        if(!sameCombiner){
         int rgbBuffer=0,alphaBuffer=0;
         for(int i=0;i<6;++i){
             C3D_TexEnv* env=C3D_GetTexEnv(i);C3D_TexEnvInit(env);
@@ -2456,6 +2469,7 @@ void Renderer::effectListNow(const RaceEffects& effects,const ef::DrawList& list
             if(st.bufferAlpha)alphaBuffer|=1<<i;
         }
         C3D_TexEnvBufUpdate(C3D_RGB,rgbBuffer);C3D_TexEnvBufUpdate(C3D_Alpha,alphaBuffer);
+        }
         C3D_AlphaBlend(GPU_BLEND_ADD,GPU_BLEND_ADD,blendFactor(d.blendSrc),blendFactor(d.blendDst),blendFactor(d.blendSrc),blendFactor(d.blendDst));
         const bool zTest=d.flags&ef::DrawSetting::ZTest;
         C3D_DepthTest(zTest,zTest?depthTest(d.zCompare):GPU_ALWAYS,(d.flags&ef::DrawSetting::ZUpdate)?GPU_WRITE_ALL:GPU_WRITE_COLOR);
@@ -2470,7 +2484,7 @@ void Renderer::effectListNow(const RaceEffects& effects,const ef::DrawList& list
         // GPU_CULL_FRONT_CCW): GX_CULL_FRONT (1) is GPU_CULL_BACK_CCW, GX_CULL_BACK (2) the other.
         C3D_CullFace(cameraCull(b.cull==1?GPU_CULL_BACK_CCW:b.cull==2?GPU_CULL_FRONT_CCW:GPU_CULL_NONE,view_));
         C3D_DrawArrays(GPU_TRIANGLES,int(b.first),int(count));
-        stats_.triangles+=count/3;++stats_.drawCalls;
+        stats_.triangles+=count/3;++stats_.drawCalls;last=&b;
     }
     // Back to the scene program and its state.
     C3D_TexEnvBufUpdate(C3D_Both,0);

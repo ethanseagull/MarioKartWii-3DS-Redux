@@ -277,6 +277,12 @@ public:
     template<class F> void forEachActorSlot(F&& f) const {
         for(unsigned i=nextActorSlot(0);i<MaxActors;i=nextActorSlot(i+1))if(!f(i))return;
     }
+    // Read-only form for draw-time readers (they may run on the job worker): the
+    // mask when it is current, else every slot; never rebuilds it. f returns false to stop.
+    template<class F> void forEachActorSlotRead(F&& f) const {
+        if(fullContactScan||contactMaskSerial_!=actorSerial_){for(unsigned i=0;i<MaxActors;++i)if(!f(i))return;return;}
+        for(unsigned w=0;w<contactMask_.size();++w)for(uint32_t bits=contactMask_[w];bits;bits&=bits-1)if(!f(w*32+unsigned(__builtin_ctz(bits))))return;
+    }
     // The first slot >= i in the contact mask (MaxActors if none), rebuilding the
     // mask first when an actor was activated since: an ascending walk over it
     // sees the same active actors as a full scan, also ones activated during the

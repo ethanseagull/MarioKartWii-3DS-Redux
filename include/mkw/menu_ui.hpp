@@ -69,7 +69,7 @@ class MenuState {
 public:
  UiPage page=UiPage::Strap;UiSelection selection{};
  UiSettings settings{}; // Settings page; saved by main when the page is left
- bool old3dsSettings=false; // Old 3DS: rows 0, 1 and 3 locked (lockOld3dsSettings)
+ bool old3dsSettings=false; // Old 3DS: every row locked (lockOld3dsSettings)
  unsigned cursor=0,age=0,focusAge=0;bool unavailable=false;
  int previewCourse=-1;
  LicenseRecords licenseRecords{};

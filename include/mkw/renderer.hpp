@@ -507,6 +507,8 @@ public:
     // Shadow volumes shade only the screen rectangle their bounds project to,
     // not the whole screen (shadowVolumesNow). A/B: no-shadow-rect.txt.
     bool shadowRects=false;
+    // Effect batches set only the state that differs from the last drawn batch (no-effect-state-skip.txt: all).
+    bool effectStateSkip=true;
     // Course objects past retail's draw distance (ObjFlow) are not drawn
     // (CourseObjects). A/B: no-draw-distance.txt.
     bool drawDistance=false;

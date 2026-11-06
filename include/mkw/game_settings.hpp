@@ -17,9 +17,10 @@ struct UiSettings {
  unsigned opponentDetail=0;
  bool operator==(const UiSettings&)const=default;
 };
-// Old 3DS (268 MHz, one core, 43 MB heap): the three heavy options stay at
-// their light values (MenuState::old3dsSettings refuses to switch them).
-inline void lockOld3dsSettings(UiSettings& s){s.textureQuality=1;s.dynamicShadows=false;s.opponentDetail=1;}
+// Old 3DS (268 MHz, one core, 43 MB heap): every option stays at its light
+// value (MenuState::old3dsSettings refuses to switch them). Bloom too: its ~20
+// blur passes cost about 1 ms of CPU a frame there (user, Nov 6).
+inline void lockOld3dsSettings(UiSettings& s){s.textureQuality=1;s.dynamicShadows=false;s.bloom=false;s.opponentDetail=1;}
 namespace settings_file {
 inline std::uint32_t crc(const unsigned char* b,unsigned n){
  std::uint32_t c=~0u;
