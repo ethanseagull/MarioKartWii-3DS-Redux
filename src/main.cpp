@@ -2799,10 +2799,11 @@ int main() {
                             }
                         }
                     const uint32_t mushroomsBefore=mkw::RaceItems::mushroomActivations[0];
-                    raceItems->beforeStepNative(inputs.data(),raceGrid.itemCount(),K::System::RaceManager::Instance()->isStageReached(K::System::RaceManager::Stage::Race),raceGrid.bulletNoEndPlayers());
+                    {MKW_SIM_SCOPE(PortItemsBefore);raceItems->beforeStepNative(inputs.data(),raceGrid.itemCount(),K::System::RaceManager::Instance()->isStageReached(K::System::RaceManager::Stage::Race),raceGrid.bulletNoEndPlayers());}
                     // Before the karts move: the ghost presses its item button on the
                     // previous recorded tick (GhostRecorder::itemUsedThisTick).
                     if(timeTrial&&mkw::RaceItems::mushroomActivations[0]!=mushroomsBefore){ghostRecorder.itemUsedThisTick();if(kQa&&ghostTest)LOGF("ghost test: frame=%u mushroom before the step",unsigned(ghostRecorder.frames()));}
+                    const auto aiStart=mkw::simprof::now();
                     for(unsigned i=0;i<raceGrid.count();++i){
                         const auto& h=raceItems->hud(i);const bool held=h.deployed&&h.heldCharges>0;
                         raceGrid.ai().setItemView(i,{uint8_t(h.item),uint8_t(held?h.heldCharges:0),h.roulette!=0,held,
@@ -2822,6 +2823,7 @@ int main() {
                     // Resolve item activation/expiry before choosing this tick's
                     // controller, including CPU Bullet Bills and the handoff back.
                     raceGrid.beforeStep(raceItems->bulletPlayers());
+                    mkw::simprof::add(mkw::simprof::PortAi,aiStart);
                 }
                 if(autoplay&&cpuLogEvery&&fullRace&&physicsSteps%cpuLogEvery==0){
                     auto* manager=K::System::RaceManager::Instance();
@@ -2879,7 +2881,7 @@ int main() {
                     sp::data.on=kQa&&fullRace&&!intro.active();
                     {MKW_SIM_SCOPE(Kinoko);scenes.calc();}
                     if(sp::data.on&&++sp::data.steps>=600){
-                        char text[512];int n=snprintf(text,sizeof text,"sim profile %u ticks, us/tick:",sp::data.steps);
+                        char text[1024];int n=snprintf(text,sizeof text,"sim profile %u ticks, us/tick:",sp::data.steps);
                         for(unsigned i=0;i<sp::Count&&n>0&&n<int(sizeof text);++i)
                             n+=snprintf(text+n,sizeof text-n," %s %.0f",sp::Names[i],double(sp::data.ticks[i])*1e6/SYSCLOCK_ARM11/sp::data.steps);
                         report(text);sp::data=sp::Data{};
@@ -2936,7 +2938,7 @@ int main() {
                 if(intro.active()&&!raceWarmupFrames){intro.step();++introTick;}
                 if(fullRace){
                     if(kQa&&blueTestEvery){raceItems->qaBlueTrace=true;raceItems->qaNearestItemPoints=blueTestOld;}
-                    raceGrid.afterStep();raceItems->afterStepNative(raceGrid.itemCount());
+                    {MKW_SIM_SCOPE(PortItemsAfter);raceGrid.afterStep();raceItems->afterStepNative(raceGrid.itemCount());}
                     if(kQa&&blueTestEvery){
                         if(raceItems->frame()%blueTestEvery==0)raceItems->qaFireBlueFromLast();
                         for(const auto& line:raceItems->qaBlueLines)report(line.c_str());
@@ -2984,6 +2986,7 @@ int main() {
                     {const auto* action=kart->action();
                      if(shakeActionStarts!=~0u&&action->startCount()!=shakeActionStarts&&action->lastStarted()==K::Kart::Action::UNK_11)cameraShake.trigger(mkw::CameraShakePow1+2,1.f);
                      shakeActionStarts=action->startCount();}
+                    const auto cameraStart=mkw::simprof::now();
                     cameraShake.step();
                     // Kinoko's camera runs last in the scene step; the presentation
                     // copy follows it. On the respawn frame retail re-seats the camera
@@ -2997,6 +3000,7 @@ int main() {
                     fillCameraInput(cameraInput);
                     if(battleMode)cameraInput.finished=battleTicks>=balloonBattle.durationTicks();
                     cameraDirector->step(cameraInput);
+                    mkw::simprof::add(mkw::simprof::PortCamera,cameraStart);
                     // Race-flow events for presentation subscribers (audio).
                     const unsigned stage=unsigned(race->stage());
                     if(battleMode&&stage>=2&&!results.active()&&battleTicks<balloonBattle.durationTicks())++battleTicks;
@@ -3170,8 +3174,9 @@ int main() {
                     mkw::LakituInput jugem;
                     jugem.kart=kart;jugem.stage=stage;jugem.timer=race->timer();jugem.lap=raceGrid.lap();jugem.lapCount=3;
                     jugem.introHeld=intro.active();jugem.finished=raceGrid.finished();jugem.cameraForward=view.target-view.eye;
-                    lakitu.step(jugem);
+                    {MKW_SIM_SCOPE(PortLakitu);lakitu.step(jugem);}
                     {
+                        const auto audioStart=mkw::simprof::now();
                         // Race audio state (RaceRSARPlayer::Calc order: after the race step).
                         const auto& me=race->player(0);using St=K::Kart::eStatus;const auto& st=kart->status();
                         mkw::RaceSound::Frame audio;audio.stage=stage;audio.timer=race->timer();audio.currentLap=me.currentLap();
@@ -3199,6 +3204,7 @@ int main() {
                                 K::Kart::KartObjectManager::Instance()->object(i)->move()->takeSoundCues();
                         }
                         raceSound.step(audio,&actors);
+                        mkw::simprof::add(mkw::simprof::PortAudio,audioStart);
                         // The audio thread only writes a bounded SPSC queue. Disk logging stays here.
                         mkw::RaceAudioLayer::ObjectTrace ot;
                         while(raceSound.layer().takeObjectTrace(ot)) {
@@ -3229,7 +3235,7 @@ int main() {
                     }
 
                 }
-                double us=(svcGetSystemTick()-tick)*1000000.0/SYSCLOCK_ARM11;stepTotal+=us;stepMax=std::max(stepMax,us);physicsSteps++;accumulator-=1;
+                double us=(svcGetSystemTick()-tick)*1000000.0/SYSCLOCK_ARM11;stepTotal+=us;stepMax=std::max(stepMax,us);mkw::simprof::add(mkw::simprof::TickTotal,tick);physicsSteps++;accumulator-=1;
                 if(autoplay&&cpuLogEvery&&fullRace){
                     // QA: full simulation tick cost (items, AI, physics) per log window.
                     static double windowTotal=0,windowMax=0;static unsigned windowSteps=0;

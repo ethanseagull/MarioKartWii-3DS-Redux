@@ -17,13 +17,16 @@ enum Slot : unsigned {
     K1Total, K1Search, K1KartCol, K1ObjCol, K1ItemCol, K1Body, K1Wheels, // KartSub::calcPass1
     K1Model,                                                 // KartObject::calc: model()->calc()
     Kinoko,                                                  // main: scenes.calc()
+    PortItemsBefore, PortAi, PortItemsAfter, PortCamera, PortLakitu, PortAudio, // main: the port's work around it
+    TickTotal,                                               // main: one whole tick of the race loop
     Count
 };
 inline constexpr const char* Names[Count]={
     "race_manager","box_col","objects","karts","jugem","items",
     "k0_state","k0_move","k0_action","k0_physics","k0_hitboxes",
     "k1_total","k1_box_search","k1_kart_col","k1_object_col","k1_item_col","k1_body_col","k1_wheels",
-    "k1_model","kinoko"};
+    "k1_model","kinoko",
+    "port_items_before","port_ai","port_items_after","port_camera","port_lakitu","port_audio","tick_total"};
 struct Data {unsigned long long ticks[Count]{};unsigned steps=0;bool on=false;};
 inline Data data{};
 #if defined(__3DS__)
@@ -33,8 +36,13 @@ struct Scope {
     ~Scope(){if(data.on)data.ticks[slot]+=svcGetSystemTick()-start;}
     Scope(const Scope&)=delete;Scope& operator=(const Scope&)=delete;
 };
+// Manual start/stop for blocks a scope can't wrap.
+inline u64 now(){return data.on?svcGetSystemTick():0;}
+inline void add(Slot s,u64 start){if(data.on&&start)data.ticks[s]+=svcGetSystemTick()-start;}
 #else
 struct Scope {explicit Scope(Slot){}};
+inline unsigned long long now(){return 0;}
+inline void add(Slot,unsigned long long){}
 #endif
 }
 #define MKW_SIM_SCOPE(slot) ::mkw::simprof::Scope mkwSimScope_##slot(::mkw::simprof::slot)
