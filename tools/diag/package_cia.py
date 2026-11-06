@@ -23,7 +23,8 @@ VARIANT = os.environ.get('MKW_DIAG_VARIANT', '')
 OUT = ROOT / ('build/diag-' + VARIANT if VARIANT else 'build/diag')
 ELF = OUT / 'mkw-3ds-diag.elf'
 TITLE, RSF, SUFFIX = {'': ('000400000F4B5D00', 'diag-external-sd.rsf', 'DIAG'),
-                      'o3dstest': ('000400000F4B5E00', 'diag-o3ds-test.rsf', 'Old3DS')}[VARIANT]
+                      'o3dstest': ('000400000F4B5E00', 'diag-o3ds-test.rsf', 'Old3DS'),
+                      'o3dsplay': ('000400000F4B5E00', 'diag-o3ds-test.rsf', 'Old3DS-play')}[VARIANT]
 WORK = Path(os.environ.get('MKW_WORK', ROOT / 'build/standard'))
 BANNER = Path(os.environ.get('MKW_BANNER', WORK / 'home-banner/production/banner-startgrid.bnr'))
 # tools/build.py records the makerom it found or downloaded.
@@ -48,7 +49,7 @@ def main():
         raise SystemExit(f'{BANNER} missing: run tools/build.py first or set MKW_BANNER.')
     cia = OUT / f'MarioKartWiiDS-v{VERSION}-{SUFFIX}.cia'
     icon = HERE / 'package/icon-diag.icn'
-    if VARIANT == 'o3dstest':
+    if VARIANT in ('o3dstest', 'o3dsplay'):
         # The Old 3DS build shows on the HOME Menu as "Mario Kart WiiDS Old 3DS" with
         # the game's own icon (the standard build's icon48/24), beside the game.
         art = WORK / 'home-banner/production'

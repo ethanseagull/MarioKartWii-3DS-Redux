@@ -25,6 +25,8 @@ if not (WORK / 'generated').is_dir():
 GEN = WORK / 'generated'
 # MKW_DIAG_VARIANT=o3dstest: the Old 3DS test build for a New 3DS (include/mkw/console_model.hpp),
 # in build/diag-o3dstest/ (its own objects, so the two builds don't rebuild each other).
+# MKW_DIAG_VARIANT=o3dsplay: the same Old 3DS test build in release mode (MKW_RELEASE: no QA
+# hooks, runtime log, profiler or SD test files), for play builds; build/diag-o3dsplay/, same title.
 VARIANT = os.environ.get('MKW_DIAG_VARIANT', '')
 OUT = ROOT / ('build/diag-' + VARIANT if VARIANT else 'build/diag')
 NAME = 'mkw-3ds-diag'
@@ -38,11 +40,12 @@ env = dict(os.environ)
 env['PATH'] = os.pathsep.join([str(SDK / 'devkitARM/bin'), str(SDK / 'tools/bin'), env['PATH']])
 
 ARCH = ['-march=armv6k', '-mtune=mpcore', '-mfloat-abi=hard', '-mtp=soft']
+PLAY = VARIANT == 'o3dsplay'
 FLAGS = ARCH + ['-O2', '-g', '-mword-relocations', '-ffunction-sections', '-fdata-sections', '-ffp-contract=off',
-                '-std=gnu++23', '-D__3DS__', '-DREVOLUTION', '-DMKW_AUTO_PROFILE', '-DMKW_WRAP_ROMFS_MOUNT', '-DKINOKO_QUIET',
+                '-std=gnu++23', '-D__3DS__', '-DREVOLUTION', *(['-DMKW_RELEASE'] if PLAY else ['-DMKW_AUTO_PROFILE', '-DMKW_WRAP_ROMFS_MOUNT']), '-DKINOKO_QUIET',
                 '-fno-exceptions', '-fno-rtti', '-fcheck-new', '-fno-strict-aliasing',
                 '-ffile-prefix-map=' + ROOT.as_posix() + '/=']
-FLAGS += {'': [], 'o3dstest': ['-DMKW_OLD3DS_TEST']}[VARIANT]
+FLAGS += {'': [], 'o3dstest': ['-DMKW_OLD3DS_TEST'], 'o3dsplay': ['-DMKW_OLD3DS_TEST']}[VARIANT]
 FLAGS += ['-I' + p.as_posix() for p in [SHADER, ROOT / 'vendor/kinoko/include', ROOT / 'vendor/kinoko/source', ROOT / 'include',
                                         ROOT / 'vendor/cfl-mii/include', ROOT / 'vendor/citro3d/include', SDK / 'libctru/include', GEN]]
 
@@ -86,6 +89,8 @@ def main():
     rsp.write_text('\n'.join('"' + p.as_posix() + '"' for p in objects))
     wrappers = ['linearAlloc', 'linearMemAlign', 'linearRealloc', 'linearGetSize', 'linearFree', 'linearSpaceFree', 'fopen',
                 'romfsMountFromTitle']  # DIAG: logs the Mii resource fallback (cfl-fallback-test.txt)
+    if PLAY:
+        wrappers.remove('romfsMountFromTitle')
     subprocess.run([str(CXX), *ARCH, '-flto=auto', '-specs=3dsx.specs', '-Wl,--gc-sections', '-Wl,-Map=' + str(OUT / (NAME + '.map')),
                     *['-Wl,--wrap=' + w for w in wrappers], '@' + str(rsp), str(WORK / 'libCFL.a'), str(WORK / 'libcitro3d.a'),
                     '-L' + str(SDK / 'libctru/lib'), '-lctru', '-lm', '-o', str(OUT / (NAME + '.elf'))], env=env, check=True)
