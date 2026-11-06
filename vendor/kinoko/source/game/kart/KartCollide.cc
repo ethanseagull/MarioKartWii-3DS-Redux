@@ -63,11 +63,15 @@ bool KartCollisionExempt(const KartObject *kart) {
     if (scenario.players[kart->param()->playerIdx()].type == System::RaceConfig::Player::Type::Ghost) {
         return true;
     }
+    return KartCollide::KartCollisionStatusExempt(kart);
+}
+} // namespace
+
+bool KartCollide::KartCollisionStatusExempt(const KartObject *kart) {
     const auto &status = kart->status();
     return status.onBit(eStatus::TriggerRespawn, eStatus::InRespawn, eStatus::AfterRespawn,
             eStatus::CannonStart, eStatus::InCannon, eStatus::AfterCannon, eStatus::BattleHidden);
 }
-} // namespace
 
 KartCollide::ItemCollisionHook KartCollide::s_itemCollisionHook = nullptr;
 void *KartCollide::s_itemCollisionContext = nullptr;

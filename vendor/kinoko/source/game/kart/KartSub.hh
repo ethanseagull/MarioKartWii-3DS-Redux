@@ -31,6 +31,9 @@ public:
     void calcPass0B1();
     void calcPass0B2();
     void calcPass1();
+    // mkw-3ds: calcPass1 = calcPass1Serial + calcPass1Local (KartObjectManager::s_pass1Grouped).
+    void calcPass1Serial();
+    void calcPass1Local();
     void resizeAABB(f32 radiusScale);
     void addFloor(const CollisionData &, bool);
     void updateSuspOvertravel(const EGG::Vector3f &suspOvertravel);
@@ -45,6 +48,8 @@ public:
     /// @endGetters
 
 private:
+    void pass1Serial();
+    void pass1Local();
     bool m_pass0MoveDone = false;
     KartMove *m_move;
     KartAction *m_action;

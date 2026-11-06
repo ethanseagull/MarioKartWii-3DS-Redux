@@ -146,6 +146,9 @@ public:
     /// PlayerSub18_checkItemCollision right after the object collision; a race item controller
     /// registers this hook to resolve its contacts for the racer at that point.
     using ItemCollisionHook = void (*)(void *context, size_t playerIdx);
+    /// The status part of the racer-pair exemption (respawn, cannon, battle hidden);
+    /// ghosts are exempt as well, by type.
+    [[nodiscard]] static bool KartCollisionStatusExempt(const KartObject *kart);
     static void SetItemCollisionHook(ItemCollisionHook hook, void *context) {
         s_itemCollisionHook = hook;
         s_itemCollisionContext = context;

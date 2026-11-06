@@ -197,6 +197,15 @@ void KartObject::calc() {
     {MKW_SIM_SCOPE(K1Model);model()->calc();}
 }
 
+void KartObject::calcSerial() {
+    sub()->calcPass1Serial();
+}
+
+void KartObject::calcLocal() {
+    sub()->calcPass1Local();
+    {MKW_SIM_SCOPE(K1Model);model()->calc();}
+}
+
 const KartAccessor *KartObject::accessor() const {
     return &m_pointers;
 }

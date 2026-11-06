@@ -2373,23 +2373,25 @@ int main() {
     if(exists("sdmc:/3ds/MKWiiDS/batch-body.txt"))K::Kart::KartCollide::s_batchBody=true;
     // On by default, each with an off-file (release and DIAG): no-pass0-split.txt (pass 0
     // in four phase-major parts instead of two), no-wheel-down-cache.txt (each wheel keeps
-    // its fixed down vector).
+    // its fixed down vector), no-pass1-group.txt (pass 1 serial parts, then local parts).
     if(exists("sdmc:/3ds/MKWiiDS/no-pass0-split.txt"))K::Kart::KartObjectManager::s_pass0Split=false;
     if(exists("sdmc:/3ds/MKWiiDS/no-wheel-down-cache.txt"))K::Kart::KartSuspensionPhysics::s_keepWheelDown=false;
+    if(exists("sdmc:/3ds/MKWiiDS/no-pass1-group.txt"))K::Kart::KartObjectManager::s_pass1Grouped=false;
     // DIAG ab-alternate.txt: same-binary A/B in one run. Each 600-step sim profile
     // window runs one combination of the Old 3DS speed-ups (bit 0: head-look subset,
     // bit 1: packed KCL prisms, bit 2: item contact mask, bit 3: phase-major pass 0,
     // bit 4: batched wheel prisms, bit 5: batched body prisms, bit 6: pass 0 in four
-    // parts, bit 7: kept wheel down vectors; set = new path),
+    // parts, bit 7: kept wheel down vectors, bit 8: pass 1 grouped; set = new path),
     // cycling all new, all old, then each one off alone; the window's line ends
     // with "ab <bits>".
     const bool abAlternate=kQa&&exists("sdmc:/3ds/MKWiiDS/ab-alternate.txt");
     unsigned abWindow=0;
-    auto abApply=[&]{if(!abAlternate)return;constexpr unsigned abBits=8,all=(1u<<abBits)-1;const unsigned slot=abWindow%(abBits+2);
+    auto abApply=[&]{if(!abAlternate)return;constexpr unsigned abBits=9,all=(1u<<abBits)-1;const unsigned slot=abWindow%(abBits+2);
         const unsigned bits=slot==0?all:slot==1?0u:all&~(1u<<(slot-2));
         mkw::DriverAnimation::subsetLook=bits&1;K::Field::KColData::s_packed=(bits>>1)&1;mkw::RaceItems::fullContactScan=!((bits>>2)&1);
         K::Kart::KartObjectManager::s_phaseMajor=(bits>>3)&1;K::Kart::KartSuspensionPhysics::s_batchWheels=(bits>>4)&1;K::Kart::KartCollide::s_batchBody=(bits>>5)&1;
-        K::Kart::KartObjectManager::s_pass0Split=(bits>>6)&1;K::Kart::KartSuspensionPhysics::s_keepWheelDown=(bits>>7)&1;};
+        K::Kart::KartObjectManager::s_pass0Split=(bits>>6)&1;K::Kart::KartSuspensionPhysics::s_keepWheelDown=(bits>>7)&1;
+        K::Kart::KartObjectManager::s_pass1Grouped=(bits>>8)&1;};
     abApply();
     if(kQa&&exists("sdmc:/3ds/MKWiiDS/bottom-rgba8.txt"))mkw::renderQuality().bottomRgba4=false;
     mkw::renderQuality().mipmaps=!exists("sdmc:/3ds/MKWiiDS/diagnose-no-mipmaps.txt");
@@ -2927,7 +2929,7 @@ int main() {
                         for(unsigned i=0;i<sp::Count&&n>0&&n<int(sizeof text);++i)
                             n+=snprintf(text+n,sizeof text-n," %s %.0f",sp::Names[i],double(sp::data.ticks[i])*1e6/SYSCLOCK_ARM11/sp::data.steps);
                         if(mkw::DriverAnimation::verifyLook&&n>0&&n<int(sizeof text))n+=snprintf(text+n,sizeof text-n," look_checks %u look_mismatches %u",mkw::DriverAnimation::lookChecks,mkw::DriverAnimation::lookMismatches);
-                        if(abAlternate&&n>0&&n<int(sizeof text))snprintf(text+n,sizeof text-n," ab %u",unsigned(mkw::DriverAnimation::subsetLook)|unsigned(K::Field::KColData::s_packed)<<1|unsigned(!mkw::RaceItems::fullContactScan)<<2|unsigned(K::Kart::KartObjectManager::s_phaseMajor)<<3|unsigned(K::Kart::KartSuspensionPhysics::s_batchWheels)<<4|unsigned(K::Kart::KartCollide::s_batchBody)<<5|unsigned(K::Kart::KartObjectManager::s_pass0Split)<<6|unsigned(K::Kart::KartSuspensionPhysics::s_keepWheelDown)<<7);
+                        if(abAlternate&&n>0&&n<int(sizeof text))snprintf(text+n,sizeof text-n," ab %u",unsigned(mkw::DriverAnimation::subsetLook)|unsigned(K::Field::KColData::s_packed)<<1|unsigned(!mkw::RaceItems::fullContactScan)<<2|unsigned(K::Kart::KartObjectManager::s_phaseMajor)<<3|unsigned(K::Kart::KartSuspensionPhysics::s_batchWheels)<<4|unsigned(K::Kart::KartCollide::s_batchBody)<<5|unsigned(K::Kart::KartObjectManager::s_pass0Split)<<6|unsigned(K::Kart::KartSuspensionPhysics::s_keepWheelDown)<<7|unsigned(K::Kart::KartObjectManager::s_pass1Grouped)<<8);
                         if(abAlternate&&n>0&&n<int(sizeof text))n+=snprintf(text+n,sizeof text-n," batch_spheres %lu batch_replays %lu",(unsigned long)K::Field::KColData::s_batchedSpheres,(unsigned long)K::Field::KColData::s_batchReplays);
                         K::Field::KColData::s_batchedSpheres=K::Field::KColData::s_batchReplays=0;
                         ++abWindow;abApply();

@@ -204,9 +204,24 @@ void KartSub::calcPass0B2() {
 /// Handles the second-half of physics calculations. This mainly includes
 /// collision detection, as well as suspension physics.
 void KartSub::calcPass1() {
-    constexpr s16 SIDE_COLLISION_TIME = 5;
     MKW_SIM_SCOPE(K1Total);
+    pass1Serial();
+    pass1Local();
+}
 
+void KartSub::calcPass1Serial() {
+    MKW_SIM_SCOPE(K1Total);
+    pass1Serial();
+}
+
+void KartSub::calcPass1Local() {
+    MKW_SIM_SCOPE(K1Total);
+    pass1Local();
+}
+
+/// mkw-3ds: pass 1 up to the item collision: the part that reads other racers
+/// (racer pairs, objects, items). See KartObjectManager::s_pass1Grouped.
+void KartSub::pass1Serial() {
     state()->resetEjection();
 
     m_movingWaterCollisionCount = 0;
@@ -225,6 +240,12 @@ void KartSub::calcPass1() {
     {MKW_SIM_SCOPE(K1KartCol);collide()->calcKartCollision();}
     {MKW_SIM_SCOPE(K1ObjCol);collide()->calcObjectCollision();}
     {MKW_SIM_SCOPE(K1ItemCol);collide()->calcItemCollision();}
+}
+
+/// mkw-3ds: the rest of pass 1 (body and wheel collision, suspension, pose): this
+/// racer's own state, the course and drivable objects.
+void KartSub::pass1Local() {
+    constexpr s16 SIDE_COLLISION_TIME = 5;
     dynamics()->setPos(pos() + collide()->tangentOff());
 
     auto &status = KartObjectProxy::status();
