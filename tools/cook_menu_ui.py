@@ -11,6 +11,7 @@ from PIL import Image, ImageDraw
 from cook_race_hud import sections,string,layout,animation,sample,font_strings,variant
 from cook_race_items import cook_image_sprite,decode_tpl,digest
 from cook_roster import ROOT
+from t3x_check import t3x_matches
 from menu_layout import render_layout,controllers,controller_alphas,controller_animations,messages,message_font_indices,pane_nodes
 from menu_movies import extract_movies,ThpMovie
 from menu_unlock_messages import entries as unlock_entries
@@ -27,9 +28,13 @@ def save(name,img,p=None):
  width,height=img.size; padded=[max(8,1<<(v-1).bit_length()) for v in img.size]
  target=OUT/'textures'/('ui_'+name+'.png')
  cached=False
- if target.exists() and target.with_suffix('.t3x').exists():
+ if target.exists() and t3x_matches(target.with_suffix('.t3x'),padded,'rgba8'):
+  # The whole padded image must match what cook_image_sprite writes now
+  # (content, transparent padding): an older, wider image can leave pixels
+  # in the padding that bilinear sampling picks up at the edge.
+  full=Image.new('RGBA',tuple(padded));full.paste(img.convert('RGBA'),(0,0))
   with Image.open(target) as previous:
-   cached=previous.size==tuple(padded) and previous.crop((0,0,width,height)).convert('RGBA').tobytes()==img.convert('RGBA').tobytes()
+   cached=previous.size==tuple(padded) and previous.convert('RGBA').tobytes()==full.tobytes()
  r={'name':'ui_'+name,'path':'textures/ui_'+name+'.t3x','width':width,'height':height,'padded':padded,'u':width/padded[0],'v':height/padded[1]} if cached else cook_image_sprite(img,'ui_'+name,OUT)
  if p:source(p);r.update(source=str(p.relative_to(ROOT)),source_sha256=evidence[str(p.relative_to(ROOT))])
  if (native_width,native_height)!=(width,height):r.update(width=native_width,height=native_height,rasterWidth=width,rasterHeight=height)

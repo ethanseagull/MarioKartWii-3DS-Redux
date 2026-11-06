@@ -10,6 +10,7 @@ from PIL import Image
 import award_face_textures
 from gx_material import material_state,retail_lighting,GMDL_SUBMESH
 from devkitpro import tool
+from t3x_check import t3x_matches
 from coplanar_layers import course_layers
 from course_layer_policy import triangle_layers
 from world_uv import local_triangle
@@ -79,10 +80,11 @@ def cook(source,out,prefix,max_texture=256,preserve_vertices=False,reuse_texture
    if not png.is_file() or Image.open(png).convert('RGBA').tobytes()!=im.tobytes():raise ValueError('Reusable texture content changed: '+str(png))
   else:im.save(png)
   alpha=im.getchannel('A').getextrema()[0]<255;fmt='rgba8' if exact_award_face else 'etc1a4' if alpha else 'etc1'
-  if not reuse_textures:
+  # A reused .t3x must still match (an older cook's size, format or
+  # compression is encoded again from the verified PNG).
+  if not reuse_textures or not t3x_matches(png.with_suffix('.t3x'),size,fmt):
    subprocess.run([str(tool('tex3ds')),'-f',fmt,'-q','high','-z','none','-o',str(png.with_suffix('.t3x')),str(png)],check=True,stdout=subprocess.DEVNULL)
    if exact_award_face:award_face_textures.preserve_rgba(png.with_suffix('.t3x'),im)
-  elif not png.with_suffix('.t3x').is_file():raise ValueError('Missing reusable texture: '+str(png))
   audits.append({'source':t['name'],'name':name,'size':size,'alpha':alpha,**replacement_audit})
  # Materials tools/export_brres.ts could not translate (its receipt's fallbacks).
  fallbacks={l.split(': ',1)[1] for l in data['limitations'] if l.startswith('Fallback material: ')}
