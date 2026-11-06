@@ -272,6 +272,9 @@ public:
     // `left`, when given, tallies the textures that stay in LINEAR.
     struct VramLeft {unsigned count=0,unitOne=0;std::size_t bytes=0,unitOneBytes=0;};
     bool moveToVram(Texture& texture,std::size_t reserve,VramLeft* left=nullptr);
+    // The VRAM bytes moveToVram would take: twice the LINEAR size for a
+    // widened unit-1 ETC1 texture, 0 for one that must stay in LINEAR.
+    std::size_t vramCost(const Texture& texture)const;
     void clearUnusedTextureCache();
     // Index of the frame being recorded: storage a deferred frame references
     // in place alternates on its parity (two frames are in flight).

@@ -90,8 +90,43 @@ void deferSdLogs(bool on){
 }
 unsigned deferredLogBytes(){RecursiveLock_Lock(&logLock);const unsigned n=unsigned(logBytes);RecursiveLock_Unlock(&logLock);return n;}
 }
+#ifndef MKW_RELEASE
+namespace {
+// DIAG (cfl-fallback-test.txt): hide the packed Mii resource so cfl_mii.c
+// takes its fallback, the console's own CFL system archive (title
+// 0004009B00010202); cfl-fallback.txt records each step.
+bool cflFallbackTest(){
+ static const int on=[]{FILE* f=__real_fopen("sdmc:/3ds/mkw-3ds/cfl-fallback-test.txt","r");if(f)std::fclose(f);return f?1:0;}();
+ return on;
+}
+void cflFallbackLog(const char* text){
+ if(FILE* f=__real_fopen("sdmc:/3ds/mkw-3ds/cfl-fallback.txt","a")){std::fputs(text,f);std::fclose(f);}
+}
+}
+#endif
 extern "C" {
+#ifdef MKW_WRAP_ROMFS_MOUNT
+Result __real_romfsMountFromTitle(u64 tid,FS_MediaType mediatype,const char* name);
+Result __wrap_romfsMountFromTitle(u64 tid,FS_MediaType mediatype,const char* name){
+ const Result rc=__real_romfsMountFromTitle(tid,mediatype,name);
+ char line[128];std::snprintf(line,sizeof line,"romfsMountFromTitle(%016llX, media %d, %s) = 0x%08lX (%s)\n",
+  (unsigned long long)tid,int(mediatype),name?name:"",(unsigned long)rc,R_SUCCEEDED(rc)?"mounted":"failed");
+ cflFallbackLog(line);
+ return rc;
+}
+#endif
 FILE* __wrap_fopen(const char* path,const char* mode){
+#ifndef MKW_RELEASE
+ if(path&&cflFallbackTest()){
+  if(!std::strcmp(path,"mii/CFL_Res.dat")){cflFallbackLog("test: packed mii/CFL_Res.dat hidden\n");return nullptr;}
+  if(!std::strncmp(path,"$CFLRES:",8)){
+   FILE* f=__real_fopen(path,mode);long size=-1;
+   if(f){std::fseek(f,0,SEEK_END);size=std::ftell(f);std::rewind(f);}
+   char line[160];std::snprintf(line,sizeof line,"open %s: %s, %ld bytes\n",path,f?"ok":"FAILED",size);cflFallbackLog(line);
+   return f;
+  }
+ }
+#endif
  const u64 start=svcGetSystemTick();FILE* file=nullptr;
  if(mkw::diag::deferring.load(std::memory_order_relaxed)&&path&&mode&&mode[0]=='a'&&
     !std::strncmp(path,"sdmc:/3ds/mkw-3ds/",18)&&std::strncmp(path+18,"perf-",5))file=mkw::diag::deferredOpen(path);

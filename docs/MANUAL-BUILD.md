@@ -70,7 +70,7 @@ before the menu texture fit.
 | battle | `cook_battle_menu_text.py`, `cook_battle_hud.py`, `cook_battle_hud_motion.py`, `cook_battle_bottom_scores.py`, `cook_battle_results.py`, `cook_battle_screens.py` |
 | race | `cook_race_intro.py`, `cook_mii_voice.py build/itembox-retail.rel`, `cook_audio.py`, `cook_race_items.py sd-card/3ds/mkw-3ds --disc {disc}`, `cook_race_flow.py`, `cook_race_balloon.py`, `cook_menu_mii_bodies.py`, `generate_native_icon.py` |
 | effects and objects | `cook_race_effects.py --course-only --output build/vfx/textures`, `cook_lakitu.py`, `cook_hanachan_joints.py`, `cook_pokey_joints.py`, `cook_object_sounds.py`, `cook_battle_balloons.py`, `cook_battle_coins.py`, `cook_battle_objects.py`, `cook_race_effects.py --balloon-only --output build/battle-balloon-effects/textures`, `cook_race_effects.py --coin-only --output build/battle-coin-effects/textures`, `cook_coin_hud_stack.py`, `cook_blast.py`, `cook_blooper.py`, `cook_luma.py`, `cook_coconut_objects.py`, `prepare_firebar_stream.py` |
-| native Mii resource | `stage_native_mii_resource.py <CFL_Res.dat>` |
+| native Mii resource | `stage_native_mii_resource.py --none` (the game reads the console's own; or give a `CFL_Res.dat` to package it) |
 | star colors | `node build/export_star.mjs assets/common/driver.brres include/mkw/star_colors.hpp` |
 | awards | `prepare_award_assets.py {disc}`, `node build/export_award_scene.mjs build/award-source`, `cook_award_cameras.py`, `cook_award_drive.py`, `cook_award_lighting.py`, `cook_award_models.py --jobs {jobs}`, `cook_race_effects.py --award-source build/award-source --output build/vfx/textures` |
 | credits | `cook_staff_camera.py`, `generate_staff_crowd.py`, `cook_staff_ui.py --retail-rel build/itembox-retail.rel --output build/staff` |

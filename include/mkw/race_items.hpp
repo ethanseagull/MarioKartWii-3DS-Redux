@@ -10,6 +10,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace Kinoko::Field {class RailInterpolator;class ObjectItemboxPress;class ObjectDrivable;}
@@ -197,6 +198,11 @@ public:
     void afterStep(const ItemRacer* racers,unsigned count,ItemWorldQuery query=nullptr);
     void beforeStepNative(const ItemInput* inputs,unsigned count,bool raceActive,uint16_t bulletNoEndPlayers=0);
     void afterStepNative(unsigned count);
+    // QA (diagnostic build): fire Blue Shells from last place and trace their
+    // route. qaNearestItemPoints restores the old whole-course nearest point.
+    bool qaNearestItemPoints=false,qaBlueTrace=false;
+    std::vector<std::string> qaBlueLines;
+    bool qaFireBlueFromLast();
     /// One racer's box and item contacts against last step's item positions.
     void kartContacts(unsigned player);
     ItemInput autoItemInput(unsigned player) const;
@@ -266,10 +272,11 @@ private:
     uint32_t rouletteRng_=1;
     std::array<uint16_t,4> itemSpawnTimers_{}; // Lightning, Blue, Blooper, POW
     std::array<ItemRacer,MaxRacers> racers_{};
-    // Racers whose item point is the nearest route point to itemPointFrom_,
-    // resolved on first use: only shell launches and guidance read it.
-    std::array<Vec3,MaxRacers> itemPointFrom_{};
-    uint16_t itemPointPending_=0;
+    // Each racer's maintained item point (ItemHolderPlayer +0x44): route point 0
+    // when the race starts, then ShellRoute::track every frame; reseeded when a
+    // respawn ends. respawning_ holds last frame's respawn bit per racer.
+    std::array<uint16_t,MaxRacers> itemPoints_{};
+    uint16_t respawning_=0;
     std::array<ItemInput,MaxRacers> inputs_{};
     std::array<bool,MaxRacers> held_{};
     // Thunder Cloud object state, kept with its carrier: transfer cooldown (+0x1d4) and age
@@ -347,8 +354,9 @@ private:
     int redRouteTarget(unsigned player)const;
     int redTarget(const ItemActor& actor,bool ranked)const;
     int blueTarget(const ItemActor& actor)const;
-    void trackShellRacers();
+    void trackShellRacers(bool advance);
     uint16_t itemPoint(unsigned racer);
+    void qaTraceBlue(ItemActor& actor);
     ItemActor& spawn(unsigned player,ItemKind kind,bool backwards,const Vec3* origin=nullptr);
     void releaseHeld(unsigned player,bool backwards);
     void removeHeld(unsigned player,unsigned slot,bool breakChain);

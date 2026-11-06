@@ -37,9 +37,11 @@ files[assets/'mii/parts.mpr']=Path('mii/parts.mpr')
 native_mii=ROOT/'build/native-mii-resource'
 native_info=json.loads((native_mii/'receipt.json').read_text())
 native_resource=native_mii/'mii/CFL_Res.dat'
-if native_resource.stat().st_size!=native_info['bytes'] or hashlib.sha256(native_resource.read_bytes()).hexdigest()!=native_info['sha256']:
+# Built without --cfl: the game mounts the console's CFL archive instead.
+if native_info.get('absent'):pass
+elif native_resource.stat().st_size!=native_info['bytes'] or hashlib.sha256(native_resource.read_bytes()).hexdigest()!=native_info['sha256']:
  raise ValueError('Native Mii resource changed; run stage_native_mii_resource.py')
-files[native_resource]=Path('mii/CFL_Res.dat')
+if not native_info.get('absent'):files[native_resource]=Path('mii/CFL_Res.dat')
 # Real ceremony kart simulation reads its original KMP/KCL through ResourceManager.
 for name in ('winningrun_demo','ending_demo'):
  files[ROOT/f'build/award-source/Race/Course/{name}.szs']=Path(f'Race/Course/{name}.szs')

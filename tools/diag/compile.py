@@ -36,7 +36,7 @@ env['PATH'] = os.pathsep.join([str(SDK / 'devkitARM/bin'), str(SDK / 'tools/bin'
 
 ARCH = ['-march=armv6k', '-mtune=mpcore', '-mfloat-abi=hard', '-mtp=soft']
 FLAGS = ARCH + ['-O2', '-g', '-mword-relocations', '-ffunction-sections', '-fdata-sections', '-ffp-contract=off',
-                '-std=gnu++23', '-D__3DS__', '-DREVOLUTION', '-DMKW_AUTO_PROFILE', '-DKINOKO_QUIET',
+                '-std=gnu++23', '-D__3DS__', '-DREVOLUTION', '-DMKW_AUTO_PROFILE', '-DMKW_WRAP_ROMFS_MOUNT', '-DKINOKO_QUIET',
                 '-fno-exceptions', '-fno-rtti', '-fcheck-new', '-fno-strict-aliasing',
                 '-ffile-prefix-map=' + ROOT.as_posix() + '/=']
 FLAGS += ['-I' + p.as_posix() for p in [SHADER, ROOT / 'vendor/kinoko/include', ROOT / 'vendor/kinoko/source', ROOT / 'include',
@@ -80,7 +80,8 @@ def main():
     objects = [OUT / 'objects' / s.relative_to(ROOT).with_suffix('.o') for s in sources]
     rsp = OUT / 'objects.rsp'
     rsp.write_text('\n'.join('"' + p.as_posix() + '"' for p in objects))
-    wrappers = ['linearAlloc', 'linearMemAlign', 'linearRealloc', 'linearGetSize', 'linearFree', 'linearSpaceFree', 'fopen']
+    wrappers = ['linearAlloc', 'linearMemAlign', 'linearRealloc', 'linearGetSize', 'linearFree', 'linearSpaceFree', 'fopen',
+                'romfsMountFromTitle']  # DIAG: logs the Mii resource fallback (cfl-fallback-test.txt)
     subprocess.run([str(CXX), *ARCH, '-flto=auto', '-specs=3dsx.specs', '-Wl,--gc-sections', '-Wl,-Map=' + str(OUT / (NAME + '.map')),
                     *['-Wl,--wrap=' + w for w in wrappers], '@' + str(rsp), str(WORK / 'libCFL.a'), str(WORK / 'libcitro3d.a'),
                     '-L' + str(SDK / 'libctru/lib'), '-lctru', '-lm', '-o', str(OUT / (NAME + '.elf'))], env=env, check=True)

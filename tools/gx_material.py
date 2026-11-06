@@ -186,6 +186,19 @@ def material_state(shape):
     if factors not in modes or sum(f=='v' for f in next(iter(expression),()))>1:
         return flags, 1., True, 'Unsupported original GX alpha equation', None, extended
     flags |= modes[factors]<<20
+    # A cutout that keeps only fully opaque texels: texture alpha times a
+    # constant w < 1, tested against w (Moonview Highway's Nuki_Ryoumen:
+    # K3.a = 128/255, alpha >= 128). On the Wii its CMPR mip levels stay one-bit,
+    # so the test is a half-coverage cutout at every distance. Our mip levels
+    # carry partial alpha, which that test throws away: rails and the bridge
+    # lattice broke up and vanished with distance. Test half coverage instead.
+    if factors == ('p',) and 0 < weight < 1 and flags & 1:
+        op, index = (flags >> 26) & 7, (flags >> 29) & 3
+        reference = (extended >> 16) & 255 or (0, 128, 165, 255)[index]
+        if op in (4, 6) and reference >= round(weight * 255) - (op == 4):
+            flags &= ~(31 << 26)
+            flags |= 1 | (6 << 26)
+            extended = (extended & ~(255 << 16)) | (max(1, round(weight * 255 / 2)) << 16)
     return flags, weight, vertex, limitation, None, extended
 
 

@@ -28,16 +28,28 @@ Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.9.4 (merged 
 - CPU racers drift manually, as on the Wii, and after a fall their path restarts from their respawn point.
 - Course, sky and course object textures are cooked to a texel budget instead of a flat 256 cap, so long road strips, skies and baked shadow maps keep more of the Wii's detail. The Old 3DS loads the larger ones one mip level down.
 - New 3DS: every opponent keeps its full-detail kart, driver and wheels at any distance, and crowds and animated items run every tick, as in the Wii's single-player races.
+- Blue Shells always leave forward, as on the Wii. A held-back stick, or a CPU throwing back at a racer behind it, launched them backwards off the item route.
+- Each racer's item point (the route position Red and Blue Shells steer by) is kept as on the Wii: it starts at point 0, moves each frame to the closest point within two links, walks forward along the route when the kart is 12000 or more away, and is reset after a respawn. The nearest point anywhere on the course could lie on another stretch of road at hairpins and crossings.
+- Blue Shells no longer turn back along the track at merges. When the leader's predicted route entered the next merge point from another branch, the shell took that branch backwards; it now keeps heading to the merge point.
+- Cutouts that keep only fully opaque texels (Moonview Highway's guardrails and bridge lattice) test half coverage instead. The Wii's one-bit mip levels pass that test at every distance; ours carry partial alpha, so the rails broke up and vanished with distance.
+- Wario's Gold Mine minecarts are clipped at each cart's own position. They were all hidden whenever the cart manager's placement was beyond draw distance, and the distant model used the near model's animation index.
+- No menu banners over a paused race: the Time Trials pause and the "Quit this race?" question drew the menu's header, footer and Back button.
+- Time Trials start as on the Wii: no course preview, straight to the camera swinging round the kart and the countdown.
+- Staff and saved ghosts replay their recorded run. Course objects and the karts kept moving through the course preview and the race's first two frames, so a ghost met Wario's Gold Mine's carts and other moving objects out of step with its run. Ghosts saved before this may not replay on courses with moving objects.
+- GCN Peach Beach's Cataquacks walk their set paths in every Time Trial, as on the Wii, instead of chasing the racer, which could throw the ghost off its run.
+- Menus: the Ghost page's time labels follow their own row (they all took the Staff Ghost row's press animation), the VS and Battle Rules OK button keeps its shape so "OK" is readable, and Settings values keep their letter spacing inside the buttons.
+- Building no longer needs CFL_Res.dat: the game reads the console's own Mii resource. `--cfl` still packages a copy if you want.
 
 # Settings
 
 - The Wii's Settings button is back on the license screen, in the lower screen's top right corner as on the Wii (Up from the top row or Right from the right column). It opens the Wii's Settings page (its buttons, background and music) with this port's options, saved for the whole game in `settings.dat`:
-  - Texture Quality: High keeps every texture at its cooked size; Standard loads textures over 256x256 one mip level down.
+  - Texture Quality: High keeps every texture at its cooked size; Low loads textures over 256x256 one mip level down.
   - Dynamic Shadows (moved here from License Settings; the first start takes the last license's choice).
   - Bloom: On or Off. Off also leaves bloom's VRAM to the course.
-  - Opponent Detail: Full, or Reduced (distant opponents use the Wii's split-screen models).
+  - Opponent Detail: Full, or Low (distant opponents use the Wii's split-screen models).
   - Changes apply to the next race.
-  - The upper screen shows a live sample of the highlighted option at its current value, drawn with the race's own code: the road close up at High or Standard, the racer with the dynamic or the plain shadow, with or without bloom, and at full or reduced detail.
+  - The upper screen shows a live sample of the highlighted option at its current value, drawn with the race's own code: the road close up at High or Low, the racer, seated still, with the dynamic or the plain shadow, with or without bloom, and at full or reduced detail.
+  - Every option value's letters load with the page; "Opponent Detail: Full" had lost its "F" and "p".
 - The license screen, title and main menu show the Wii's faint stripes over the blurred title picture on the lower screen, instead of the dark stripes the race menus use.
 
 # Loading

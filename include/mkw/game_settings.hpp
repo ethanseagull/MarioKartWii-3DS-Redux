@@ -12,7 +12,7 @@ struct UiSettings {
  // 256x256 texels load from their first mip level (Texture::loadMemory).
  unsigned textureQuality=0;
  bool dynamicShadows=true,bloom=true;
- // 0 Full: every opponent keeps full detail. 1 Reduced: opponents switch to
+ // 0 Full: every opponent keeps full detail. 1 Low: opponents switch to
  // the Wii's split-screen bodies with camera distance (RenderQuality::racerLod).
  unsigned opponentDetail=0;
  bool operator==(const UiSettings&)const=default;

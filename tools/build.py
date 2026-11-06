@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the standard (release) game from your own Mario Kart Wii USA disc.
 
-    py -3.12 tools/build.py --disc <RMCE01.iso|.wbfs> --cfl <CFL_Res.dat>
+    py -3.12 tools/build.py --disc <RMCE01.iso|.wbfs>
 
 It sets up .venv from requirements.txt, fetches the pinned converters in
 dependencies.json (noclip, gclib, cfl-tool, pycgfx), extracts the disc, runs
@@ -20,7 +20,7 @@ A stopped or failed build resumes at the first unfinished stage. After a git
 pull, a cook stage whose script, the tools/ modules it imports or the tracked
 files it names changed runs again, with every stage after it. --from STAGE
 runs that stage and every later one again (--list-stages shows the order).
-The disc and CFL_Res.dat are only read.
+The disc is only read.
 """
 import argparse, ast, fnmatch, hashlib, inspect, json, os, platform, posixpath, re, shutil, struct, subprocess, sys, textwrap, time
 import urllib.request, zipfile
@@ -104,7 +104,7 @@ def check_cfl(path):
         raise BuildError(f'CFL_Res.dat not found: {path}')
     data = path.read_bytes()
     if not 84 <= len(data) <= 1083400 or struct.unpack_from('<H', data)[0] != 20:
-        raise BuildError(f'{path} is not a 3DS CFL_Res.dat (it is not CFL_DB.dat or a Mii file; see README.md).')
+        raise BuildError(f'{path} is not a 3DS CFL_Res.dat (it is not CFL_DB.dat or a Mii file).')
 
 
 def devkitpro():
@@ -331,9 +331,11 @@ def bootstrap(args):
         raise BuildError('Run this with a native Python (on Windows: py -3.12 tools/build.py ...), not the MSYS2 one.')
     check_python(sys.version_info)
     check_venv()
-    disc, cfl = Path(args.disc).expanduser().resolve(), Path(args.cfl).expanduser().resolve()
+    disc = Path(args.disc).expanduser().resolve()
+    cfl = Path(args.cfl).expanduser().resolve() if args.cfl else None
     check_disc(disc)
-    check_cfl(cfl)
+    if cfl:
+        check_cfl(cfl)
     sdk = devkitpro()
     work = Path(args.work).expanduser().resolve()
     work.mkdir(parents=True, exist_ok=True)
@@ -345,7 +347,7 @@ def bootstrap(args):
     sync_source(source, work / 'source-files.json')
     fetch_dependencies(source)
     prepare_venv(source)
-    command = [str(VENV_PYTHON), str(Path(__file__).resolve()), '--worker', '--disc', str(disc), '--cfl', str(cfl),
+    command = [str(VENV_PYTHON), str(Path(__file__).resolve()), '--worker', '--disc', str(disc), *(['--cfl', str(cfl)] if cfl else []),
                '--work', str(work), '--jobs', str(args.jobs)] + (['--from', args.start] if args.start else [])
     return subprocess.run(command).returncode
 
@@ -461,7 +463,8 @@ class Builder:
         self.banner_work = self.work / 'home-banner'
         self.logs = self.work / 'logs'
         self.state_path = self.work / 'state.json'
-        self.disc, self.cfl, self.jobs = Path(args.disc or '-'), Path(args.cfl or '-'), max(1, args.jobs)
+        self.disc, self.jobs = Path(args.disc or '-'), max(1, args.jobs)
+        self.cfl = Path(args.cfl) if args.cfl else None
         self.stages = self.define_stages()
 
     def prepare(self):
@@ -1003,7 +1006,7 @@ class Builder:
             ('firebar', ['prepare_firebar_stream.py'], 'build/course-water-feedback/textures/firebar-indirect.ftan'),
         ]:
             tool(name, args, out)
-        tool('native-resource', ['stage_native_mii_resource.py', self.cfl], 'build/native-mii-resource/receipt.json')
+        tool('native-resource', ['stage_native_mii_resource.py', self.cfl or '--none'], 'build/native-mii-resource/receipt.json')
         add('star-colors', lambda: self.node('star-colors', 'build/export_star.mjs', 'assets/common/driver.brres', 'include/mkw/star_colors.hpp'),
             R('include/mkw/star_colors.hpp'), ['build/export_star.mjs', 'assets/common/driver.brres', 'include/mkw/star_colors.hpp'])
         tool('award-inputs', ['prepare_award_assets.py', D], 'build/award-source/award-sources.json')
@@ -1237,7 +1240,7 @@ def check_cia(cia, title, version):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--disc', help='your Mario Kart Wii USA (RMCE01) ISO or WBFS')
-    parser.add_argument('--cfl', help="your 3DS CFL_Res.dat (README.md says where it comes from)")
+    parser.add_argument('--cfl', help='optional CFL_Res.dat to package')
     parser.add_argument('--work', default=str(REPO / 'build/standard'), help='work directory (default: build/standard)')
     parser.add_argument('--jobs', type=int, default=min(4, os.cpu_count() or 4), help='parallel converter jobs (default: 4)')
     parser.add_argument('--from', dest='start', metavar='STAGE', help='run this stage and all later ones again')
@@ -1249,8 +1252,8 @@ def main():
             print('(setup: host tools, source copy, pinned converters, .venv; every run)')
             print('\n'.join(name for name, _, _ in Builder(args).stages))
             return 0
-        if not args.disc or not args.cfl:
-            parser.error('--disc and --cfl are required')
+        if not args.disc:
+            parser.error('--disc is required')
         if not args.worker:
             return bootstrap(args)
         Builder(args).main(args.start)

@@ -470,9 +470,12 @@ void CourseObjects::Impl::recordObjects(){
         // moves, else where the presenter last drew it, else its placement.
         const auto* p=v.object&&(v.kinetic||!v.drawnValid)?&v.object->pos():nullptr;
         const C3D_Mtx& m=v.drawnValid?v.drawn:v.placement;
-        draw.hidden=beyond(p?Vec3{p->x,p->y,p->z}:Vec3{m.r[0].w,m.r[1].w,m.r[2].w},drawDistances[i]);
+        // The cart manager stays at its placement while its carts run the whole
+        // mine: clipping them all there hid every cart far from that point.
+        if(partsClipped(v)){draw.partLimit=drawDistances[i];draw.partScale=distanceScale;}
+        else draw.hidden=beyond(p?Vec3{p->x,p->y,p->z}:Vec3{m.r[0].w,m.r[1].w,m.r[2].w},drawDistances[i]);
         if(draw.hidden)diag::tallyHidden(v.resource);
-        drawObject(draw,v);draw.hidden=false;
+        drawObject(draw,v);draw.hidden=false;draw.partLimit=0;
     }
     // Retail owns one pochaYogan model per player and restarts all three
     // non-looping tracks together. Keep the authored terminal pose rather

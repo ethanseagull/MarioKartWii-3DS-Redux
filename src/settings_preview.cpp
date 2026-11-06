@@ -224,12 +224,12 @@ void drawRacer(Renderer& renderer,Racer& racer,VehicleAnimation& vehicle,bool lo
   renderer.setSkinPalette(nullptr,0,12);
   return;
  }
- // Driving straight ahead: the race's "drive" clip, looped.
+ // Seated still: the race's "drive" clip held on its first frame, so the
+ // driver does not loop its steering motion while the racer turns.
  const int clip=a.animation->find(driverVehicleClipName("drive",choice.bike));
  if(clip>=0){
-  const float frames=std::max(1.f,a.animation->duration(unsigned(clip))-1.f),frame=std::fmod(float(age),frames);
   a.animation->setBraidWorld(seated);
-  a.animation->apply(*a.driver,clip,frame,age,a.animation->face("drive"),frame);
+  a.animation->apply(*a.driver,clip,0,age,a.animation->face("drive"),0);
  }
  auto animate=[&](DriverAnimation* bank,Model* model,bool handle){
   if(!bank||!model)return;

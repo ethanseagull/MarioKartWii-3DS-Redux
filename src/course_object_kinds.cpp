@@ -768,8 +768,10 @@ void drawTruckWagon(ObjectDraw& d,Visual& v){
         const auto& cart=*static_cast<const K::Field::ObjectTruckWagonCart*>(v.parts[i]);
         if(!cart.isActive())continue;
         const C3D_Mtx m=liveMatrix(cart);
-        Anim a;a.clip=v.clips[0];a.frame=float(d.tick);a.srt=v.clips[1];a.srtFrame=float(d.tick);
+        if(d.partBeyond(position(m)))continue;
         const bool far=v.low.model&&length(position(m)-d.camera)>renderQuality().objectLowDistance;
+        // Clip indices belong to each model's own bank; the LOD has no tire SRT.
+        Anim a;a.clip=v.clips[far?2:0];a.frame=float(d.tick);a.srt=far?-1:v.clips[1];a.srtFrame=float(d.tick);
         d.submit(far?v.low.model:v.main.model,m,a);
         if(v.shadow.model)d.shadow(v.shadow.model,m);
     }
@@ -1169,7 +1171,7 @@ bool classifyObject(Visual& v,const ObjectAssets& assets,int course){
     }else if(id==ObjectId::TruckWagon&&live){
         v.present=drawTruckWagon;v.main=find(assets,"TruckWagon","TruckWagon");v.low=find(assets,"TruckWagon","TruckWagon_LOD");
         v.shadow=find(assets,"TruckWagon","TruckWagon-shadow");
-        v.clips[0]=clip(v.main,"TruckWagon_run");v.clips[1]=scroll(v.main,"TruckWagon_tire");
+        v.clips[0]=clip(v.main,"TruckWagon_run");v.clips[1]=scroll(v.main,"TruckWagon_tire");v.clips[2]=clip(v.low,"TruckWagon_run");
     }else if(id==ObjectId::Psea&&live){
         v.present=drawTide;static const char* seas[]={"Psea1sand","Psea2dark","Psea3nami","Psea4tex","Psea5spc"};
         for(unsigned i=0;i<5;++i)v.extra[i]=find(assets,"Psea",seas[i],seas[i]);
@@ -1241,6 +1243,7 @@ bool classifyObject(Visual& v,const ObjectAssets& assets,int course){
     return true;
 }
 void drawObject(ObjectDraw& d,Visual& v){if(v.present)v.present(d,v);}
+bool partsClipped(const Visual& v){return v.present==drawTruckWagon;}
 bool skyObject(const Visual& v){return v.present==drawSun;}
 bool waterObject(const Visual& v){return v.present==drawTide||v.present==drawVeniceWater;}
 const K::Field::ObjectBase* reviewFocus(const Visual& v){

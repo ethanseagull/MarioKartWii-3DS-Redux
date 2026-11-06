@@ -169,7 +169,7 @@ ItemSurface queryCourseItemSurfaceAt(Vec3 previous,Vec3 position,float radius,un
 void RaceItems::nativeKartPass(void* context,size_t player){
     auto* items=static_cast<RaceItems*>(context);
     if(!items->active_||player>=items->count_)return;
-    items->racers_[player]=snapshot(unsigned(player));items->itemPointPending_&=uint16_t(~(1u<<player));
+    items->racers_[player]=snapshot(unsigned(player));
     items->kartContacts(unsigned(player));
 }
 void RaceItems::nativeKartBump(void* context,size_t attacker,size_t victim){

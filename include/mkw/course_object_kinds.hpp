@@ -162,6 +162,10 @@ struct ObjectDraw {
     // The object is past retail's draw distance: its presenter still runs
     // (movers, state timing), but submit/shadow/explosion/plain draw nothing.
     bool hidden=false;
+    // Retail's squared draw distance and FOV factor for presenters that clip
+    // each spawned part at its own position (partsClipped); 0 draws at any distance.
+    float partLimit=0,partScale=0;
+    bool partBeyond(Vec3 p)const{return partScale>0&&partLimit>0&&dot(p-camera,p-camera)*partScale>partLimit;}
     void submit(ObjModel* model,const C3D_Mtx& transform,const Anim& anim);
     // -shadow meshes are stencil shadow volumes, resolved after all objects.
     void shadow(ObjModel* model,const C3D_Mtx& transform,const Anim& anim={});
@@ -173,6 +177,8 @@ bool classifyObject(Visual& visual,const ObjectAssets& assets,int course);
 // Route followers for objects Kinoko leaves static; true when v is one.
 bool classifyMover(Visual& visual,const ObjectAssets& assets);
 void drawObject(ObjectDraw& draw,Visual& visual);
+// The presenter clips each part itself (minecarts travel far from the manager's placement).
+bool partsClipped(const Visual& visual);
 // Drawn in the sky pass rather than with the course objects.
 bool skyObject(const Visual& visual);
 bool waterObject(const Visual& visual);

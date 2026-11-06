@@ -154,7 +154,7 @@ bool Texture::loadMemory(const void* data,size_t size,bool vram,int halveLarge) 
         const C3D_TexInitParams params{u16(gpu.width/2),u16(gpu.height/2),u8(gpu.maxLevel-1),gpu.fmt,GPU_TEX_2D,false};
         if(C3D_TexInitWithParams(&small,nullptr,params)){
             std::memcpy(small.data,static_cast<const uint8_t*>(gpu.data)+gpu.size,C3D_TexCalcTotalSize(small.size,small.maxLevel));
-            C3D_TexDelete(&gpu);gpu=small;
+            C3D_TexDelete(&gpu);gpu=small;++renderQuality().halvedTextures;
         }
     }
     C3D_TexFlush(&gpu); // Make decoded LINEAR pixels visible before first sampling.
@@ -715,6 +715,12 @@ bool Renderer::loadVramTexture(Texture& texture,const char* path,GPU_TEXTURE_WRA
     C3D_TexSetWrap(&texture.gpu,wrap,wrap);
     texture.ready=true;
     return true;
+}
+std::size_t Renderer::vramCost(const Texture& texture)const{
+    const auto& t=texture.gpu;
+    const std::size_t bytes=C3D_TexCalcTotalSize(t.size,t.maxLevel);
+    if(!texture.unitOne||(t.fmt!=GPU_ETC1&&t.fmt!=GPU_L4&&t.fmt!=GPU_A4))return bytes;
+    return unitOneEtc1a4&&t.fmt==GPU_ETC1?2*bytes:0;
 }
 bool Renderer::moveToVram(Texture& texture,std::size_t reserve,VramLeft* left){
     auto& t=texture.gpu;

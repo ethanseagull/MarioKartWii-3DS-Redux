@@ -17,9 +17,8 @@ which builds on dudewhat's original port and MiniBandit's continuation.
 ## What you need
 
 - Your own **Mario Kart Wii USA** disc image (game ID **RMCE01**) as an ISO or WBFS. Convert RVZ or NKit images first.
-- Your 3DS's **CFL_Res.dat**, the console's Mii rendering resource. It isn't on the Wii disc; step 6 below shows how to copy it.
 - A PC with about 40 GB free and an internet connection. The build is tested on Windows.
-- A 3DS with custom firmware (Luma3DS), FBI and GodMode9.
+- A 3DS with custom firmware (Luma3DS) and FBI.
 
 No game files are included in this repository. Everything the game needs is
 converted from your own disc.
@@ -55,22 +54,12 @@ them. Otherwise the build downloads the versions pinned in
 checks their SHA-256. Node and ffmpeg are only downloaded on Windows. ffmpeg
 needs the soxr resampler, which most builds have.
 
-### Copy CFL_Res.dat from your 3DS
-
-6. On the 3DS, in GodMode9:
-   1. Open `[1:] SYSNAND CTRNAND` → `title` → `0004009b` → `00010202` → `content`.
-   2. Press A on the `.app` file, choose *NCCH image options...* → *Mount image
-      to drive*, and answer yes to open it.
-   3. Open `romfs`, press A on `CFL_Res.dat` and choose *Copy to 0:/gm9/out*.
-   4. Put the SD card in your PC and copy `gm9/out/CFL_Res.dat` somewhere
-      handy.
-
 ### Build
 
-7. Open a terminal (PowerShell is fine) in the folder you cloned and run:
+6. Open a terminal (PowerShell is fine) in the folder you cloned and run:
 
    ```sh
-   py -3.12 tools/build.py --disc "C:/Games/RMCE01.wbfs" --cfl "C:/Games/CFL_Res.dat"
+   py -3.12 tools/build.py --disc "C:/Games/RMCE01.wbfs"
    ```
 
    The first run takes about an hour on a fast PC and needs nothing from you
@@ -96,10 +85,10 @@ greater is required", remove only `.venv` from the cloned folder and rerun:
 
 ```powershell
 Remove-Item -LiteralPath .venv -Recurse -Force
-py -3.12 tools/build.py --disc "C:/Games/RMCE01.wbfs" --cfl "C:/Games/CFL_Res.dat"
+py -3.12 tools/build.py --disc "C:/Games/RMCE01.wbfs"
 ```
 
-Use your own disc and CFL paths. On Linux or macOS, remove `.venv` and use
+Use your own disc path. On Linux or macOS, remove `.venv` and use
 `python3.12` for the build command. Keep `build/standard`; completed build
 stages are still there and the build resumes from them.
 
@@ -113,7 +102,7 @@ This keeps completed build stages in `build/standard`.
 
 ```sh
 git pull
-py -3.12 tools/build.py --disc "C:/Games/RMCE01.wbfs" --cfl "C:/Games/CFL_Res.dat"
+py -3.12 tools/build.py --disc "C:/Games/RMCE01.wbfs"
 ```
 
 Only what changed gets rebuilt, so this usually takes a few minutes (longer
@@ -145,9 +134,9 @@ The version in the CIA's file name doesn't change with every commit.
 
 ## Installing
 
-8. Copy the `sd/3ds` folder to the root of your SD card. The game data ends
+7. Copy the `sd/3ds` folder to the root of your SD card. The game data ends
    up in `sd:/3ds/mkw-3ds/`.
-9. Copy the CIA to the SD card and install it with FBI. Or skip the CIA and
+8. Copy the CIA to the SD card and install it with FBI. Or skip the CIA and
    start `mkw-3ds.3dsx` from the Homebrew Launcher.
 
 If your console has never run a homebrew game with sound, dump its DSP
@@ -156,6 +145,7 @@ firmware once with DSP1.
 ## Build options
 
 `--work DIR` builds somewhere other than `build/standard`,
+`--cfl FILE` packages your own CFL_Res.dat,
 `--jobs N` sets how many converters run at once (default 4), and
 `--from STAGE` runs one stage and everything after it again
 (`--list-stages` lists them).

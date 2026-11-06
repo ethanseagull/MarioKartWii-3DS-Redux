@@ -185,6 +185,12 @@ static uint32_t readGhostFile(const char* path,unsigned course,std::vector<K::u8
 static uint32_t readStaffGhost(unsigned course,unsigned kind,std::vector<K::u8>* file=nullptr){
     char path[64];const unsigned n=mkw::licenseSaveCourse(course);
     std::snprintf(path,sizeof path,"Race/TimeAttack/ghost%u/ghost%u_comp_%02u.rkg",kind+1,kind+1,n);
+    // DIAG: ghost-override.rkg stands in for the first staff ghost of its course
+    // (a Kinoko reference ghost, to compare the replay with its KRKG).
+#ifndef MKW_RELEASE
+    if(kind==0&&readGhostFile("sdmc:/3ds/mkw-3ds/ghost-override.rkg",course,nullptr))
+        return readGhostFile("sdmc:/3ds/mkw-3ds/ghost-override.rkg",course,file);
+#endif
     return readGhostFile(path,course,file);
 }
 static uint32_t readOwnGhost(unsigned slot,unsigned course,std::vector<K::u8>* file=nullptr){
@@ -531,6 +537,11 @@ int main() {
     // next frame is built while the GPU draws this one (A/B: no-menu-pipeline.txt).
     const bool menuDeferred=!exists("sdmc:/3ds/mkw-3ds/no-menu-pipeline.txt");
     const bool ghostTest=kQa&&exists("sdmc:/3ds/mkw-3ds/ghost-test.txt");
+    // QA: blue-test.txt "<ticks> [old]" fires a Blue Shell from last place every
+    // <ticks> while none is in flight and traces each one's route in runtime.log;
+    // "old" restores the whole-course nearest item point for comparison.
+    unsigned blueTestEvery=0;bool blueTestOld=false;
+    if(kQa)if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/blue-test.txt","r")){char mode[8]={};if(fscanf(f,"%u %7s",&blueTestEvery,mode)<1)blueTestEvery=600;blueTestOld=!strcmp(mode,"old");fclose(f);}
     // Bottom screen: no background fill under the opaque map (A/B: no-bottom-cover.txt).
     mkw::RaceBottomScreen::skipCoveredFill=!exists("sdmc:/3ds/mkw-3ds/no-bottom-cover.txt");
     // Shadow volumes shade only their projected rectangle (A/B: no-shadow-rect.txt).
@@ -1382,19 +1393,25 @@ int main() {
         else if(staffGhost)raceGhostTime=staffGhostTimes[staffGhost-1];
         if(staffGhost&&!raceGhostTime){report("FAIL ghost file: racing alone");staffGhost=0;}
     };
-    if(fullRace){if(runMenu()!=mkw::UiAction::StartRace){finishAutoplay();renderer.waitForGpu();menuModels.reset(renderer);menuIcons.reset(renderer);menuRenderer.release();mkw::SoundSystem::instance().stop();mkw::MenuMovieAudio::shutdown();mkw::shutdownLoadingScreen();renderer.shutdown();gfxExit();return 0;}applySelection();menu.raceStarted();menuProfile->write("sdmc:/3ds/mkw-3ds/menu-performance.csv");raceLoadStart=svcGetSystemTick();}
-    bool dataReady=exists("Race/Common.szs")&&courseAvailable(courseChoice);
-    if(dataReady&&(kQa&&exists("sdmc:/3ds/mkw-3ds/trace-test.txt"))) {
+    // DIAG: the KRKG trace test runs before the menus (no course choice needed).
+    if(kQa&&exists("Race/Common.szs")&&exists("sdmc:/3ds/mkw-3ds/trace-test.txt")) {
         // Invoke upstream's complete per-frame KRKG comparison, not just final position.
         freopen("trace-console.log","w",stdout);setvbuf(stdout,nullptr,_IONBF,0);
         auto* sys=K::KTestSystem::CreateInstance();
-        char a0[]="-g",a1[]="lc.rkg",a2[]="-k",a3[]="lc.krkg";
-        char* args[]={a0,a1,a2,a3};sys->parseOptions(4,args);
+        // trace-test.txt: "<name> [frames]" runs <name>.rkg against <name>.krkg
+        // (both beside the game data); empty runs lc for its whole KRKG.
+        char name[64]="lc",frames[8]="0";
+        if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/trace-test.txt","r")){char n[64]{},fr[8]{};const int got=fscanf(f,"%63s %7s",n,fr);fclose(f);if(got>=1)std::snprintf(name,sizeof name,"%s",n);if(got>=2)std::snprintf(frames,sizeof frames,"%s",fr);}
+        char rkg[80],krkg[80];std::snprintf(rkg,sizeof rkg,"%s.rkg",name);std::snprintf(krkg,sizeof krkg,"%s.krkg",name);
+        char a0[]="-g",a2[]="-k",a4[]="-f";
+        char* args[]={a0,rkg,a2,krkg,a4,frames};sys->parseOptions(6,args);
         auto start=svcGetSystemTick();sys->init();bool ok=sys->run();
         double ms=(svcGetSystemTick()-start)*1000.0/SYSCLOCK_ARM11;
         if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/trace-result.json","w")){fprintf(f,"{\"pass\":%s,\"elapsed_ms\":%.3f,\"hardware_verified\":false}\n",ok?"true":"false",ms);fclose(f);}
         report(ok?"TRACE PASS":"TRACE FAIL");gfxExit();return ok?0:2;
     }
+    if(fullRace){if(runMenu()!=mkw::UiAction::StartRace){finishAutoplay();renderer.waitForGpu();menuModels.reset(renderer);menuIcons.reset(renderer);menuRenderer.release();mkw::SoundSystem::instance().stop();mkw::MenuMovieAudio::shutdown();mkw::shutdownLoadingScreen();renderer.shutdown();gfxExit();return 0;}applySelection();menu.raceStarted();menuProfile->write("sdmc:/3ds/mkw-3ds/menu-performance.csv");raceLoadStart=svcGetSystemTick();}
+    bool dataReady=exists("Race/Common.szs")&&courseAvailable(courseChoice);
     const bool effectsTest=(kQa&&exists("sdmc:/3ds/mkw-3ds/effects-test.txt"));
     // QA (autoplay + lakitu-test.txt): drop the player out of bounds at this step.
     // QA: "step [request]" forces an out-of-bounds activation; the optional camera
@@ -1608,8 +1625,10 @@ int main() {
     auto startIntro=[&](){
         intro.stop();introClearance.clear();
         if(!fullRace)return;
+        // The Wii's Time Trials has no course preview: the race opens on the
+        // start camera round the kart, then the countdown (Dolphin tt-ok.dtm).
         size_t size=0;const void* kmp=K::System::ResourceManager::Instance()->getFile("course.kmp",&size,K::System::ArchiveId::Course);
-        if(intro.load(kmp,size))intro.start();
+        if(!timeTrial&&intro.load(kmp,size))intro.start();
         LOGF("course preview %s: %u frames",intro.active()?"playing":"absent",intro.frames());
         introTick=0;introCaptured=~0u;
         demo.enter(intro.active());demoOk=demoSkip=false;
@@ -1964,10 +1983,14 @@ int main() {
                 }
                 for(auto& t:model->textures)if(t)add(t.get(),0.f);
             }
+            // Scored per VRAM byte: a widened unit-1 shadow map takes twice its
+            // LINEAR size there (DIAG unit1-linear-score.txt: per LINEAR byte).
             std::vector<std::pair<float,mkw::Texture*>> order;
+            const bool linearScore=kQa&&exists("sdmc:/3ds/mkw-3ds/unit1-linear-score.txt");
             for(auto* texture:loaded){
                 const auto& g=texture->gpu;
-                order.push_back({area[texture]/float(std::max<std::size_t>(1,C3D_TexCalcTotalSize(g.size,g.maxLevel))),texture});
+                const std::size_t cost=linearScore?C3D_TexCalcTotalSize(g.size,g.maxLevel):renderer.vramCost(*texture);
+                order.push_back({area[texture]/float(std::max<std::size_t>(1,cost)),texture});
             }
             std::stable_sort(order.begin(),order.end(),[](const auto& x,const auto& y){return x.first>y.first;});
             for(auto [score,texture]:order)moved+=renderer.moveToVram(*texture,reserve,&courseLeft);
@@ -2168,6 +2191,10 @@ int main() {
             mkw::pack::cacheReads(false);
             if(fullRace&&!loadBottomScreen())return false;stage("bottom screen");
             moveCourseTexturesToVram();stage("texture VRAM transfer");
+            if(kQa){const auto& q=mkw::renderQuality();
+                snprintf(line,sizeof line,"settings in race: texture %s (halved %u), dynamic shadows %s (player target %d), bloom %s, opponents %s",
+                         menu.settings.textureQuality?"Low":"High",q.halvedTextures,menu.settings.dynamicShadows?"On":"Off",int(renderer.playerShadowReady()),
+                         renderer.bloomEnabled?"On":"Off",q.racerLod?"Low":"Full");report(line);mkw::renderQuality().halvedTextures=0;}
             mkw::pack::cacheReads(true);
             resetRaceSystems(true);mkw::pack::cacheReads(false);if(trackLoadFailed)return false;stage("grid and opponents");
             if(fullRace){
@@ -2350,6 +2377,11 @@ int main() {
     auto previous=svcGetSystemTick();double accumulator=0,physicsMs=0,maxPhysics=0;unsigned frames=0,restarts=0;
     u32 lastRefresh=C3D_FrameCounter(0);
     unsigned physicsSteps=0;
+    // DIAG (ghost-trace.txt): the ghost kart (player 1) after every physics step,
+    // written to ghost-trace.csv when the race ends, to compare with a KRKG.
+    const bool ghostTrace=kQa&&exists("sdmc:/3ds/mkw-3ds/ghost-trace.txt");
+    struct GhostTraceRow{unsigned step;float x,y,z,speed,completion;unsigned checkpoint;};
+    std::vector<GhostTraceRow> ghostTraceRows;
     mkw::AnimationBudget animationBudget;
     // The presented camera of the current step: drawn each frame and handed to the NW4R
     // effects as their process camera after each step.
@@ -2643,8 +2675,9 @@ int main() {
                     if(afterGoal)inputs[0]={};
                     else if(raceGrid.driveLocal){
                         inputs[0]=raceItems->autoItemInput(0);
-                        // The CPU route threads between boxes: QA rolls the item roulette instead.
-                        if(physicsSteps%600==300&&qaGives.empty())raceItems->startRoulette(0);
+                        // The CPU route threads between boxes: QA rolls the item roulette instead
+                        // (not in Time Trials, which has only its Triple Mushroom).
+                        if(!timeTrial&&physicsSteps%600==300&&qaGives.empty())raceItems->startRoulette(0);
                     }
                     // CPU items: retail AIItemRace commands from the previous AI tick.
                     for(unsigned i=1;i<raceGrid.count();++i){
@@ -2728,7 +2761,20 @@ int main() {
                 if(autoplay&&lakituRespawnStep&&physicsSteps==lakituRespawnStep){auto* qaCollide=K::Kart::KartObjectManager::Instance()->object(0)->collide();qaCollide->setOobCameraPending(uint16_t(lakituRequest));qaCollide->activateOob(false,nullptr,false,false);}
                 const bool ghostTick=fullRace&&timeTrial&&!replay&&K::System::RaceManager::Instance()->isStageReached(K::System::RaceManager::Stage::Countdown)&&
                     !K::System::RaceManager::Instance()->player(0).finished();
-                scenes.calc();
+                // Time Trials: the scene stands still while Kinoko's intro is
+                // held. Ghosts are recorded with 172 scene frames between the
+                // karts' placement and the countdown (the Wii's, and Kinoko's
+                // KRKG traces); held frames would move every course object
+                // (Wario's Gold Mine's carts) and the karts ahead of the run.
+                // Time Trials has no course preview (as on the Wii), but the two
+                // warm-up frames after a race load hold the intro too: stepping
+                // through them desynced Peach Beach's staff ghost.
+                const bool sceneStepped=!(fullRace&&timeTrial&&(intro.active()||raceWarmupFrames));
+                if(sceneStepped)scenes.calc();
+                if(ghostTrace&&sceneStepped&&fullRace&&timeTrial&&staffGhost&&K::Kart::KartObjectManager::Instance()->count()>1){
+                    auto* g=K::Kart::KartObjectManager::Instance()->object(1);const auto& gp=g->pos();const auto& rp=K::System::RaceManager::Instance()->player(1);
+                    ghostTraceRows.push_back({physicsSteps,gp.x,gp.y,gp.z,g->speed(),rp.raceCompletion(),unsigned(rp.checkpointId())});
+                }
                 if(ghostTick){
                     const auto& in=K::System::KPadDirector::Instance()->playerInput(0).currentState();
                     auto raw=[](float v){return unsigned(std::clamp(int(std::lround(v*7.f))+7,0,14));};
@@ -2775,7 +2821,13 @@ int main() {
                 }
                 if(intro.active()&&!raceWarmupFrames){intro.step();++introTick;}
                 if(fullRace){
+                    if(kQa&&blueTestEvery){raceItems->qaBlueTrace=true;raceItems->qaNearestItemPoints=blueTestOld;}
                     raceGrid.afterStep();raceItems->afterStepNative(raceGrid.itemCount());
+                    if(kQa&&blueTestEvery){
+                        if(raceItems->frame()%blueTestEvery==0)raceItems->qaFireBlueFromLast();
+                        for(const auto& line:raceItems->qaBlueLines)report(line.c_str());
+                        raceItems->qaBlueLines.clear();
+                    }
                     // After the karts moved, as Kinoko's KartItem fires a ghost's:
                     // the ghost presses its item button on this recorded tick.
                     if(ghostTick&&mkw::RaceItems::mushroomActivations[0]!=ghostMushrooms){ghostRecorder.itemUsedThisTick();ghostMushrooms=mkw::RaceItems::mushroomActivations[0];
@@ -2880,6 +2932,10 @@ int main() {
                             if(!qaMode&&!replay&&staffGhost){
                                 ++(ms<raceGhostTime?activeRecords.ghostWins:activeRecords.ghostLosses);save.records=activeRecords;raceSavePending=true;
                                 LOGF("ghost %u: player %u ms, ghost %u ms (record), ghost finished=%d",staffGhost,unsigned(ms),unsigned(raceGhostTime),int(race->player(1).finished()));
+                                if(ghostTrace&&!ghostTraceRows.empty())if(FILE* f=fopen("sdmc:/3ds/mkw-3ds/ghost-trace.csv","w")){
+                                    fputs("step,x,y,z,speed,completion,checkpoint\n",f);
+                                    for(const auto& r:ghostTraceRows)fprintf(f,"%u,%.9g,%.9g,%.9g,%.9g,%.9g,%u\n",r.step,r.x,r.y,r.z,r.speed,r.completion,r.checkpoint);
+                                    fclose(f);ghostTraceRows.clear();}
                             }
                             // The player's ghost: kept when this run is the course's best
                             // time, or the course has no ghost yet. Mii racers aren't

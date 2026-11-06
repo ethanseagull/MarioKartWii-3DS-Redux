@@ -581,7 +581,9 @@ def main():
   'record_next':['Next'],
   'record_row':['Overall Ranking','Distance Traveled','Total Race Count','Total Battle Count','Wii Wheel %','Tricks','Favorite Character','Favorite Vehicle','Favorite Course','Favorite Stage','First-Place Appearances','% Race Time in 1st Place','Item Hits Delivered','Item Hits Received','Ghost Races','Tournaments Played','--','0%']+course_names+[c['name'] for c in garage['choices']]+[info['name'] for info in roster['characters']]+battle_labels+list('0123456789%'),
   'license_management':['Check Records','Change Miis','Erase License'],
-  'settings_button':['Nintendo GameCube Controller','Network Settings','Mario Kart Channel'],
+  # The pause rows (TT) and the quit question also use this family; without
+  # their styles the focus pulse falls back to the outlined plain text.
+  'settings_button':['Nintendo GameCube Controller','Network Settings','Mario Kart Channel','Continue','Restart','Change Course','Change Character','Quit','Yes','No'],
   'rule_base':['Class','CPU','CPU Vehicles','Courses','Items','Race Count'],
   'rule_option':['50cc','100cc','150cc','Mirror','Easy','Normal','Hard','Karts','Bikes','All','Choose','Random','In Order','Balanced','Aggressive','Strategic','None'],
   'rule_chosen':['50cc','100cc','150cc','Mirror','Easy','Normal','Hard','Karts','Bikes','All','Choose','Random','In Order','Balanced','Aggressive','Strategic','None'],

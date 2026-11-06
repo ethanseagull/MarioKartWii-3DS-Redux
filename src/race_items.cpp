@@ -26,7 +26,7 @@ void RaceItems::setKarts(ItemKarts* karts){karts_=karts?karts:ownKarts_.get();}
 void RaceItems::reset(const std::vector<ItemBox>& boxes,unsigned racers,uint32_t seed){
     boxes_=boxes;for(auto& box:boxes_){box.respawn=0;box.active=true;box.appearance=ItemBoxAppearanceFrames+1;}
     movers_.clear();lines_.clear();presses_.clear();roadBoxes_.clear();
-    shellRoute_.clear();shellCourse_=0xffff;actors_={};reclaimOrder_={};reclaimPressure_=0;reclaimPhase_=0;nativeReclaimPhase_=false;freeAtStepStart_.fill(true);hud_={};racers_={};itemPointPending_=0;inputs_={};held_={};heldDropTicks_={};inventoryDrops_={};cloudTransfer_={};cloudAge_={};cloudSlot_={};itemLock_={};bullets_={};bulletNoEnd_=0;
+    shellRoute_.clear();shellCourse_=0xffff;actors_={};reclaimOrder_={};reclaimPressure_=0;reclaimPhase_=0;nativeReclaimPhase_=false;freeAtStepStart_.fill(true);hud_={};racers_={};itemPoints_.fill(ShellRoute::Invalid);respawning_=0;inputs_={};held_={};heldDropTicks_={};inventoryDrops_={};cloudTransfer_={};cloudAge_={};cloudSlot_={};itemLock_={};bullets_={};bulletNoEnd_=0;
     inkReadyFrame_={};rouletteChoice_.fill(ItemKind::None);roulettes_={};rouletteRank_={};rouletteRng_=seed^0x72756c65u;
     // Retail ItemSlotData_updateTimers (USA2a0f58) initializes these during
     // countdown; the Blue timer has no reset call in the offline controller.
@@ -486,7 +486,10 @@ void RaceItems::use(unsigned player,bool backwards){
         break;
     case ItemKind::ThunderCloud:h.cloud=CloudDuration;karts_->setThunderCloud(player,true);sound(ItemSoundCue::CloudOn,player);break;
     default:
-        spawn(player,kind,backwards);
+        // A Blue Shell always leaves forward: the Wii has no backward throw for it.
+        // Passing a held-back stick through launched it behind the kart, off the
+        // route, and it flew the wrong way until its approach turned it round.
+        spawn(player,kind,backwards&&kind!=ItemKind::BlueShell);
         // ItemHolderPlayer_useBlueShell 0x807a3c00 flags the tethered Blue (+0x154), so
         // ItemHolderPlayerb4_use sets +0x78 = 7 until the next update releases it (0x80789c5c).
         if(kind==ItemKind::BlueShell)h.slotLock=ItemKind::BlueShell;
@@ -658,7 +661,7 @@ void RaceItems::beforeStep(const ItemRacer* racers,const ItemInput* inputs,unsig
     for(unsigned i=0;i<count_;++i){racers_[i]=racers[i];inputs_[i]=inputs?inputs[i]:ItemInput{};}
     karts_->bind(racers_.data(),count_);
     for(unsigned i=0;i<count_;++i)karts_->overlay(i,racers_[i]);
-    trackShellRacers();
+    trackShellRacers(false);
     for(unsigned i=0;i<MaxActors;++i)freeAtStepStart_[i]=!actors_[i].active;
     // Course objects animate during the starting countdown as on Wii. Their
     // presentation clock is independent of item roulette/RNG and draw rate.
@@ -681,7 +684,7 @@ void RaceItems::afterStep(const ItemRacer* racers,unsigned count,ItemWorldQuery 
     karts_->bind(racers_.data(),count_);
     for(unsigned i=0;i<count_;++i)karts_->overlay(i,racers_[i]);
     if(!active_){for(unsigned i=0;i<count_;++i){held_[i]=inputs_[i].use;syncKart(i);}stepSounds_=sounds_.size();return;}
-    trackShellRacers();
+    trackShellRacers(true);
     // Host models resolve the kart pass here; the native kart did it inside its pass. Racer
     // contact stands in for the native bump (both orders, as the kart pass calls it).
     if(!karts_->contactsInKartPass()&&!contactsDone_){

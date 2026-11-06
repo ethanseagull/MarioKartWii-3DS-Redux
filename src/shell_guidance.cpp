@@ -1,6 +1,7 @@
 #include "mkw/race_items.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 
 namespace mkw {
@@ -12,15 +13,68 @@ float sinAngle(uint32_t angle){return std::sin(float(uint16_t(angle))*(2*Pi/6553
 float cosAngle(uint32_t angle){return std::cos(float(uint16_t(angle))*(2*Pi/65536.f));}
 bool missing(const ItemRacer& r){return r.shellTargetUnavailable||(r.unavailable&&!r.inCannon);}
 }
-void RaceItems::trackShellRacers(){
-    for(unsigned i=0;i<count_;++i){const uint16_t bit=uint16_t(1u<<i);
-        if(racers_[i].itemPoint>=shellRoute_.size()){itemPointFrom_[i]=racers_[i].position;itemPointPending_|=bit;}else itemPointPending_&=uint16_t(~bit);
+void RaceItems::trackShellRacers(bool advance){
+    // USA 0x8078e82c starts every holder at item point 0; 0x8078f144 advances it
+    // each frame after the karts move. A host that supplies a point keeps it.
+    for(unsigned i=0;i<count_;++i){const uint16_t bit=uint16_t(1u<<i);auto& point=itemPoints_[i];const auto& r=racers_[i];
+        if(r.itemPoint<shellRoute_.size()){point=r.itemPoint;continue;}
+        if(point>=shellRoute_.size())point=shellRoute_.size()?0:ShellRoute::Invalid;
+        if(!advance||point>=shellRoute_.size())continue;
+        // Retail re-seeds from the respawn checkpoint (0x8056a76c -> 0x8078fcec).
+        const bool respawn=r.unavailable&&!r.inCannon;
+        if(respawn)respawning_|=bit;
+        else if(respawning_&bit){respawning_&=uint16_t(~bit);point=shellRoute_.nearest(r.position).point;}
+        point=shellRoute_.track(point,r.position);
     }
 }
 uint16_t RaceItems::itemPoint(unsigned racer){
-    const uint16_t bit=uint16_t(1u<<racer);
-    if(itemPointPending_&bit){racers_[racer].itemPoint=shellRoute_.nearest(itemPointFrom_[racer]).point;itemPointPending_&=uint16_t(~bit);}
-    return racers_[racer].itemPoint;
+    if(qaNearestItemPoints)return shellRoute_.nearest(racers_[racer].position).point;
+    if(itemPoints_[racer]>=shellRoute_.size())itemPoints_[racer]=shellRoute_.nearest(racers_[racer].position).point;
+    return itemPoints_[racer];
+}
+bool RaceItems::qaFireBlueFromLast(){
+    if(!active_||!shellRoute_.size())return false;
+    for(const auto& a:actors_)if(a.active&&a.kind==ItemKind::BlueShell)return false;
+    for(unsigned i=0;i<count_;++i){
+        if(rank(i)!=count_)continue;
+        auto& h=hud_[i];const auto& r=racers_[i];
+        if(h.deployed||h.roulette||r.finished||r.unavailable||heldDropTicks_[i])return false;
+        h.item=ItemKind::BlueShell;h.charges=1;use(i,false);
+        char line[160];snprintf(line,sizeof line,"blue test: frame=%u fired by %u (rank %u), item point %u",unsigned(frame_),i,rank(i),unsigned(itemPoint(i)));
+        qaBlueLines.push_back(line);return true;
+    }
+    return false;
+}
+void RaceItems::qaTraceBlue(ItemActor& a){
+    auto& s=a.guidance;if(s.qaLogged)return;
+    char line[400];
+    if(s.phase>=3||!a.active){
+        snprintf(line,sizeof line,"blue shell: frame=%u owner=%d target=%d route ticks=%u cursor-back=%u moving-back=%u longest-back=%u%s",
+                 unsigned(frame_),int(a.owner),int(a.target),unsigned(s.qaTicks),unsigned(s.qaCursorBack),unsigned(s.qaMovingBack),unsigned(s.qaMaxRun),
+                 s.qaCursorBack||s.qaMaxRun>=30?" BACKWARDS":"");
+        qaBlueLines.push_back(line);s.qaLogged=true;return;
+    }
+    ++s.qaTicks;
+    if(s.qaPoint>=shellRoute_.size())s.qaPoint=shellRoute_.nearest(a.position).point;
+    s.qaPoint=shellRoute_.track(s.qaPoint,a.position);
+    const bool cursorBack=s.phase==1&&(!s.current.forward||!s.next.forward);
+    if(cursorBack)++s.qaCursorBack;
+    // Moving against the track: horizontal motion over 120 degrees from the
+    // route's default direction at the shell's own tracked point.
+    const ShellRoute::Cursor here{s.qaPoint,true},ahead=shellRoute_.edge(here);bool back=false;
+    if(shellRoute_.valid(ahead)){
+        Vec3 dir=shellRoute_.point(ahead).position-shellRoute_.point(here).position,v=a.position-a.previous;dir.y=0;v.y=0;
+        back=length(v)>20&&dot(dir,v)<-.5f*length(dir)*length(v);
+    }
+    if(back){++s.qaMovingBack;s.qaRun=uint16_t(s.qaRun+1);s.qaMaxRun=std::max(s.qaMaxRun,s.qaRun);}else s.qaRun=0;
+    if((cursorBack&&s.qaCursorBack==1)||s.qaRun==30){
+        const int t=a.target;const unsigned o=unsigned(a.owner);
+        snprintf(line,sizeof line,"blue back: frame=%u %s phase=%u owner=%u rank %u progress %.3f point %u | target=%d rank %u progress %.3f point %u | cursor %u%c->%u%c own point %u pos %.0f %.0f %.0f",
+                 unsigned(frame_),cursorBack&&s.qaCursorBack==1?"cursor":"motion",unsigned(s.phase),o,rank(o),racers_[o].progress,unsigned(itemPoint(o)),
+                 t,t>=0?rank(unsigned(t)):0u,t>=0?racers_[t].progress:0.f,t>=0?unsigned(itemPoint(unsigned(t))):0xffffu,
+                 unsigned(s.current.point),s.current.forward?'+':'-',unsigned(s.next.point),s.next.forward?'+':'-',unsigned(s.qaPoint),a.position.x,a.position.y,a.position.z);
+        qaBlueLines.push_back(line);
+    }
 }
 int RaceItems::blueTarget(const ItemActor& a)const{
     // 295718: ascending race rank, skip finishers until the owner has led;
@@ -299,6 +353,7 @@ void RaceItems::updateShell(ItemActor& a,ItemWorldQuery query){
             s.visualY+=error*response;
         }
     }
+    if(blue&&qaBlueTrace)qaTraceBlue(a);
     a.yaw=std::atan2(a.position.x-a.previous.x,a.position.z-a.previous.z);
     if(!std::isfinite(a.position.x)||!std::isfinite(a.position.y)||!std::isfinite(a.position.z)||a.position.y<-100000)a.active=false;
 }
