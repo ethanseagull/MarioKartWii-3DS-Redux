@@ -270,6 +270,8 @@ private:
 public:
     // DIAG A/B (ab-alternate.txt): true scans every slot as before.
     static inline bool fullContactScan=false;
+    // Old 3DS: item snapshots fetch the kart's parts once (item_native.cpp); off: no-fast-snapshot.txt.
+    static inline bool fastSnapshot=true;
     // Calls f(slot) for the actor slots in ascending order, as a scan of actors()
     // would visit them, but only those in the contact mask (a superset of the
     // active ones: f still checks active). f returns false to stop. Tick thread
