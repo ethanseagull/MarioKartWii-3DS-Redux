@@ -582,6 +582,10 @@ int main() {
     const bool pauseVram=!(kQa&&exists("sdmc:/3ds/MKWiiDS/no-pause-vram.txt"));
     // Old 3DS: opponents pose their head query every 2nd tick (DriverAnimation::staggerLook).
     mkw::DriverAnimation::staggerLook=!mkw::isNew3ds()&&!exists("sdmc:/3ds/MKWiiDS/no-look-stagger.txt");
+    // Old 3DS: the head query poses only the head, body-look pivots and effect root;
+    // the other bones keep the last drawn pose, which a clip change then blends
+    // from. New 3DS poses the whole skeleton every tick, as before (exact frames).
+    mkw::DriverAnimation::subsetLook=!mkw::isNew3ds();
     // Old 3DS: opponents take their vehicle snapshot only on the tick before a drawn frame.
     const bool oppFrameSnapshot=!mkw::isNew3ds()&&!exists("sdmc:/3ds/MKWiiDS/no-opp-frame-snapshot.txt");
     // Old 3DS: an opponent under the kart effect LOD (+7 set, no +9: its effect group
