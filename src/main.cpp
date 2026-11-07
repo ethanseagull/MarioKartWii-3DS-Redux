@@ -656,15 +656,24 @@ int main() {
     // posing, the local racer's pose) run on core 1, within the 30% time limit
     // the audio threads already ask for, while core 0 records the frame; core 0
     // takes any job not yet claimed and runs the jobs' GPU-visible writes
-    // (Renderer::queueJobWrites). Opt-in (core1-jobs.txt) until a console run: in
-    // Azahar 2 of 12 GPs with it on stalled in the award ceremony's drive (cause not
-    // found; none in ~20 GPs without it), for a gain only in pack racing.
+    // (Renderer::queueJobWrites). Opt-in (core1-jobs.txt) until a console run, for
+    // a gain only in pack racing. (The two Azahar "ceremony stalls" with it on were
+    // GPs the autopilot finished 4th: that ceremony waits on its board for A and
+    // never logged "podium", which the runners waited for.) The worker is only
+    // useful while racing, so it stops before the award ceremony and starts again
+    // with the next race load; DIAG core1-ceremony-keep.txt keeps it running.
+    static mkw::Renderer* jobWriteTarget=nullptr;jobWriteTarget=&renderer;
+    auto startCore1Jobs=[&](){
+        if(!mkw::jobWorker().start(30))return false;
+        renderer.queueJobWrites(true);mkw::jobWorker().setDrain([](bool reset){jobWriteTarget->runJobWrites(reset);});
+        return true;
+    };
+    bool core1Jobs=false;
+    const bool core1CeremonyKeep=kQa&&exists("sdmc:/3ds/MKWiiDS/core1-ceremony-keep.txt");
     if(!secondCore&&exists("sdmc:/3ds/MKWiiDS/core1-jobs.txt")){
-        static mkw::Renderer* jobWriteTarget=nullptr;jobWriteTarget=&renderer;
-        if(mkw::jobWorker().start(30)){
-            renderer.queueJobWrites(true);mkw::jobWorker().setDrain([](bool reset){jobWriteTarget->runJobWrites(reset);});
-            report("Old 3DS: presentation jobs on core 1 (30% limit)");
-        }else report("job worker unavailable: presentation jobs run on core 0");
+        core1Jobs=startCore1Jobs();
+        report(core1Jobs?(core1CeremonyKeep?"Old 3DS: presentation jobs on core 1 (30% limit), worker kept through the ceremony":"Old 3DS: presentation jobs on core 1 (30% limit)")
+                        :"job worker unavailable: presentation jobs run on core 0");
     }else if(!secondCore)report("Old 3DS: presentation jobs on core 0");
     // Race frames draw on the second core one frame behind their recording
     // (src/render_thread.cpp); menus draw immediately.
@@ -2384,6 +2393,8 @@ int main() {
         // Release the preceding race before the first attempt too. A second
         // race must not need room for both generations of graphics/audio.
         cleanup();stage("race cleanup");
+        // Old 3DS core-1 jobs: the worker stopped for the last award ceremony.
+        if(core1Jobs&&!mkw::jobWorker().running()&&!startCore1Jobs())report("job worker unavailable: presentation jobs run on core 0");
         // A failed attempt retries with the heap the cache held.
         const bool ok=mkw::loadRequiredResources(attempt,[&](){mkw::pack::dropCache();cleanup();mkw::DriverAnimation::dropKept();});
         if(bankKeep){char text[64];snprintf(text,sizeof text,"animation banks reused %u, unused %u",mkw::DriverAnimation::reusedCount(),mkw::DriverAnimation::keptCount());report(text);}
@@ -2625,6 +2636,9 @@ int main() {
                 scenes.currentScene()->heap()->enableAllocation();
                 scenes.destroyCurrentSceneNoIncoming(false);
             }
+            // Old 3DS core-1 jobs: no worker thread through the ceremony (it submits
+            // no jobs; the next race load starts the worker again).
+            if(core1Jobs&&!core1CeremonyKeep){mkw::jobWorker().stop();report("Old 3DS: job worker stopped for the award ceremony");}
             auto outcome=mkw::runAwardPodium(renderer,awardResults,report,awardTransitionStart,&scenes);
             const unsigned slot=std::min(menu.selection.license,3u);
             const auto ending=mkw::staffEnding(licenseSaves[slot],awardResults);
