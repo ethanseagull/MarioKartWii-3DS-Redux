@@ -30,21 +30,31 @@ GEN = WORK / 'generated'
 VARIANT = os.environ.get('MKW_DIAG_VARIANT', '')
 OUT = ROOT / ('build/diag-' + VARIANT if VARIANT else 'build/diag')
 NAME = 'mkw-3ds-diag'
-# MKW_KINOKO_PGO: profile-guided optimization of Kinoko (vendor/kinoko, built with LTO).
-#   generate  a training build in <out>-pgogen whose Kinoko writes its profile counters
-#             to sdmc:/3ds/MKWiiDS/pgo/<source path>.gcda at each race end (merged over
-#             races); copy that folder's contents to tools/pgo/kinoko/.
+# MKW_KINOKO_PGO: profile-guided optimization of Kinoko (vendor/kinoko, built with LTO)
+# and, in the Old 3DS variants, of the port's own sources (src/).
+#   generate  a training build in <out>-pgogen whose instrumented code writes its profile
+#             counters to sdmc:/3ds/MKWiiDS/pgo/<path below objects/>.gcda at each race
+#             end (merged over races); copy pgo/vendor/kinoko/source/ to tools/pgo/kinoko/
+#             and pgo/src/ to tools/pgo/port/ (READMEs there).
 #   off       ignore tools/pgo/kinoko/.
 #   (unset)   Kinoko sources with a profile in tools/pgo/kinoko/ are built with it
 #             (tools/build.py does the same); the rest as before.
+# Old 3DS variants only (o3dstest, o3dsplay): the port's sources are built with LTO as
+# well (MKW_PORT_LTO=off: without), and with their profiles from tools/pgo/port/
+# (MKW_PORT_PGO=off: without). Kinoko's getters then inline into the port's calls.
 PGO = os.environ.get('MKW_KINOKO_PGO', '')
 if PGO == 'generate':
     OUT = OUT.with_name(OUT.name + '-pgogen')
 KINOKO_SOURCE = ROOT / 'vendor/kinoko/source'
 PGO_DIR = ROOT / 'tools/pgo/kinoko'
-# Path components of the training build's object folder for the Kinoko sources, which
-# libgcov cuts from each .gcda path (GCOV_PREFIX_STRIP) before adding the SD folder.
-PGO_STRIP = len((OUT / 'objects' / KINOKO_SOURCE.relative_to(ROOT)).resolve().as_posix().split('/'))
+OLD3DS = VARIANT in ('o3dstest', 'o3dsplay')
+PORT_SOURCE = ROOT / 'src'
+PORT_PGO_DIR = ROOT / 'tools/pgo/port'
+PORT_LTO = OLD3DS and os.environ.get('MKW_PORT_LTO', '') != 'off'
+PORT_PGO = OLD3DS and os.environ.get('MKW_PORT_PGO', '') != 'off'
+# Path components of the training build's object folder, which libgcov cuts from each
+# .gcda path (GCOV_PREFIX_STRIP) before adding the SD folder.
+PGO_STRIP = len((OUT / 'objects').resolve().as_posix().split('/'))
 # Profile use: no unrolling or peeling (the Old 3DS is instruction-cache bound); code
 # the training never reached is optimized as without a profile.
 PGO_USE_FLAGS = ['-fprofile-use', '-fprofile-partial-training', '-Wno-missing-profile', '-Wno-coverage-mismatch',
@@ -75,16 +85,32 @@ sources = [ROOT / s.strip() for s in (ROOT / 'docs/MANUAL-PROGRAM-SOURCES.txt').
 def compile_one(src, signature):
     obj = OUT / 'objects' / src.relative_to(ROOT).with_suffix('.o')
     obj.parent.mkdir(parents=True, exist_ok=True)
-    flags = FLAGS + (['-flto=auto'] if src.suffix == '.cc' else [])
+    kinoko = src.suffix == '.cc' and src.is_relative_to(KINOKO_SOURCE)
+    port = OLD3DS and src.suffix == '.cpp' and src.is_relative_to(PORT_SOURCE)
+    flags = FLAGS + (['-flto=auto'] if src.suffix == '.cc' or (port and PORT_LTO) else [])
     profile = b''
-    if src.suffix == '.cc' and src.is_relative_to(KINOKO_SOURCE):
-        if PGO == 'generate':
-            flags = flags + ['-fprofile-generate', '-fprofile-update=single', f'-DMKW_KINOKO_PGO_GENERATE={PGO_STRIP}']
-        elif PGO != 'off' and (PGO_DIR / src.relative_to(KINOKO_SOURCE)).with_suffix('.gcda').is_file():
-            # GCC reads the profile beside the object (its -o path with .gcda).
-            profile = (PGO_DIR / src.relative_to(KINOKO_SOURCE)).with_suffix('.gcda').read_bytes()
-            obj.with_suffix('.gcda').write_bytes(profile)
-            flags = flags + PGO_USE_FLAGS
+    gcda = None
+    if kinoko and PGO != 'off':
+        gcda = (PGO_DIR / src.relative_to(KINOKO_SOURCE)).with_suffix('.gcda')
+    elif port and PORT_PGO:
+        gcda = (PORT_PGO_DIR / src.relative_to(PORT_SOURCE)).with_suffix('.gcda')
+    if (kinoko or port) and PGO == 'generate':
+        flags = flags + ['-fprofile-generate', '-fprofile-update=single', f'-DMKW_KINOKO_PGO_GENERATE={PGO_STRIP}']
+        # No value (indirect-call) profiling in the port: its counter is thread-local, and
+        # the job worker's and other threads' accesses fell outside libctru's TLS area
+        # (unmapped writes at 0x1FF83A60, then a crash). Kinoko runs on the main thread.
+        if port:
+            flags = flags + ['-fno-profile-values']
+    elif gcda and gcda.is_file():
+        # GCC reads the profile beside the object (its -o path with .gcda).
+        profile = gcda.read_bytes()
+        obj.with_suffix('.gcda').write_bytes(profile)
+        flags = flags + PGO_USE_FLAGS
+        # The port's threads (audio, I/O, job worker) update their counters without
+        # atomics, so a profile can be slightly inconsistent (sound_system's ioLoop was):
+        # let GCC smooth it instead of failing.
+        if port:
+            flags = flags + ['-fprofile-correction']
     digest = hashlib.sha256(src.read_bytes() + signature + ' '.join(flags).encode() + profile).hexdigest()
     name = str(obj.relative_to(OUT / 'objects').with_suffix(src.suffix))
     stamp = obj.with_suffix('.sha256')
