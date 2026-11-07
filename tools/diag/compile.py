@@ -96,6 +96,11 @@ def compile_one(src, signature):
         gcda = (PORT_PGO_DIR / src.relative_to(PORT_SOURCE)).with_suffix('.gcda')
     if (kinoko or port) and PGO == 'generate':
         flags = flags + ['-fprofile-generate', '-fprofile-update=single', f'-DMKW_KINOKO_PGO_GENERATE={PGO_STRIP}']
+        # No value (indirect-call) profiling in the port: its counter is thread-local, and
+        # the job worker's and other threads' accesses fell outside libctru's TLS area
+        # (unmapped writes at 0x1FF83A60, then a crash). Kinoko runs on the main thread.
+        if port:
+            flags = flags + ['-fno-profile-values']
     elif gcda and gcda.is_file():
         # GCC reads the profile beside the object (its -o path with .gcda).
         profile = gcda.read_bytes()
