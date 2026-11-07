@@ -18,7 +18,7 @@ namespace mkw {
 const char* driverBankFailure="";
 // Animation banks are CPU-only. Prefer LINEAR while it has spare capacity,
 // but reserve room for GPU resources and allow banks to use the ordinary heap.
-void DriverAnimation::reset(){resetLook();bodyLook_={};lookCount_=0;lookYaw_=lookPitch_=0;beforeLookPalette_.clear();hasBraids_=braidsRacing_=false;braids_.reset();braidWorld_={1,0,0,0,0,1,0,0,0,0,1,0,1,0,0,0,1,0,0,0,1};effectRootSlot_=-2;effectRootReady_=false;effectRootTracks_={};effectRoot_=previousEffectRoot_={};releaseData();dataLinear_=true;ready=false;rigidParts_.clear();count_=faceCount_=hairNodeCount_=hairClipCount_=uvClipCount_=0;baseUV_.clear();lastClip_=-1;hasPreviousPose_=false;cachedVertices_=nullptr;cachedSettled_=false;poseBoundsValid_=false;usedMatrices_.fill(false);neutralUv_=nullptr;uvBuffer_=nullptr;uvNeutral_=true;shared_={};handleDrive_=dash_=shake_=-1;gpu_=false;shapeHidden_.fill(false);}
+void DriverAnimation::reset(){resetLook();bodyLook_={};lookCount_=0;lookYaw_=lookPitch_=0;beforeLookPalette_.clear();hasBraids_=braidsRacing_=false;braids_.reset();braidWorld_={1,0,0,0,0,1,0,0,0,0,1,0,1,0,0,0,1,0,0,0,1};effectRootSlot_=-2;effectRootReady_=false;effectRootTracks_={};effectRoot_=previousEffectRoot_={};releaseData();dataLinear_=true;ready=false;rigidParts_.clear();count_=faceCount_=hairNodeCount_=hairClipCount_=uvClipCount_=0;baseUV_.clear();lastClip_=-1;hasPreviousPose_=false;cachedVertices_=cachedVertices2_=nullptr;cachedSettled_=false;poseBoundsValid_=false;usedMatrices_.fill(false);neutralUv_=nullptr;uvBuffer_=nullptr;uvNeutral_=true;shared_={};handleDrive_=dash_=shake_=-1;gpu_=false;shapeHidden_.fill(false);}
 bool DriverAnimation::gpuSkin(Model& model){
     if(!ready||gpu_||matrices_>Renderer::MaxSkinBones||vertices_!=model.vertexCount)return false;
     if(skinNormals_){
@@ -33,7 +33,7 @@ bool DriverAnimation::gpuSkin(Model& model){
     }
     if(skinNormals_)flushGpuData(model.skinBoneIndices,vertices_*sizeof(float));
     flushGpuData(model.vertices,vertices_*sizeof(Vertex));
-    shapeHidden_.fill(false);cachedVertices_=nullptr;cachedSettled_=false;uvBuffer_=nullptr;uvNeutral_=true;
+    shapeHidden_.fill(false);cachedVertices_=cachedVertices2_=nullptr;cachedSettled_=false;uvBuffer_=nullptr;uvNeutral_=true;
     uvDisjoint_=true;
     for(unsigned i=0;i<shapes_;++i)for(unsigned j=i+1;j<shapes_;++j)
         if(ranges_[i].count&&ranges_[j].count&&ranges_[i].first<ranges_[j].first+ranges_[j].count&&ranges_[j].first<ranges_[i].first+ranges_[i].count)uvDisjoint_=false;
@@ -462,14 +462,25 @@ bool DriverAnimation::apply(Model& model,int clip,float frame,unsigned tick,int 
        cachedExpression_==expression&&tick>=cachedTick_&&tick/step==cachedTick_/step){
         ++renderMetrics.animationHolds;return poseVisible();
     }
-    if(cachedSettled_&&blend>=1&&cachedVertices_==model.vertices&&cachedClip_==clip&&
-       cachedFrame_==frame&&cachedExpression_==expression&&cachedExpressionFrame_==faceFrame&&
+    const bool sameInputs=cachedSettled_&&blend>=1&&cachedClip_==clip&&
+       cachedFrame_==frame&&cachedExpression_==expression&&cachedExpressionFrame_==faceFrame;
+    if(sameInputs&&cachedVertices_==model.vertices&&
        ((!hairClipCount_&&!hasBraids_)||cachedTick_==tick)){++renderMetrics.poseReuses;return poseVisible();}
+    // A second model of this bank (race items keep a lit and an unlit copy):
+    // the one other buffer written from the cached pose (cachedVertices2_)
+    // already holds it, and another buffer takes that pose's write without
+    // evaluating it again. Each is what evaluating these inputs again gives.
+    const bool exactShare=sharePose&&sameInputs&&paletteApplied_&&cachedTick_==tick&&!hairClipCount_&&!hasBraids_;
+    if(exactShare&&cachedVertices2_==model.vertices){
+        std::swap(cachedVertices_,cachedVertices2_);++renderMetrics.poseReuses;return poseVisible();
+    }
+    const bool again=exactShare&&cachedVertices_;
     unsigned stride=matrices_*84+shapes_*4;
-    evaluate(c,a,b,t,tick,blend);
-    poseBoundsValid_=false;
+    if(!again){evaluate(c,a,b,t,tick,blend);poseBoundsValid_=false;paletteApplied_=true;}
     if(!poseVisible()){cachedSettled_=false;return false;}
-    ++renderMetrics.poseEvaluations;renderMetrics.skinnedVertices+=vertices_;
+    if(again)++renderMetrics.poseReuses;else ++renderMetrics.poseEvaluations;
+    renderMetrics.skinnedVertices+=vertices_;
+    cachedVertices2_=again?cachedVertices_:nullptr;
     cachedVertices_=model.vertices;cachedClip_=clip;cachedFrame_=frame;
     cachedExpression_=expression;cachedExpressionFrame_=faceFrame;cachedTick_=tick;cachedSettled_=blend>=1;
     const auto shown=reinterpret_cast<const uint32_t*>(c.data+a*stride+matrices_*84);
@@ -601,6 +612,7 @@ unsigned DriverAnimation::lookChecks=0,DriverAnimation::lookMismatches=0;
 // rendered pose; stepLook marks the render cache unsettled as before.
 const float* DriverAnimation::lookPose(int clip,float frame,unsigned tick){
     if(!ready||clip<0||unsigned(clip)>=count_)return nullptr;
+    paletteApplied_=false;
     if(lookHead_>=matrices_)return pose(clip,frame,tick,false);
     unsigned need[4],n=0;
     auto add=[&](unsigned s){if(s>=matrices_)return;for(unsigned i=0;i<n;++i)if(need[i]==s)return;need[n++]=s;};
@@ -655,6 +667,7 @@ const float* DriverAnimation::lookPose(int clip,float frame,unsigned tick){
 }
 const float* DriverAnimation::pose(int clip,float frame,unsigned tick,bool simulateBraids){
     if(!ready||clip<0||unsigned(clip)>=count_)return nullptr;
+    paletteApplied_=false;
     auto sample=[](const Clip& c,float t){return c.loop?std::fmod(std::max(t,0.f),float(c.count)):std::clamp(t,0.f,float(c.count-1));};
     const auto& c=clips_[clip];frame=sample(c,frame);unsigned a=unsigned(frame),b=a+1<c.count?a+1:(c.loop?0:a);float t=frame-a;
     if(lastClip_!=clip){hasPreviousPose_=lastClip_>=0;previousPalette_=palette_;if(lookCount_)std::copy_n(beforeLookPalette_.data(),matrices_*21,previousPalette_.data());previousEffectRoot_=effectRoot_;transitionTick_=tick;lastClip_=clip;}
