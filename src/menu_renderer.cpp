@@ -255,6 +255,18 @@ void MenuRenderer::release(){
  for(auto& m:s.movies)m.reset();
  s.pinned.reset();s.pinning.reset();s.streamsPinned.fill(false);s.streamsPinning.fill(false);
 }
+std::size_t MenuRenderer::moveToVram(Renderer& renderer,std::size_t reserve){
+ auto& s=*impl_;std::vector<std::pair<std::size_t,unsigned>> order;
+ for(unsigned i=0;i<s.slots.size();++i)if(const auto& t=s.slots[i].texture){
+  // 4-bit textures stay in LINEAR whatever unit draws them (3dbrew GPU/Pitfalls).
+  const auto format=t->gpu.fmt;if(format==GPU_ETC1||format==GPU_L4||format==GPU_A4)continue;
+  order.push_back({std::size_t(C3D_TexCalcTotalSize(t->gpu.size,t->gpu.maxLevel)),i});
+ }
+ std::sort(order.rbegin(),order.rend());
+ std::size_t moved=0;
+ for(const auto& [bytes,i]:order)if(renderer.moveToVram(*s.slots[i].texture,reserve))moved+=bytes;
+ return moved;
+}
 std::uint32_t MenuRenderer::residentBytes()const{return impl_->bytes;}
 unsigned MenuRenderer::loadsPending()const{unsigned n=0;for(const auto& slot:impl_->slots)n+=slot.job&&!slot.job->done();return n;}
 void MenuRenderer::logPending(const std::vector<UiQuad>& resident,const char* path)const{

@@ -578,6 +578,8 @@ int main() {
     // A race load reuses the last race's animation banks (DriverAnimation::keepReleased;
     // A/B: no-bank-keep.txt frees and reads them again).
     const bool bankKeep=!exists("sdmc:/3ds/MKWiiDS/no-bank-keep.txt");
+    // Old 3DS: the pause textures go to VRAM above the race's VRAM reserve (DIAG off: no-pause-vram.txt).
+    const bool pauseVram=!(kQa&&exists("sdmc:/3ds/MKWiiDS/no-pause-vram.txt"));
     // Old 3DS: opponents pose their head query every 2nd tick (DriverAnimation::staggerLook).
     mkw::DriverAnimation::staggerLook=!mkw::isNew3ds()&&!exists("sdmc:/3ds/MKWiiDS/no-look-stagger.txt");
     // Old 3DS: opponents take their vehicle snapshot only on the tick before a drawn frame.
@@ -882,6 +884,8 @@ int main() {
     // pauseTextureReserve keeps, and stay through the race (resumes included):
     // START then reads nothing from the card. Empty when not resident.
     std::vector<mkw::UiQuad> pauseResident;bool pausePinned=false;
+    // DIAG: lowest LINEAR free seen from the end of a race load to its end (hb samples).
+    size_t raceLinearLow=~size_t(0);
     std::function<void()> drawPausedBottom;
     std::function<void()> releaseRace,suspendRaceGraphics;
     std::function<bool()> restoreRaceGraphics;
@@ -2367,16 +2371,27 @@ int main() {
                 mkw::pack::cacheReads(true);
                 const size_t pauseLinearBefore=linearSpaceFree();
                 if(!menuRenderer.prepare(pauseResident)){menuRenderer.release(renderer);pauseResident.clear();}
+                // Old 3DS: VRAM the course textures left above their reserve takes the
+                // pause textures (8 bits a texel or more, largest first), so their
+                // LINEAR stays with the race. Freshly loaded: no frame has used them.
+                size_t pauseVramBytes=0;
+                if(!arenaNew3ds&&pauseVram&&!pauseResident.empty())pauseVramBytes=menuRenderer.moveToVram(renderer,mkw::RenderQuality::vramReserve);
                 const size_t pauseLinearPrepared=linearSpaceFree();
-                // Old 3DS: a race left with under 3 MiB of LINEAR stalled in Azahar right
-                // after its load (SNES Ghost Valley 2, 1.4 MiB). There the pause menu
-                // loads its textures when it opens instead (releasing the racers if needed).
-                if(!arenaNew3ds&&!pauseResident.empty()&&linearSpaceFree()<(3u<<20)){menuRenderer.release(renderer);pauseResident.clear();report("Old 3DS: pause menu not preloaded (LINEAR)");}
+                // Old 3DS: under 1.5 MiB of LINEAR left, the pause menu loads its textures
+                // when it opens instead (releasing the racers if needed). Build G stalled
+                // in Azahar right after a load that left 1.4 MiB (SNES Ghost Valley 2), so
+                // this was 3 MiB; at old3ds 4da18ca races that skipped the preload ran
+                // whole races with 0.44-2.6 MiB (Bowser's Castle 441 KB), races use under
+                // 64 KB more after their load, and race end has 1.3 MiB more again
+                // (captures/2026-11-08-o3ds-fixes/a-keep).
+                if(!arenaNew3ds&&!pauseResident.empty()&&linearSpaceFree()<(3u<<19)){menuRenderer.release(renderer);pauseResident.clear();report("Old 3DS: pause menu not preloaded (LINEAR)");}
                 const size_t pauseLinearKept=linearSpaceFree();
                 mkw::pack::cacheReads(false);
                 renderer.preparePauseControls();
-                LOGF("pause preload linear KB: before %lu, prepared %lu, kept %lu, with controls %lu (reserve %lu)",(unsigned long)pauseLinearBefore/1024,(unsigned long)pauseLinearPrepared/1024,
-                     (unsigned long)pauseLinearKept/1024,(unsigned long)linearSpaceFree()/1024,(unsigned long)pauseTextureReserve()/1024);
+                LOGF("pause preload linear KB: before %lu, prepared %lu, kept %lu, with controls %lu (reserve %lu), vram free %lu (pause textures in VRAM %lu)",(unsigned long)pauseLinearBefore/1024,(unsigned long)pauseLinearPrepared/1024,
+                     (unsigned long)pauseLinearKept/1024,(unsigned long)linearSpaceFree()/1024,(unsigned long)pauseTextureReserve()/1024,(unsigned long)vramSpaceFree()/1024,(unsigned long)pauseVramBytes/1024);
+                if(kQa){static bool listed=false;if(!listed){listed=true;std::vector<mkw::UiQuad> quads;pauseQuads(quads);char text[1024];mkw::uiResidentTextureList(quads,text,sizeof text);LOGF("pause preload sprites KB: %.230s",text);if(std::strlen(text)>230)LOGF("  ...%.230s",text+230);if(std::strlen(text)>460)LOGF("  ...%.230s",text+460);}}
+                raceLinearLow=linearSpaceFree();
                 pausePinned=!pauseResident.empty();
                 courseObjects.setAllocationReserve(pausePinned?0:pauseTextureReserve());
                 stage("pause menu");
@@ -3222,7 +3237,8 @@ int main() {
                             raceEvents.emit(mkw::RaceEvent::OptionChosen,physicsSteps,results.chosen());
                             LOGF("race end option %s (race %u/%u)",results.chosen()==0?(results.finalRace()?"Next":"Next Race"):"Quit Game",vsSet.race,raceCount());
                             // Kinoko arena left after racing (Old 3DS runs a 14 MiB arena).
-                            LOGF("race end scene_free=%lu heap_used=%lu linear_free=%lu",(unsigned long)scenes.currentScene()->heap()->getAllocatableSize(),(unsigned long)mallinfo().uordblks,(unsigned long)linearSpaceFree());
+                            LOGF("race end scene_free=%lu heap_used=%lu linear_free=%lu linear_low=%lu",(unsigned long)scenes.currentScene()->heap()->getAllocatableSize(),(unsigned long)mallinfo().uordblks,(unsigned long)linearSpaceFree(),
+                                 (unsigned long)std::min(raceLinearLow,size_t(linearSpaceFree())));
                         }
                         if(events&Flow::EventLeave){
                             // The race has faded to black (RaceResultsFlow::Leaving).
@@ -3293,6 +3309,7 @@ int main() {
                     // QA heartbeat: a freeze shows as the last line written.
                     if(kQa&&physicsSteps%300==0){const auto& hi=raceItems->hud(0);LOGF("hb step=%u stage=%u lap=%u rank=%u finished=%d item=%d split_drains=%u drain_caller=%08lx effect_rebuilds=%u recording=%u",physicsSteps,stage,raceGrid.lap(),raceGrid.rank(),int(raceGrid.finished()),int(hi.item),
                         mkw::diag::splitStats.midFrameDrains,(unsigned long)mkw::diag::splitStats.lastDrainCaller,mkw::diag::splitStats.effectRebuilds,mkw::diag::splitStats.effectRebuildsRecording);
+                    if(kQa&&physicsSteps%300==0)raceLinearLow=std::min(raceLinearLow,size_t(linearSpaceFree()));
                     if(kQa&&physicsSteps%300==0){const auto& sr=mkw::diag::shadowRectStats;
                         LOGF("hb shadow_rects bounded=%u full=%u empty=%u mean_bounded_px=%.0f",sr.bounded,sr.full,sr.empty,sr.bounded?double(sr.area)/sr.bounded:0.0);}}
                     mkw::LakituInput jugem;

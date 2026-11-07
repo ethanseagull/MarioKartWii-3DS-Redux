@@ -190,5 +190,7 @@ void layoutMenuScreens(const MenuState&,const std::vector<UiQuad>& source,
 // Allocation size of the actual sprite-index set requested by MenuRenderer.
 // Does not read or retain textures; movies and live vehicle icons are excluded.
 std::uint32_t uiResidentTextureBytes(const std::vector<UiQuad>&);
+// DIAG: the same set as "key KB" pairs (runtime.log).
+void uiResidentTextureList(const std::vector<UiQuad>&,char* out,std::size_t size);
 std::vector<UiQuad> composeMenu(const MenuState&,const UiRaceView&);
 }
