@@ -129,17 +129,23 @@ void RaceScene::calcEngines() {
 #ifdef MKW_KINOKO_PGO_GENERATE
 namespace {
 /// mkw-3ds PGO training build (tools/diag/compile.py, MKW_KINOKO_PGO=generate): at
-/// each race end, Kinoko's profile counters go to sdmc:/3ds/MKWiiDS/pgo/<source path>
-/// .gcda (the object path with its first MKW_KINOKO_PGO_GENERATE components cut), merged
-/// with the races before. libgcov does not create the folders itself on the SD card.
+/// each race end, the instrumented code's profile counters (Kinoko, and the port's src/
+/// in the Old 3DS variants) go to sdmc:/3ds/MKWiiDS/pgo/<path below objects/>.gcda (the
+/// object path with its first MKW_KINOKO_PGO_GENERATE components cut), merged with the
+/// races before. libgcov does not create the folders itself on the SD card.
 void dumpKinokoProfile() {
-    static const char *const dirs[] = {"", "/abstract", "/abstract/g3d", "/abstract/memory", "/egg",
+    static const char *const dirs[] = {"", "/src", "/vendor", "/vendor/kinoko", "/vendor/kinoko/source"};
+    static const char *const kinokoDirs[] = {"/abstract", "/abstract/g3d", "/abstract/memory", "/egg",
             "/egg/core", "/egg/util", "/game", "/game/field", "/game/field/jugem",
             "/game/field/obj", "/game/item", "/game/kart", "/game/render", "/game/scene",
             "/game/system", "/game/system/map"};
     char path[96];
     for (const char *dir : dirs) {
         std::snprintf(path, sizeof path, "sdmc:/3ds/MKWiiDS/pgo%s", dir);
+        mkdir(path, 0777);
+    }
+    for (const char *dir : kinokoDirs) {
+        std::snprintf(path, sizeof path, "sdmc:/3ds/MKWiiDS/pgo/vendor/kinoko/source%s", dir);
         mkdir(path, 0777);
     }
     std::snprintf(path, sizeof path, "%d", MKW_KINOKO_PGO_GENERATE);
