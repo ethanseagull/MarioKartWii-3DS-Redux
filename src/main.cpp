@@ -3582,6 +3582,32 @@ int main() {
                             const auto* racer=K::Kart::KartObjectManager::Instance()->object(i);
                             const auto& m=racer->pose();const auto& status=racer->status();const auto* action=racer->action();
                             auto& in=fxIn[i];
+                            // The lava splash below runs for every racer; it needs only these.
+                            in.position=vec(racer->pos());in.velocity=vec(racer->velocity());in.scale=racer->scale().y;
+                            in.beforeRespawn=status.onBit(St::BeforeRespawn);
+                            const int lavaSlot=racer->collide()->oobLavaHeightSlot();
+                            if(in.beforeRespawn&&!lavaBeforeRespawn[i]&&lavaSlot>=0){
+                                const auto* map=K::System::CourseMap::Instance();
+                                bool hasLava=false;float height=-60000.f;
+                                for(uint16_t j=0;j<map->getGeoObjCount();++j){
+                                    const auto* object=map->getGeoObj(j);
+                                    if(!(object->presenceFlag()&1))continue;
+                                    if(object->id()==17)hasLava=true;
+                                    // Retail shares the pocha height table across water/lava/forest.
+                                    if((object->id()==7||object->id()==17||object->id()==19)&&object->setting(0)==lavaSlot)height=object->pos().y;
+                                }
+                                if(hasLava){
+                                    mkw::EffectFrame f;f.origin=in.position+in.velocity;f.origin.y=height;f.scale=in.scale;
+                                    raceEffects.burst(raceEffects.find(i==0?"rk_pochaYogan":"rk_pochaYoganS"),f);
+                                    courseObjects.triggerLavaSplash(i,f.origin,f.scale,physicsSteps);
+                                }
+                            }
+                            lavaBeforeRespawn[i]=in.beforeRespawn;
+                            // Thinned LOD racer (kartFxLodThin): its group stays off this tick, as
+                            // calcs/draws below give for a LOD racer without +9; its effects
+                            // catch up on its next stepped tick. Its other inputs are not read.
+                            if(kartFxLodThin&&i&&((physicsSteps+i)&3)&&kartFxLod.lod.lod(i)&&!kartFx[i].keepAlive()){
+                                calcGroups&=~mkw::KartFxSlots::groupBit(i);drawGroups&=~mkw::KartFxSlots::groupBit(i);continue;}
                             in.position=vec(racer->pos());in.right={m[0,0],m[1,0],m[2,0]};in.up={m[0,1],m[1,1],m[2,1]};in.forward={m[0,2],m[1,2],m[2,2]};
                             in.scale=racer->scale().y;in.initialY=racer->bsp().initialYPos;in.bulletOffset=mkw::BulletModelHeight-in.initialY;
                             in.star=status.onBit(St::Star);in.mega=status.onBit(St::Mega);in.bullet=status.onBit(St::Bullet);
@@ -3614,29 +3640,6 @@ int main() {
                                     if(object->setting(0)==pochaSlot)in.pochaHeight=object->pos().y;
                                 }
                             }
-                            const int lavaSlot=racer->collide()->oobLavaHeightSlot();
-                            if(in.beforeRespawn&&!lavaBeforeRespawn[i]&&lavaSlot>=0){
-                                const auto* map=K::System::CourseMap::Instance();
-                                bool hasLava=false;float height=-60000.f;
-                                for(uint16_t j=0;j<map->getGeoObjCount();++j){
-                                    const auto* object=map->getGeoObj(j);
-                                    if(!(object->presenceFlag()&1))continue;
-                                    if(object->id()==17)hasLava=true;
-                                    // Retail shares the pocha height table across water/lava/forest.
-                                    if((object->id()==7||object->id()==17||object->id()==19)&&object->setting(0)==lavaSlot)height=object->pos().y;
-                                }
-                                if(hasLava){
-                                    mkw::EffectFrame f;f.origin=in.position+in.velocity;f.origin.y=height;f.scale=in.scale;
-                                    raceEffects.burst(raceEffects.find(i==0?"rk_pochaYogan":"rk_pochaYoganS"),f);
-                                    courseObjects.triggerLavaSplash(i,f.origin,f.scale,physicsSteps);
-                                }
-                            }
-                            lavaBeforeRespawn[i]=in.beforeRespawn;
-                            // Thinned LOD racer (kartFxLodThin): its group stays off this tick, as
-                            // calcs/draws below give for a LOD racer without +9; its effects
-                            // catch up on its next stepped tick.
-                            if(kartFxLodThin&&i&&((physicsSteps+i)&3)&&kartFxLod.lod.lod(i)&&!kartFx[i].keepAlive()){
-                                calcGroups&=~mkw::KartFxSlots::groupBit(i);drawGroups&=~mkw::KartFxSlots::groupBit(i);continue;}
                             in.bike=racer->isBike();in.groundStart=status.onBit(St::GroundStart);in.hardLanding=status.onBit(St::HardLanding);in.jumpPad=status.onBit(St::JumpPad);
                             in.chargingSSMT=status.onBit(St::ChargingSSMT);
                             in.countdownAccelerate=K::System::RaceManager::Instance()->stage()==K::System::RaceManager::Stage::Countdown&&racer->inputs()->currentState().accelerate();
