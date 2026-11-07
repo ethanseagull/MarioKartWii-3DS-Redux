@@ -235,6 +235,8 @@ public:
     bool startRoulette(unsigned player);
     /// Live objects and inventory copies of a retail object type (ItemHolderItem_getCount).
     unsigned objectCount(unsigned type) const;
+    /// objectCount of every retail type 0..14 in one pass.
+    void objectCounts(std::array<unsigned,15>& out) const;
     /// The prize the running roulette will give (decided at the box, RMCU 0x807ab550).
     ItemKind rouletteChoice(unsigned player) const { return player<MaxRacers?rouletteChoice_[player]:ItemKind::None; }
     /// A racer-contact bump (RMCU fn_1_609F4): the attacker's Thunder Cloud may pass to the
@@ -270,6 +272,12 @@ private:
 public:
     // DIAG A/B (ab-alternate.txt): true scans every slot as before.
     static inline bool fullContactScan=false;
+    // Old 3DS: item snapshots fetch the kart's parts once (item_native.cpp); off: no-fast-snapshot.txt.
+    static inline bool fastSnapshot=true;
+    // Old 3DS: the actor step skips holder syncs and object counts that nothing changed since
+    // the last one, and held-item scans of racers holding nothing (item_world.cpp); off:
+    // no-fast-actor-step.txt.
+    static inline bool fastActorStep=true;
     // Calls f(slot) for the actor slots in ascending order, as a scan of actors()
     // would visit them, but only those in the contact mask (a superset of the
     // active ones: f still checks active). f returns false to stop. Tick thread

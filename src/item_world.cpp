@@ -238,36 +238,53 @@ void RaceItems::updateActors(ItemWorldQuery query){
     // USA8078d464 uses the gameplay limit, not allocated capacity. USA80790844
     // computes the global pressure AFTER all holders, so every holder reads the
     // previous step's value. All fifteen retail +0x5c weights are one.
+    // fastActorStep (Old 3DS): the sync and the object counts change only when a holder's
+    // step below touched an actor (a reclaim or a member's update). After a holder with
+    // neither, a sync is a no-op (it is idempotent) and the counts are unchanged, so both
+    // are skipped until the next change; racers holding nothing skip the held-item scan.
+    const bool fast=fastActorStep;
+    bool changed=false;std::array<unsigned,15> counts{};bool countsValid=false;
     for(unsigned type=0;type<15;++type){
-        syncReclaimOrder();
+        if(!fast||changed)syncReclaimOrder();
+        changed=false;
         auto& h=reclaimOrder_[type];
-        const int free=int(ItemObjectLimits[type])-int(objectCount(type));
+        if(fast&&!countsValid){objectCounts(counts);countsValid=true;}
+        const int free=int(ItemObjectLimits[type])-int(fast?counts[type]:objectCount(type));
         if(ItemObjectLimits[type]>1&&(free<2||reclaimPressure_>-5)){
             h.sort(phase,type==2,eligible,
                 [&](unsigned slot){return actors_[slot].floorTypes;},
                 [&](unsigned slot){return actors_[slot].explosion;});
             if(phase==0&&(free<1||reclaimPressure_>0)&&h.count&&eligible(h.slots[0])){
                 const auto slot=h.slots[0];actors_[slot].active=false;h.remove(slot);
+                changed=true;
             }
         }
         // Keep holder order for movement and contacts, too. Copy the slot list
         // because a contact can remove another actor during this holder's step.
         const auto order=h.slots;const unsigned n=h.count;
+        if(n)changed=true;
+        if(changed)countsValid=false;
         for(unsigned k=0;k<n;++k){
             auto& a=actors_[order[k]];if(!a.active)continue;
             updateActor(a,query);
             if(!a.active){h.remove(order[k]);continue;}
             if(a.settled&&(a.scattered||a.kind==ItemKind::Banana))h.land(order[k]);
             resolveCourseObjects(a);if(!a.active)continue;
-            for(unsigned owner=0;owner<count_&&a.active;++owner)
+            for(unsigned owner=0;owner<count_&&a.active;++owner){
+                // resolveActorHeld returns at once for an empty slot.
+                if(fast&&!hud_[owner].heldMask)continue;
                 for(unsigned slot=0;slot<3&&a.active;++slot)resolveActorHeld(a,owner,slot);
+            }
             for(unsigned other=nextActorSlot(0);other<MaxActors&&a.active;other=nextActorSlot(other+1))
                 if(other!=order[k]&&actors_[other].active)resolveActorPair(a,actors_[other]);
         }
     }
-    syncReclaimOrder();
+    if(!fast||changed)syncReclaimOrder();
     reclaimPressure_=-30;
-    for(unsigned type=0;type<15;++type)reclaimPressure_+=int(objectCount(type));
+    if(fast){
+        if(!countsValid)objectCounts(counts);
+        for(unsigned type=0;type<15;++type)reclaimPressure_+=int(counts[type]);
+    }else for(unsigned type=0;type<15;++type)reclaimPressure_+=int(objectCount(type));
 }
 
 void RaceItems::updateActor(ItemActor& a,ItemWorldQuery query){
@@ -486,6 +503,7 @@ void RaceItems::heldKartContacts(unsigned player){
     for(unsigned owner=0;owner<count_;++owner){
         if(owner==player)continue;
         auto& h=hud_[owner];auto& state=deployments_[owner];
+        if(fastActorStep&&!h.heldMask)continue; // every slot below would be skipped
         for(unsigned slot=0;slot<3;++slot){
             if(!(h.heldMask&(1u<<slot))||state.scales[slot]<HeldContactMinimumScale)continue;
             const float radius=heldItemContactRadius(owner,slot);

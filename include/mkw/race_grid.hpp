@@ -32,6 +32,9 @@ private:
 class RaceGrid {
 public:
     static constexpr unsigned Capacity=12;
+    // Old 3DS: CPU pad inputs skip Kinoko's validity check (raw sticks 0..14, result unused);
+    // off: no-fast-cpu-pad.txt.
+    static inline bool fastPad=true;
     // Call within the RaceConfig init callback. Count=1 keeps a solo race.
     void configure(Kinoko::System::RaceConfig& config,unsigned localGarageChoice,unsigned count=Capacity,const std::array<unsigned,Capacity>* roster=nullptr);
     // Call after every scene creation/restart. Owns copies, never scene pointers.
