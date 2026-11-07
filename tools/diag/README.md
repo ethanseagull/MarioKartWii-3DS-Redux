@@ -115,6 +115,13 @@ accessory matrices together with its chassis matrix instead of on their first
 read (the same values). `no-pose-share.txt` evaluates an animation bank's pose
 again for each model it is applied to (race items pose a lit and an unlit
 copy) instead of reusing the pose its other model already holds.
+`core1-jobs.txt` (opt-in) moves the Old 3DS presentation jobs (racer posing,
+the local racer's pose) from core 0 to a job worker on core 1 at 30%. Off by
+default until a console run: 2 of 12 Azahar GPs with it stalled in the award
+ceremony's drive.
+`no-opp-pres-thin.txt` presents opponents not drawn up close every tick
+instead of once per drawn frame; `no-kartfx-lod-thin.txt` steps LOD racers'
+kart effects every tick instead of every 4th.
 
 ## Repacked packs
 

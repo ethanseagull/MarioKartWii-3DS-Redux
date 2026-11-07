@@ -31,6 +31,7 @@
 #include "mkw/nw4r_ef_draw.hpp"
 #include "mkw/retail_lighting.hpp"
 #include "mkw/skin_positions.hpp"
+#include "mkw/job_worker.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -58,6 +59,7 @@ struct Arena {
         return p;
     }
     void reset(){current=0;used=0;}
+    std::size_t release(){std::size_t n=0;for(auto& c:chunks)n+=c.size;chunks.clear();chunks.shrink_to_fit();reset();return n;}
 };
 struct Header {uint16_t type,reserved;uint32_t size;};
 enum : uint16_t {
@@ -243,9 +245,32 @@ DeferredWrites* Renderer::writes(){
     if(renderThread)return nullptr;
     // A frame between begin() and end() queues its writes.
     if(auto* list=writeTarget_.load(std::memory_order_acquire))return &list->writes;
+    // Immediate frames: a job on the other core queues them for the main thread.
+    if(jobQueue_&&onJobWorker())return &jobWrites_;
     // Outside a frame (loads) they run at once, after every drawn frame.
     if(deferred_&&recordThread&&!gpuIdle_)waitForGpu();
     return nullptr;
+}
+void Renderer::queueJobWrites(bool on){
+    if(on&&!jobStorage_){jobStorage_=std::make_unique<DeferredWrites::Storage>();jobWrites_.storage_=jobStorage_.get();}
+    jobQueue_=on&&jobStorage_;
+}
+std::size_t Renderer::releaseJobWrites(){
+    if(!jobStorage_)return 0;
+    auto& s=*jobStorage_;
+    LightLock_Lock(&s.lock);const std::size_t n=s.arena.release();s.writes.clear();s.writes.shrink_to_fit();LightLock_Unlock(&s.lock);
+    jobRun_.clear();jobRun_.shrink_to_fit();
+    return n;
+}
+void Renderer::runJobWrites(bool reset){
+    if(!jobStorage_)return;
+    auto& s=*jobStorage_;
+    // Run outside the lock (a write may flush); payloads stay until reset,
+    // which comes only once no job runs (JobWorker::finishAll).
+    LightLock_Lock(&s.lock);jobRun_.swap(s.writes);s.writes.clear();LightLock_Unlock(&s.lock);
+    for(const auto& w:jobRun_)w.run(w.payload);
+    jobRun_.clear();
+    if(reset){LightLock_Lock(&s.lock);s.arena.reset();LightLock_Unlock(&s.lock);}
 }
 void Renderer::submit(){
     if(!recording_||recording_==localList_.get())return;

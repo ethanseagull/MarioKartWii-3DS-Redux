@@ -642,7 +642,7 @@ int main() {
         LOGF("stereo capable slider_override=%.2f",slider);
     }else report("stereo unavailable (2D model)");
     // secondCore: see pipelineFrames above.
-    if(!secondCore)report("Old 3DS: race frames and presentation jobs on core 0");
+    if(!secondCore)report("Old 3DS: race frames on core 0");
     // DIAG: memory latency and core-1 share, once, when running as an Old 3DS (mkw/hw_probe.hpp).
     // DIAG sim-profile.txt (or ab-alternate.txt): the per-tick sim profile and this
     // probe. Off otherwise: the profile's ~140 clock syscalls a tick and the probe's
@@ -652,6 +652,20 @@ int main() {
     if(mkw::old3dsTestBuild){char text[120];snprintf(text,sizeof text,"Old 3DS test build: speedup off, Old 3DS paths, no ZL/ZR/C-stick; application memory %lu KB",(unsigned long)osGetMemRegionSize(MEMREGION_APPLICATION)/1024);report(text);}
     // Second-core presentation jobs (racer posing); none run while the race steps.
     if(secondCore&&!mkw::jobWorker().start())report("job worker unavailable: presentation jobs run on core 0");
+    // Old 3DS (no render thread): the presentation jobs (racer and course-object
+    // posing, the local racer's pose) run on core 1, within the 30% time limit
+    // the audio threads already ask for, while core 0 records the frame; core 0
+    // takes any job not yet claimed and runs the jobs' GPU-visible writes
+    // (Renderer::queueJobWrites). Opt-in (core1-jobs.txt) until a console run: in
+    // Azahar 2 of 12 GPs with it on stalled in the award ceremony's drive (cause not
+    // found; none in ~20 GPs without it), for a gain only in pack racing.
+    if(!secondCore&&exists("sdmc:/3ds/MKWiiDS/core1-jobs.txt")){
+        static mkw::Renderer* jobWriteTarget=nullptr;jobWriteTarget=&renderer;
+        if(mkw::jobWorker().start(30)){
+            renderer.queueJobWrites(true);mkw::jobWorker().setDrain([](bool reset){jobWriteTarget->runJobWrites(reset);});
+            report("Old 3DS: presentation jobs on core 1 (30% limit)");
+        }else report("job worker unavailable: presentation jobs run on core 0");
+    }else if(!secondCore)report("Old 3DS: presentation jobs on core 0");
     // Race frames draw on the second core one frame behind their recording
     // (src/render_thread.cpp); menus draw immediately.
     if(secondCore&&!renderer.startRenderThread())report("render thread unavailable: race frames draw on core 0");
@@ -2197,6 +2211,9 @@ int main() {
     // memory as a first launch, with nothing half-built left behind.
     releaseRace=[&](){
         raceWarmupFrames=0;renderer.loadingFrame=false;
+        // Old 3DS core-1 jobs: the race's job-write chunks go before the next scene loads.
+        mkw::jobWorker().finishAll();
+        if(const std::size_t freed=renderer.releaseJobWrites())LOGF("job writes released bytes=%u",unsigned(freed));
         notificationLed.clear();
         flushRaceSave();
         renderer.waitForGpu();balloonRuntime.clear();raceGrid.ai().clearBattleSearch();coinBattle.clear();
