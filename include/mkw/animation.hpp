@@ -110,6 +110,9 @@ public:
     bool ready=false;
     // Local player must never hold a pose for adaptive presentation budgeting.
     bool fullRate=false;
+    // A second model applied with the inputs of the last evaluation reuses its
+    // pose instead of evaluating again (the same pose). A/B: no-pose-share.txt.
+    static inline bool sharePose=true;
 private:
     // stepLook's head query: only the slots it reads (see animation.cpp).
     const float* lookPose(int clip,float frame,unsigned tick);
@@ -181,6 +184,9 @@ private:
     // Cache only an identical completed pose on the same destination buffer.
     // Secondary hair keeps its independent tick; clip transitions never skip.
     const Vertex* cachedVertices_=nullptr;
+    // The other buffer written from the cached pose; palette_ holds apply()'s
+    // last evaluation (pose() and lookPose() overwrite it).
+    const Vertex* cachedVertices2_=nullptr;bool paletteApplied_=false;
     int cachedClip_=-1,cachedExpression_=-2;
     float cachedFrame_=-1,cachedExpressionFrame_=-1;
     unsigned cachedTick_=0;

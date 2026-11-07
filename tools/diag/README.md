@@ -110,7 +110,11 @@ GPU commands every frame instead of copying the commands recorded on the
 race's first bloom frame (immediate mono frames: Old 3DS). `no-c3d-fast.txt`
 makes citro3d compare its register shadows with memcmp and scan every uniform
 on each draw, instead of word compares and a per-shader "any uniform dirty"
-flag (the same GPU commands).
+flag (the same GPU commands). `no-lazy-parts.txt` builds a racer's wheel and
+accessory matrices together with its chassis matrix instead of on their first
+read (the same values). `no-pose-share.txt` evaluates an animation bank's pose
+again for each model it is applied to (race items pose a lit and an unlit
+copy) instead of reusing the pose its other model already holds.
 
 ## Repacked packs
 
