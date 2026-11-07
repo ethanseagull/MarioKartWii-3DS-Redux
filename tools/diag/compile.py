@@ -106,6 +106,11 @@ def compile_one(src, signature):
         profile = gcda.read_bytes()
         obj.with_suffix('.gcda').write_bytes(profile)
         flags = flags + PGO_USE_FLAGS
+        # The port's threads (audio, I/O, job worker) update their counters without
+        # atomics, so a profile can be slightly inconsistent (sound_system's ioLoop was):
+        # let GCC smooth it instead of failing.
+        if port:
+            flags = flags + ['-fprofile-correction']
     digest = hashlib.sha256(src.read_bytes() + signature + ' '.join(flags).encode() + profile).hexdigest()
     name = str(obj.relative_to(OUT / 'objects').with_suffix(src.suffix))
     stamp = obj.with_suffix('.sha256')
