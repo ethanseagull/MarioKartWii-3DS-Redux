@@ -183,7 +183,10 @@ void RacerVisuals::step(unsigned tick,const RaceItems& items,bool drawNext){
     }
 }
 void RacerVisuals::Impl::prepareRacer(unsigned i){
-    auto& out=prepared[i];out=Prepared{};
+    // Flags and counts only (not out=Prepared{}, ~3 KB a racer a frame): every matrix a
+    // reader uses is written before its flag or count says so.
+    auto& out=prepared[i];out.draw=out.bodyVisible=out.driverVisible=out.lowHandleVisible=false;
+    out.lod=1;out.additive=0;out.wheels=0;out.wheelVisible={};out.extras=0;
     auto* r=racers[i].get();if(!r)return;
     r->headShown=false;
     if(!r->body||!r->driver||!r->animation)return;
