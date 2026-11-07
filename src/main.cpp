@@ -2403,6 +2403,9 @@ int main() {
     if(exists("sdmc:/3ds/MKWiiDS/no-fast-snapshot.txt"))mkw::RaceItems::fastSnapshot=false;
     if(exists("sdmc:/3ds/MKWiiDS/no-fast-actor-step.txt"))mkw::RaceItems::fastActorStep=false;
     if(exists("sdmc:/3ds/MKWiiDS/no-fast-cpu-pad.txt"))mkw::RaceGrid::fastPad=false;
+    // Each kart's Kinoko parts in one heap block (exact; applies at kart creation, so it has no
+    // ab-alternate bit). Off: no-kart-arena.txt (release and DIAG).
+    if(exists("sdmc:/3ds/MKWiiDS/no-kart-arena.txt"))K::Kart::KartObjectManager::s_kartArena=false;
     // DIAG ab-alternate.txt: same-binary A/B in one run. Each 600-step sim profile
     // window runs one combination of the Old 3DS speed-ups (bit 0: head-look subset,
     // bit 1: packed KCL prisms, bit 2: item contact mask, bit 3: phase-major pass 0,

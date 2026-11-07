@@ -100,7 +100,17 @@ void KartObject::init() {
 void KartObject::initImpl() {
     sub()->initAABB(m_pointers, this);
     sub()->init();
+    // mkw-3ds: the object collision hull goes into this kart's BlockArena too (see the
+    // KartObjectManager constructor); then the block is trimmed to what it holds.
+    EGG::BlockArena *arena = EGG::BlockArena::Containing(this);
+    if (arena) {
+        arena->enter();
+    }
     objectCollisionKart()->init(param()->playerIdx());
+    if (arena) {
+        EGG::BlockArena::Leave();
+        arena->trim(0);
+    }
 }
 
 /// @brief Sets the initial position and rotation of the kart based off the current track.
