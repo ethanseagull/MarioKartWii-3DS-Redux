@@ -319,7 +319,9 @@ void RaceGrid::beforeStep(uint16_t bulletPlayers){
             // Trick input from the retail AITrickHandler (CPU) / AIEngine command.
             const auto trick=racing&&!d.reverse?System::Trick(std::min<uint8_t>(command.trick,4)):System::Trick::None;
             const int raw=std::clamp(7+int(std::lround(aiStick*7.f)),0,14);
-            pad->setInputsRawStick(buttons,unsigned(raw),7,trick);
+            // raw is clamped to 0..14 above.
+            if(fastPad)pad->setInputsRawStickUnchecked(buttons,uint8_t(raw),7,trick);
+            else pad->setInputsRawStick(buttons,unsigned(raw),7,trick);
             kart->move()->setCpuSteer(true,command.animationStick,command.lean);
             continue;
         }
