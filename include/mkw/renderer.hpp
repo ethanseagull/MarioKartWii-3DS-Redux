@@ -217,6 +217,13 @@ public:
     void drain();
     // Race simulation may continue while both recording lists are occupied.
     bool canRecordFrame() const;
+    // Immediate frames with the job worker on another core (Old 3DS core 1):
+    // job threads queue their GPU-visible writes here and the main thread runs
+    // them in queue order (runJobWrites, after JobWorker::finish), so every
+    // write and its cache flush happen on the core that draws, as a deferred
+    // frame's render thread runs them. reset also frees the payloads.
+    void queueJobWrites(bool on);
+    void runJobWrites(bool reset);
     // Race bottom screen (docs/BOTTOM_SCREEN.md): a 320x240 RGBA8 VRAM target
     // with depth/stencil for menu icons and dual-screen intros; transferred only when drawn.
     // Create and release with the render thread idle, outside a frame:
@@ -598,6 +605,7 @@ private:
     std::atomic<unsigned> submitted_{0},completed_{0},gpuDone_{0};
     std::atomic<bool> quit_{false};
     std::atomic<FrameList*> writeTarget_{nullptr};
+    std::unique_ptr<DeferredWrites::Storage> jobStorage_;DeferredWrites jobWrites_;std::vector<DeferredWrites::Write> jobRun_;bool jobQueue_=false;
     bool deferred_=false;
     // No recorded frame since the last waitForGpu() (this thread's view).
     bool gpuIdle_=true;
