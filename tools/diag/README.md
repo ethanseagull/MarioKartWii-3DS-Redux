@@ -98,8 +98,12 @@ upper screen).
 `bottom-rgba8.txt` keeps the lower screen's UI atlas in RGBA8; by default Old 3DS
 stores it as RGBA4 (256 KB less VRAM, so more course textures leave LINEAR).
 `full-quality.txt` turns off every Old 3DS detail reduction.
-On Old 3DS the pause menu is not preloaded when that would leave under 3 MiB of
-LINEAR (`runtime.log`: `Old 3DS: pause menu not preloaded (LINEAR)`). A failed
+On Old 3DS the pause textures move to the VRAM the course textures left above
+their 1 MiB reserve (`no-pause-vram.txt` keeps them in LINEAR), and the pause
+menu is not preloaded when that would leave under 1.5 MiB of LINEAR
+(`runtime.log`: `pause preload linear KB: ... (pause textures in VRAM N)`, or
+`Old 3DS: pause menu not preloaded (LINEAR)`; race end lines add `linear_low`,
+the lowest LINEAR seen at the 300-step heartbeats). A failed
 `new` writes `FAIL out of heap: ...` to `runtime.log` before the game aborts.
 
 Render CPU switches (each change is exact unless noted; both consoles unless
@@ -117,8 +121,13 @@ again for each model it is applied to (race items pose a lit and an unlit
 copy) instead of reusing the pose its other model already holds.
 `core1-jobs.txt` (opt-in) moves the Old 3DS presentation jobs (racer posing,
 the local racer's pose) from core 0 to a job worker on core 1 at 30%. Off by
-default until a console run: 2 of 12 Azahar GPs with it stalled in the award
-ceremony's drive.
+default until a console run. The worker stops for the award ceremony and starts
+again with the next race load; `core1-ceremony-keep.txt` keeps it running.
+The ceremony logs `ceremony hb: ...` lines (phase, frame, tick, drive, sound,
+loader, worker) about once a second and `ceremony watchdog ...` when the main
+thread stops coming round a loop for 3 s or more; `award-load-times.jsonl` gets
+`board` when the result board shows (a GP finished 4th or lower has no
+`podium` and waits there for A).
 `no-opp-pres-thin.txt` presents opponents not drawn up close every tick
 instead of once per drawn frame; `no-kartfx-lod-thin.txt` steps LOD racers'
 kart effects every tick instead of every 4th.
