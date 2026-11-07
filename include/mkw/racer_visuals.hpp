@@ -17,6 +17,10 @@ public:
     // drawNext false (Old 3DS): no frame is drawn before the next step, so racers
     // not shown up close keep last tick's vehicle snapshot (VehicleAnimation::step).
     void step(unsigned tick,const RaceItems& items,bool drawNext=true);
+    // Old 3DS: a racer whose animated driver was not drawn last frame is presented
+    // once per drawn frame (on the tick before it, drawNext), that step standing for
+    // the ticks since its last: controller clocks and wheel roll catch up.
+    static inline bool thinHidden=false;
     // Poses and culls every opponent for this frame, on the job worker where
     // possible. Call after Renderer::begin; race state must not change until draw.
     void prepare(const Renderer& renderer,const RaceItems& items,Vec3 viewer,unsigned tick,bool fullDetail=false);

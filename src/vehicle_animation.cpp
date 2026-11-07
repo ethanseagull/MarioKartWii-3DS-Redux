@@ -73,7 +73,7 @@ float VehicleAnimation::advanceRoll(float phase,float signedDistance,float radiu
     if(!std::isfinite(signedDistance)||!std::isfinite(radius)||radius<=.0001f)return phase;
     return std::remainder(phase+signedDistance/radius,2*Pi);
 }
-void VehicleAnimation::step(Kinoko::Kart::KartObject& kart,bool snapshot){
+void VehicleAnimation::step(Kinoko::Kart::KartObject& kart,bool snapshot,unsigned frames){
     bike_=kart.param()->isBike();count_=std::min(4u,unsigned(kart.param()->tireCount()));
     const auto& player=Kinoko::System::RaceConfig::Instance()->raceScenario().players[kart.param()->playerIdx()];
     const unsigned vehicle=unsigned(player.vehicle);
@@ -89,7 +89,7 @@ void VehicleAnimation::step(Kinoko::Kart::KartObject& kart,bool snapshot){
             status.onBit(S::Accelerate),status.onBit(S::Brake),status.onBit(S::TouchingGround),
             status.onBit(S::WallCollision,S::Wall3Collision),status.onBit(S::InAction),
             status.onBit(S::ChargingSSMT),status.onBit(S::Burnout),status.onBit(S::ChargeStartBoost)});
-        for(unsigned i=0;i<count_;++i){radii_[i]=kart.tirePhysics(i)->effectiveRadius();roll_[i]=advanceRoll(roll_[i],speed,radii_[i]);}
+        for(unsigned i=0;i<count_;++i){radii_[i]=kart.tirePhysics(i)->effectiveRadius();roll_[i]=advanceRoll(roll_[i],speed*float(frames),radii_[i]);}
         return;
     }
     base_=fromSource(kart.body()->visualPose());kartScale_=vec(kart.scale());
@@ -131,7 +131,7 @@ void VehicleAnimation::step(Kinoko::Kart::KartObject& kart,bool snapshot){
         // Retail Wheel::UpdateMatrix (USA 0x8059444c) uses the unscaled
         // effective radius at WheelPhysics+0x6c. Scaling only affects the
         // rendered mesh below, not the roll denominator a second time.
-        roll_[i]=advanceRoll(roll_[i],speed,radii_[i]);
+        roll_[i]=advanceRoll(roll_[i],speed*float(frames),radii_[i]);
         wheelSources_[i]=bike_?fromSource(kart.body()->wheelMatrix(i)):kartWheel;
         bspRadii_[i]=bsp.wheels[bspIndex].wheelRadius;
     }

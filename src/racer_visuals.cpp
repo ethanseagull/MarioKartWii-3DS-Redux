@@ -46,6 +46,9 @@ struct RacerVisuals::Impl {
         // Set by the last drawn frame (prepareRacer): the animated driver (LOD 1)
         // was in view. Reduced quality (Old 3DS) aims heads only for those.
         bool headShown=true;
+        unsigned presentedTick=0; // last tick step() presented it (thinHidden)
+        // One-tick driver events seen on ticks it was not presented (thinHidden).
+        int pendingThrow=0;bool pendingCelebrate=false;
     };
     std::array<std::unique_ptr<Racer>,11> racers;
     unsigned count=0;
@@ -138,7 +141,16 @@ void RacerVisuals::resetAnimation(){
 void RacerVisuals::step(unsigned tick,const RaceItems& items,bool drawNext){
     for(unsigned i=0;i<11;++i)if(auto* r=impl_->racers[i].get()){
         auto* kart=K::Kart::KartObjectManager::Instance()->object(i+1);auto& status=kart->status();
-        {MKW_SIM_SCOPE(OppVehicle);r->vehicle.step(*kart,drawNext||r->headShown);}DriverSignals s;
+        const bool hidden=thinHidden&&!r->headShown;
+        if(hidden&&!drawNext){
+            for(const auto& event:items.sounds())if(event.player==i+1){
+                if(event.cue==ItemSoundCue::HitSuccess)r->pendingCelebrate=true;
+                else if(event.cue==ItemSoundCue::Release)r->pendingThrow=event.flag?1:-1;
+            }
+            continue;
+        }
+        const unsigned frames=hidden?std::clamp(tick-r->presentedTick,1u,8u):1u;r->presentedTick=tick;
+        {MKW_SIM_SCOPE(OppVehicle);r->vehicle.step(*kart,drawNext||r->headShown,frames);}DriverSignals s;
         s.bike=kart->param()->isBike();s.handleRelativeBike=kart->param()->stats().body==K::Kart::KartParam::Stats::Body::Handle_Relative_Bike;s.wheelie=status.onBit(K::Kart::eStatus::Wheelie);
         s.airborne=status.offBit(K::Kart::eStatus::TouchingGround);s.hopping=status.onBit(K::Kart::eStatus::Hop);
         s.steering=kart->move()->cpuSteer()?kart->move()->cpuStick():kart->inputs()->currentState().stick.x;
@@ -158,8 +170,11 @@ void RacerVisuals::step(unsigned tick,const RaceItems& items,bool drawNext){
         s.finishType=driverFinishType(rank,K::System::RaceConfig::Instance()->raceScenario().playerCount);
         s.countdown=unsigned(race->stage())<=1;
         driverItemSignals(s,items,i+1);
-        s.blink=(tick+i*13)%180==0;
-        {MKW_SIM_SCOPE(OppController);r->pose=r->controller.step(s);}
+        if(!s.itemThrowDirection)s.itemThrowDirection=r->pendingThrow;
+        s.celebrate|=r->pendingCelebrate;r->pendingThrow=0;r->pendingCelebrate=false;
+        // A step standing for several ticks blinks if any of them would have.
+        s.blink=(tick+i*13)%180<frames;
+        {MKW_SIM_SCOPE(OppController);r->pose=r->controller.step(s,frames);}
         // Reduced quality: a racer drawn with its static low-detail driver, or not
         // drawn at all, shows no head aim; its look filters resume (from where they
         // stopped) once it is drawn up close again. ~0.18 ms a racer a tick on Old 3DS.
