@@ -285,8 +285,9 @@ void RacerVisuals::prepare(const Renderer& renderer,const RaceItems& items,Vec3 
         if(!gpu||!worker.running())continue;
         d.jobContext[i]={&d,i};
         d.jobs[i].reset([](void* c){auto* p=static_cast<std::pair<Impl*,unsigned>*>(c);p->first->prepareRacer(p->second);},&d.jobContext[i]);
-        worker.submit(d.jobs[i]);d.queued[i]=true;
+        worker.submit(d.jobs[i],false);d.queued[i]=true;
     }
+    worker.wake();
 }
 void RacerVisuals::draw(Renderer& renderer,const RaceItems& items,Vec3 viewer,unsigned tick,const Model* playerShadow,const C3D_Mtx* playerTransform){
     auto& d=*impl_;

@@ -528,7 +528,9 @@ void CourseObjects::prepare(const Renderer& renderer,unsigned tick,Vec3 camera){
     d.skyJob.reset([](void* c){static_cast<Impl*>(c)->recordSky();},&d);
     d.objectJob.reset([](void* c){static_cast<Impl*>(c)->recordObjects();},&d);
     auto& worker=jobWorker();
-    d.queued=worker.running();
+    // Recorded right here on a slow worker: the object draws follow the course
+    // draw, too soon for a fraction of a core to have finished them.
+    d.queued=worker.running()&&!worker.slow();
     if(d.queued){worker.submit(d.skyJob);worker.submit(d.objectJob);}
     else{d.recordSky();d.recordObjects();}
 }

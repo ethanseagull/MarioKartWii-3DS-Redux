@@ -115,6 +115,8 @@ accessory matrices together with its chassis matrix instead of on their first
 read (the same values). `no-pose-share.txt` evaluates an animation bank's pose
 again for each model it is applied to (race items pose a lit and an unlit
 copy) instead of reusing the pose its other model already holds.
+`no-core1-jobs.txt` keeps the Old 3DS presentation jobs (racer posing, the
+local racer's pose) on core 0 instead of a job worker on core 1 at 30%.
 
 ## Repacked packs
 
