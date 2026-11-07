@@ -612,6 +612,7 @@ int main() {
     renderer.lightTextureSkip=!exists("sdmc:/3ds/MKWiiDS/no-light-blend.txt");
     renderer.bloomList=!exists("sdmc:/3ds/MKWiiDS/no-bloom-list.txt");
     C3D_FastState=!exists("sdmc:/3ds/MKWiiDS/no-c3d-fast.txt");
+    mkw::VehicleAnimation::lazyParts=!exists("sdmc:/3ds/MKWiiDS/no-lazy-parts.txt");
     // unit1-alternate.txt (above): set before every race load.
     auto alternateUnitOne=[&](){
         if(!unitOneAlternate)return;

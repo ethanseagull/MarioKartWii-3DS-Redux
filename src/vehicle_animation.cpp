@@ -56,7 +56,7 @@ void VehicleAnimation::reset(){
     luma_.reset();lumaFrame_=0;
     body_=handle_=handleBase_=identity();for(auto& m:wheels_)m=identity();for(auto& m:wheelFrames_)m=identity();
     for(auto& m:accessories_)m=identity();accessorySet_=0;roll_={};travel_={};radii_={};display_={};wheelLocal_={};count_=0;vehicle_=~0u;bike_=false;driveFrame_=15;
-    base_=handleSource_=identity();for(auto& m:wheelSources_)m=identity();tirePositions_={};bspRadii_={};kartScale_={1,1,1};steering_=0;wheelMotion_={};dirty_=false;
+    base_=handleSource_=identity();for(auto& m:wheelSources_)m=identity();tirePositions_={};bspRadii_={};kartScale_={1,1,1};steering_=0;wheelMotion_={};dirty_=partsDirty_=false;
 }
 Vec3 VehicleAnimation::displayVec(unsigned offset) const{return {display_[offset/4],display_[offset/4+1],display_[offset/4+2]};}
 void VehicleAnimation::readParameters(unsigned vehicle){
@@ -188,9 +188,12 @@ bool VehicleAnimation::setSnapshot(const Snapshot& p){
     kartScale_=p.scale;steering_=std::clamp(p.steering,-1.f,1.f);vehicle_=p.vehicle;count_=p.count;bike_=p.bike;
     dirty_=true;return true;
 }
-void VehicleAnimation::evaluate() const{
-    if(!dirty_)return;
-    dirty_=false;
+void VehicleAnimation::evaluateBody() const{
+    if(!lazyParts){evaluate();return;}
+    if(dirty_)buildBody();
+}
+void VehicleAnimation::buildBody() const{
+    dirty_=false;partsDirty_=true;
     const auto& base=base_;const auto kartScale=kartScale_;
     body_=base;scale(body_,kartScale);
     const float steering=steering_;
@@ -204,6 +207,12 @@ void VehicleAnimation::evaluate() const{
         const Vec3 steeredZ{handle_.r[0].z,handle_.r[1].z,handle_.r[2].z};
         driveFrame_=std::clamp(15.f+std::atan2(dot(baseX,steeredZ),dot(baseZ,steeredZ))/Degrees,0.f,29.f);
     }
+}
+void VehicleAnimation::evaluate() const{
+    if(dirty_)buildBody();
+    if(!partsDirty_)return;
+    partsDirty_=false;
+    const auto& base=base_;const auto kartScale=kartScale_;const float steering=steering_;
     for(unsigned i=0;i<count_;++i){
         const unsigned bspIndex=bike_?i:(count_==3?(i+1)/2:i/2);
         const bool front=bspIndex==0;
