@@ -145,10 +145,31 @@ KartObjectManager::KartObjectManager() {
 
     loadScaleAnimations();
 
+    // mkw-3ds (Old 3DS locality): with s_kartArena, each kart's parts come from one block of
+    // the heap (an EGG::BlockArena), back to back in creation order and without heap block
+    // headers between them, instead of ~42 heap blocks with proxy list nodes between them.
+    // Creation order roughly follows the passes: KartParam and KartObject (the accessor every
+    // part reads through), the wheel pointer arrays, KartSub, KartMove, KartAction, KartMove's
+    // jump, half-pipe and scale, KartState, KartCollide, KartPhysics with its dynamics and body
+    // hitboxes, KartBody, each wheel's suspension, tire and their physics, ObjectCollisionKart,
+    // the wheels' hitboxes, the model, and (in initImpl) the object collision hull. Only
+    // addresses change: every allocation is still zeroed and constructed in the same order,
+    // and nothing orders by address. After the model the block keeps room for the hull and
+    // gives the rest back; initImpl trims it to size.
+    // Previous scenes' arenas died with their heap.
+    EGG::BlockArena::ForgetAll();
     for (size_t i = 0; i < m_count; ++i) {
         const auto &player = raceScenario.players[i];
+        EGG::BlockArena *arena = s_kartArena ? EGG::BlockArena::Open(KART_ARENA_CAPACITY) : nullptr;
+        if (arena) {
+            arena->enter();
+        }
         KartObject *object = KartObject::Create(player.character, player.vehicle, i);
         object->createModel();
+        if (arena) {
+            EGG::BlockArena::Leave();
+            arena->trim(KART_ARENA_HULL_RESERVE);
+        }
         m_objects[i] = object;
     }
 }
@@ -163,7 +184,12 @@ KartObjectManager::~KartObjectManager() {
     KartParamFileManager::DestroyInstance();
 
     for (size_t i = 0; i < m_count; ++i) {
+        // mkw-3ds: the kart's parts ignore their frees inside its arena; the block goes last.
+        EGG::BlockArena *arena = EGG::BlockArena::Containing(m_objects[i]);
         EGG::egg_delete(m_objects[i]);
+        if (arena) {
+            arena->release();
+        }
     }
 
     EGG::egg_free(m_objects);
@@ -208,5 +234,6 @@ KartObjectManager *KartObjectManager::s_instance = nullptr;
 bool KartObjectManager::s_phaseMajor = true;
 bool KartObjectManager::s_pass0Split = true;
 bool KartObjectManager::s_pass1Grouped = true;
+bool KartObjectManager::s_kartArena = true;
 
 } // namespace Kinoko::Kart

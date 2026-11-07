@@ -586,6 +586,7 @@ int main() {
     // neither calculates nor draws) steps its effects on every 4th tick only, staggered
     // by racer. Off-file no-kartfx-lod-thin.txt.
     const bool kartFxLodThin=!mkw::isNew3ds()&&!exists("sdmc:/3ds/MKWiiDS/no-kartfx-lod-thin.txt");
+    mkw::RacerVisuals::thinHidden=!mkw::isNew3ds()&&!exists("sdmc:/3ds/MKWiiDS/no-opp-pres-thin.txt");
     const bool ghostTest=kQa&&exists("sdmc:/3ds/MKWiiDS/ghost-test.txt");
     // QA: blue-test.txt "<ticks> [old]" fires a Blue Shell from last place every
     // <ticks> while none is in flight and traces each one's route in runtime.log;
@@ -2402,6 +2403,9 @@ int main() {
     if(exists("sdmc:/3ds/MKWiiDS/no-fast-snapshot.txt"))mkw::RaceItems::fastSnapshot=false;
     if(exists("sdmc:/3ds/MKWiiDS/no-fast-actor-step.txt"))mkw::RaceItems::fastActorStep=false;
     if(exists("sdmc:/3ds/MKWiiDS/no-fast-cpu-pad.txt"))mkw::RaceGrid::fastPad=false;
+    // Each kart's Kinoko parts in one heap block (exact; applies at kart creation, so it has no
+    // ab-alternate bit). Off: no-kart-arena.txt (release and DIAG).
+    if(exists("sdmc:/3ds/MKWiiDS/no-kart-arena.txt"))K::Kart::KartObjectManager::s_kartArena=false;
     // DIAG ab-alternate.txt: same-binary A/B in one run. Each 600-step sim profile
     // window runs one combination of the Old 3DS speed-ups (bit 0: head-look subset,
     // bit 1: packed KCL prisms, bit 2: item contact mask, bit 3: phase-major pass 0,
@@ -3379,10 +3383,13 @@ int main() {
                 signals.blink=physicsSteps%180==0;
                 driverPose=driverController.step(signals);
                 mkw::simprof::add(mkw::simprof::PresPlayer,postTickStart);
-                {MKW_SIM_SCOPE(PresOpponents);if(fullRace)opponents.step(physicsSteps,*raceItems,
-                    // Old 3DS: opponents' vehicle snapshot only before a drawn frame (the loop's
-                    // last tick; QA capture breaks draw after any tick).
-                    !oppFrameSnapshot||accumulator<1||raceCapture||(autoplay&&!benchmark&&intro.active()));}
+                {// Old 3DS: opponents' vehicle snapshot (and hidden racers' presentation,
+                 // RacerVisuals::thinHidden) only before a drawn frame: the loop's last tick,
+                 // or a tick the QA capture or the autoplay intro breaks after (below).
+                 const bool captureTick=raceCapture&&menu.simulates()&&!intro.active()&&
+                     (!captureLive||(physicsSteps-captureBase)%raceCaptureEvery==0);
+                 MKW_SIM_SCOPE(PresOpponents);if(fullRace)opponents.step(physicsSteps,*raceItems,
+                    !oppFrameSnapshot||accumulator<1||captureTick||(autoplay&&!benchmark&&intro.active()));}
                 if(driver){
                     mkw::DriverLookParameters parameters;const auto& choice=selectedVehicle();
                     const bool available=mkw::driverLookParameters(choice.character,choice.vehicle,parameters);
