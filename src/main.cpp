@@ -656,8 +656,10 @@ int main() {
     // posing, the local racer's pose) run on core 1, within the 30% time limit
     // the audio threads already ask for, while core 0 records the frame; core 0
     // takes any job not yet claimed and runs the jobs' GPU-visible writes
-    // (Renderer::queueJobWrites). A/B: no-core1-jobs.txt keeps them on core 0.
-    if(!secondCore&&!exists("sdmc:/3ds/MKWiiDS/no-core1-jobs.txt")){
+    // (Renderer::queueJobWrites). Opt-in (core1-jobs.txt) until a console run: in
+    // Azahar 2 of 12 GPs with it on stalled in the award ceremony's drive (cause not
+    // found; none in ~20 GPs without it), for a gain only in pack racing.
+    if(!secondCore&&exists("sdmc:/3ds/MKWiiDS/core1-jobs.txt")){
         static mkw::Renderer* jobWriteTarget=nullptr;jobWriteTarget=&renderer;
         if(mkw::jobWorker().start(30)){
             renderer.queueJobWrites(true);mkw::jobWorker().setDrain([](bool reset){jobWriteTarget->runJobWrites(reset);});
@@ -2209,6 +2211,9 @@ int main() {
     // memory as a first launch, with nothing half-built left behind.
     releaseRace=[&](){
         raceWarmupFrames=0;renderer.loadingFrame=false;
+        // Old 3DS core-1 jobs: the race's job-write chunks go before the next scene loads.
+        mkw::jobWorker().finishAll();
+        if(const std::size_t freed=renderer.releaseJobWrites())LOGF("job writes released bytes=%u",unsigned(freed));
         notificationLed.clear();
         flushRaceSave();
         renderer.waitForGpu();balloonRuntime.clear();raceGrid.ai().clearBattleSearch();coinBattle.clear();

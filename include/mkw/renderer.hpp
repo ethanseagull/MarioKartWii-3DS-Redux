@@ -224,6 +224,9 @@ public:
     // frame's render thread runs them. reset also frees the payloads.
     void queueJobWrites(bool on);
     void runJobWrites(bool reset);
+    // Frees the job-write arena's chunks (kept for reuse between frames); call with
+    // no job running, when a race is released. Returns the bytes freed.
+    std::size_t releaseJobWrites();
     // Race bottom screen (docs/BOTTOM_SCREEN.md): a 320x240 RGBA8 VRAM target
     // with depth/stencil for menu icons and dual-screen intros; transferred only when drawn.
     // Create and release with the render thread idle, outside a frame:
