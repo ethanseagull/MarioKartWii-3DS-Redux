@@ -582,6 +582,10 @@ int main() {
     mkw::DriverAnimation::staggerLook=!mkw::isNew3ds()&&!exists("sdmc:/3ds/MKWiiDS/no-look-stagger.txt");
     // Old 3DS: opponents take their vehicle snapshot only on the tick before a drawn frame.
     const bool oppFrameSnapshot=!mkw::isNew3ds()&&!exists("sdmc:/3ds/MKWiiDS/no-opp-frame-snapshot.txt");
+    // Old 3DS: an opponent under the kart effect LOD (+7 set, no +9: its effect group
+    // neither calculates nor draws) steps its effects on every 4th tick only, staggered
+    // by racer. Off-file no-kartfx-lod-thin.txt.
+    const bool kartFxLodThin=!mkw::isNew3ds()&&!exists("sdmc:/3ds/MKWiiDS/no-kartfx-lod-thin.txt");
     const bool ghostTest=kQa&&exists("sdmc:/3ds/MKWiiDS/ghost-test.txt");
     // QA: blue-test.txt "<ticks> [old]" fires a Blue Shell from last place every
     // <ticks> while none is in flight and traces each one's route in runtime.log;
@@ -3628,6 +3632,11 @@ int main() {
                                 }
                             }
                             lavaBeforeRespawn[i]=in.beforeRespawn;
+                            // Thinned LOD racer (kartFxLodThin): its group stays off this tick, as
+                            // calcs/draws below give for a LOD racer without +9; its effects
+                            // catch up on its next stepped tick.
+                            if(kartFxLodThin&&i&&((physicsSteps+i)&3)&&kartFxLod.lod.lod(i)&&!kartFx[i].keepAlive()){
+                                calcGroups&=~mkw::KartFxSlots::groupBit(i);drawGroups&=~mkw::KartFxSlots::groupBit(i);continue;}
                             in.bike=racer->isBike();in.groundStart=status.onBit(St::GroundStart);in.hardLanding=status.onBit(St::HardLanding);in.jumpPad=status.onBit(St::JumpPad);
                             in.chargingSSMT=status.onBit(St::ChargingSSMT);
                             in.countdownAccelerate=K::System::RaceManager::Instance()->stage()==K::System::RaceManager::Stage::Countdown&&racer->inputs()->currentState().accelerate();
