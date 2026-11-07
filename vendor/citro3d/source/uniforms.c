@@ -32,6 +32,64 @@ void C3Di_InvalidateUniformShadows(void)
 	memset(C3Di_FVUnifShadowValid, 0, sizeof(C3Di_FVUnifShadowValid));
 }
 
+// The float uniform pass below in one walk (mkw-3ds): each dirty entry is
+// compared with its shadow once, and a changed one is copied to it as the
+// run that uploads it is found. The same runs, words and shadow state.
+static void C3Di_UpdateFloatUniforms(GPU_SHADER_TYPE type, int offset)
+{
+	bool* dirty = C3D_FVUnifDirty[type];
+	bool* valid = C3Di_FVUnifShadowValid[type];
+	bool* ever = C3Di_FVUnifEverDirty[type];
+	const C3Di_Word* values = (const C3Di_Word*)C3D_FVUnif[type];
+	C3Di_Word* shadow = (C3Di_Word*)C3Di_FVUnifShadow[type];
+	int i = 0;
+	while (i < C3D_FVUNIF_COUNT)
+	{
+		if (!(i & 3))
+		{
+			u32 word;
+			memcpy(&word, __builtin_assume_aligned(&dirty[i], 4), sizeof(word));
+			if (!word)
+			{
+				i += 4;
+				continue;
+			}
+		}
+		if (!dirty[i])
+		{
+			i ++;
+			continue;
+		}
+		const C3Di_Word* v = values + i*4;
+		C3Di_Word* s = shadow + i*4;
+		dirty[i] = false;
+		ever[i] = true;
+		if (valid[i] && v[0] == s[0] && v[1] == s[1] && v[2] == s[2] && v[3] == s[3])
+		{
+			i ++;
+			continue;
+		}
+		s[0] = v[0]; s[1] = v[1]; s[2] = v[2]; s[3] = v[3];
+		valid[i] = true;
+		int j = i + 1;
+		while (j < C3D_FVUNIF_COUNT && dirty[j])
+		{
+			const C3Di_Word* vj = values + j*4;
+			C3Di_Word* sj = shadow + j*4;
+			if (valid[j] && vj[0] == sj[0] && vj[1] == sj[1] && vj[2] == sj[2] && vj[3] == sj[3])
+				break;
+			sj[0] = vj[0]; sj[1] = vj[1]; sj[2] = vj[2]; sj[3] = vj[3];
+			valid[j] = true;
+			dirty[j] = false;
+			ever[j] = true;
+			j ++;
+		}
+		GPUCMD_AddWrite(GPUREG_VSH_FLOATUNIFORM_CONFIG+offset, 0x80000000|i);
+		GPUCMD_AddWrites(GPUREG_VSH_FLOATUNIFORM_DATA+offset, (u32*)&C3D_FVUnif[type][i], (j-i)*4);
+		i = j;
+	}
+}
+
 void C3D_UpdateUniforms(GPU_SHADER_TYPE type)
 {
 	int offset = type == GPU_GEOMETRY_SHADER ? (GPUREG_GSH_BOOLUNIFORM-GPUREG_VSH_BOOLUNIFORM) : 0;
@@ -55,8 +113,12 @@ void C3D_UpdateUniforms(GPU_SHADER_TYPE type)
 	// register (shadow) is not uploaded again. The loop clears every dirty
 	// entry, so with none set it is skipped.
 	const bool* dirty = C3D_FVUnifDirty[type];
-	if (C3D_FastState && !C3D_FVUnifAnyDirty[type])
+	if (C3D_FastState)
+	{
+		if (C3D_FVUnifAnyDirty[type])
+			C3Di_UpdateFloatUniforms(type, offset);
 		i = C3D_FVUNIF_COUNT;
+	}
 	C3D_FVUnifAnyDirty[type] = false;
 	while (i < C3D_FVUNIF_COUNT)
 	{
