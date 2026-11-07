@@ -101,6 +101,21 @@ unsigned RaceItems::objectCount(unsigned type) const{
     if(frame_<blooperBusyUntil_)add(ItemKind::Blooper,1);
     return n;
 }
+void RaceItems::objectCounts(std::array<unsigned,15>& out) const{
+    // objectCount(type) for every type at once: the same sums.
+    out.fill(0);
+    auto add=[&](ItemKind kind,unsigned copies){if(unsigned(kind)<19){const unsigned type=ItemObjects[unsigned(kind)].type;if(type<15)out[type]+=copies;}};
+    for(unsigned i=nextActorSlot(0);i<MaxActors;i=nextActorSlot(i+1))if(actors_[i].active)add(actors_[i].kind,1);
+    for(unsigned i=0;i<count_;++i){
+        const auto& h=hud_[i];
+        if(h.item!=ItemKind::None&&!(h.item==ItemKind::ThunderCloud&&!h.charges))add(h.item,h.charges);
+        if(h.deployed)add(h.heldKind,h.heldCharges);
+        if(h.cloud)add(ItemKind::ThunderCloud,1);
+        if(h.bullet)add(ItemKind::Bullet,1);
+        if(h.pow)add(ItemKind::Pow,i==powUser_?1:0);
+    }
+    if(frame_<blooperBusyUntil_)add(ItemKind::Blooper,1);
+}
 unsigned RaceItems::courseDropWeight(unsigned slot)const{
     if(slot!=6||!woodboxOdds_.ready())return 0;
     auto w=woodboxOdds_.weights();
