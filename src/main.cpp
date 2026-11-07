@@ -658,8 +658,8 @@ int main() {
     // posing, the local racer's pose) run on core 1, within the 30% time limit
     // the audio threads already ask for, while core 0 records the frame; core 0
     // takes any job not yet claimed and runs the jobs' GPU-visible writes
-    // (Renderer::queueJobWrites). Opt-in (core1-jobs.txt) until a console run, for
-    // a gain only in pack racing. (The two Azahar "ceremony stalls" with it on were
+    // (Renderer::queueJobWrites). On by default (no-core1-jobs.txt keeps every job on
+    // core 0); it gains only in pack racing. (The two Azahar "ceremony stalls" with it on were
     // GPs the autopilot finished 4th: that ceremony waits on its board for A and
     // never logged "podium", which the runners waited for.) The worker is only
     // useful while racing, so it stops before the award ceremony and starts again
@@ -672,7 +672,7 @@ int main() {
     };
     bool core1Jobs=false;
     const bool core1CeremonyKeep=kQa&&exists("sdmc:/3ds/MKWiiDS/core1-ceremony-keep.txt");
-    if(!secondCore&&exists("sdmc:/3ds/MKWiiDS/core1-jobs.txt")){
+    if(!secondCore&&!exists("sdmc:/3ds/MKWiiDS/no-core1-jobs.txt")){
         core1Jobs=startCore1Jobs();
         report(core1Jobs?(core1CeremonyKeep?"Old 3DS: presentation jobs on core 1 (30% limit), worker kept through the ceremony":"Old 3DS: presentation jobs on core 1 (30% limit)")
                         :"job worker unavailable: presentation jobs run on core 0");

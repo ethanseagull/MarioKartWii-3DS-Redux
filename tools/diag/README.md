@@ -119,9 +119,8 @@ accessory matrices together with its chassis matrix instead of on their first
 read (the same values). `no-pose-share.txt` evaluates an animation bank's pose
 again for each model it is applied to (race items pose a lit and an unlit
 copy) instead of reusing the pose its other model already holds.
-`core1-jobs.txt` (opt-in) moves the Old 3DS presentation jobs (racer posing,
-the local racer's pose) from core 0 to a job worker on core 1 at 30%. Off by
-default until a console run. The worker stops for the award ceremony and starts
+Old 3DS runs the presentation jobs (racer posing, the local racer's pose) on a
+job worker on core 1 at 30%; `no-core1-jobs.txt` keeps them on core 0. The worker stops for the award ceremony and starts
 again with the next race load; `core1-ceremony-keep.txt` keeps it running.
 The ceremony logs `ceremony hb: ...` lines (phase, frame, tick, drive, sound,
 loader, worker) about once a second and `ceremony watchdog ...` when the main
