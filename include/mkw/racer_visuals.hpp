@@ -2,6 +2,7 @@
 #include <memory>
 #include <citro3d.h>
 #include <mkw/math.hpp>
+#include <mkw/driver_collision_look.hpp>
 namespace mkw {
 class Renderer;
 class Model;
@@ -16,7 +17,7 @@ public:
     void resetAnimation();
     // drawNext false (Old 3DS): no frame is drawn before the next step, so racers
     // not shown up close keep last tick's vehicle snapshot (VehicleAnimation::step).
-    void step(unsigned tick,const RaceItems& items,bool drawNext=true);
+    void step(unsigned tick,const RaceItems& items,bool drawNext=true,std::span<const DriverCollisionLook> collisions={});
     // Old 3DS: a racer whose animated driver was not drawn last frame is presented
     // once per drawn frame (on the tick before it, drawNext), that step standing for
     // the ticks since its last: controller clocks and wheel roll catch up.

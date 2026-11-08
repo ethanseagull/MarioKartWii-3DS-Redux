@@ -327,7 +327,7 @@ void KartCollide::applyKartBump(f32 sign, KartObject *attacker, KartObject *vict
     EGG::Vector3f impulse = lateral * magnitude;
     impulse = impulse - victimUp * impulse.dot(victimUp);
 
-    victimMove->cueBump(magnitude); // USA 0x8056c388
+    victimMove->cueBump(magnitude, attacker->param()->playerIdx(), impulse); // USA 0x8056c388
 
     KartDynamics *victimDynamics = victim->dynamics();
     victimDynamics->addForce(impulse);

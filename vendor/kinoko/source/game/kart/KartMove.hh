@@ -374,9 +374,11 @@ public:
         m_soundCues.bumpedBy |= static_cast<u16>(1u << playerIdx);
         m_soundCues.contact = contact;
     }
-    void cueBump(f32 magnitude) {
+    void cueBump(f32 magnitude, u8 other, const EGG::Vector3f &impulse) {
         cueSound(SoundCue::Bump);
         m_soundCues.bump = magnitude;
+        m_soundCues.bumpTarget = other;
+        m_soundCues.bumpImpulse = impulse;
     }
     void cuePowerObjectContact(bool wall) {
         m_soundCues.powerObjectContact |= wall ? 2 : 1;
@@ -404,6 +406,8 @@ public:
         bool objectHit = false; ///< Presentation observer; no physics/audio cue changes.
         EGG::Vector3f objectContact = EGG::Vector3f::zero;
         f32 bump = 0.0f;  ///< The last bump's signed magnitude.
+        u8 bumpTarget = 255; ///< Source of the accepted cooldown-gated bump.
+        EGG::Vector3f bumpImpulse = EGG::Vector3f::zero;
         u8 fallVoice = 0; ///< The fall voice type (0x16-0x19).
         u8 soundZone = 0; ///< The last sound trigger zone (KCL type 0x18 variant).
         bool poihanaThrow = false; ///< USA80739588 -> KartEffect806a325c.

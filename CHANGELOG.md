@@ -32,6 +32,7 @@ Changes on top of upstream 0.9.4 (merged Nov 4, 2026; earlier changes were made 
 
 # Racing and visuals
 
+- Drivers look at the racer who bumps them, as on the Wii (from upstream).
 - GP, VS and Battle pause as on the Wii: the race stays frozen behind the menu without its HUD, with Continue Game and Quit Game. A controls diagram of the console shows above them (`tools/cook_pause_controls.py`, with Old and New 3DS photos supplied by smol_bug). Time Trials keeps its five buttons.
 - CPU racers drift manually, as on the Wii, and after a fall their path restarts from their respawn point.
 - Course, sky and course object textures are cooked to a texel budget instead of a flat 256 cap, so long road strips, skies and baked shadow maps keep more of the Wii's detail. The Old 3DS loads the larger ones one mip level down.
@@ -328,6 +329,8 @@ Changes retained on top of the existing port, grouped by feature; withdrawn expe
 - Corrected dropped-item lifetimes, capacity-based recycling and landing states.
 
 # Scene materials and rendering
+
+- Smoothed item-box detail changes by blending the original sampled colours while retaining their sparkle pass.
 
 - Restored the original white environment highlights in the Thunder Cloud's eyes.
 

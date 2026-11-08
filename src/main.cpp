@@ -14,6 +14,7 @@
 #include <game/field/CollisionDirector.hh>
 #include <game/field/KColData.hh>
 #include <mkw/driver_item_signals.hpp>
+#include <mkw/driver_collision_look.hpp>
 #include <mkw/driver_look_data.hpp>
 #include <mkw/driver_look_gate.hpp>
 #include <mkw/sound_ids.hpp>
@@ -1857,6 +1858,7 @@ int main() {
     auto kartFxStorage=std::make_unique<std::array<mkw::KartItemEffects,mkw::KartFxSlots::MaxRacers>>();
     auto& kartFx=*kartFxStorage;
     std::array<K::Kart::KartMove::SoundCues,mkw::KartFxSlots::MaxRacers> kartContacts{};
+    std::array<mkw::DriverCollisionLook,12> driverCollisionLooks{};
     // EffectManager's kart effect LOD (docs/VFX_RESEARCH.md): the ranking, and each racer's
     // clip on the presented camera, taken after a step for the next one (race start: visible,
     // distance FLT_MAX).
@@ -3154,6 +3156,11 @@ int main() {
                     kartContacts={};
                     for(unsigned i=0;i<std::min<unsigned>(raceGrid.count(),kartContacts.size());++i)
                         kartContacts[i]=K::Kart::KartObjectManager::Instance()->object(i)->move()->peekSoundCues();
+                    std::array<mkw::Vec3,12> collisionPositions{};
+                    const unsigned collisionRacers=std::min<unsigned>(raceGrid.count(),collisionPositions.size());
+                    for(unsigned i=0;i<collisionRacers;++i)collisionPositions[i]=vec(K::Kart::KartObjectManager::Instance()->object(i)->pos());
+                    for(unsigned i=0;i<collisionRacers;++i)driverCollisionLooks[i].step(kartContacts[i].bumpTarget,
+                        vec(kartContacts[i].bumpImpulse),collisionPositions[i],std::span(collisionPositions.data(),collisionRacers));
                     auto* kart=K::Kart::KartObjectManager::Instance()->object(0);auto* race=K::System::RaceManager::Instance();
                     // Item blasts shake the camera of a nearby racer (OnKill -> RMCU 0x8059e034).
                     for(const auto& e:raceItems->events()){
@@ -3469,7 +3476,7 @@ int main() {
                 if(fullRace)signals.finishType=mkw::driverFinishType(raceGrid.rank(),K::System::RaceConfig::Instance()->raceScenario().playerCount);
                 signals.accelerating=kart->status().onBit(K::Kart::eStatus::Accelerate);signals.braking=kart->status().onBit(K::Kart::eStatus::Brake);
                 signals.countdown=unsigned(K::System::RaceManager::Instance()->stage())<=1;
-                if(fullRace)mkw::driverItemSignals(signals,*raceItems,0);
+                if(fullRace){mkw::driverItemSignals(signals,*raceItems,0);driverCollisionLooks[0].apply(signals,driverChoice);}
                 signals.blink=physicsSteps%180==0;
                 driverPose=driverController.step(signals);
                 mkw::simprof::add(mkw::simprof::PresPlayer,postTickStart);
@@ -3479,7 +3486,7 @@ int main() {
                  const bool captureTick=raceCapture&&menu.simulates()&&!intro.active()&&
                      (!captureLive||(physicsSteps-captureBase)%raceCaptureEvery==0);
                  MKW_SIM_SCOPE(PresOpponents);if(fullRace)opponents.step(physicsSteps,*raceItems,
-                    !oppFrameSnapshot||accumulator<1||captureTick||(autoplay&&!benchmark&&intro.active()));}
+                    !oppFrameSnapshot||accumulator<1||captureTick||(autoplay&&!benchmark&&intro.active()),driverCollisionLooks);}
                 if(driver){
                     mkw::DriverLookParameters parameters;const auto& choice=selectedVehicle();
                     const bool available=mkw::driverLookParameters(choice.character,choice.vehicle,parameters);
@@ -3487,7 +3494,7 @@ int main() {
                     driverAnimation.stepLook(driverAnimation.find(mkw::driverVehicleClipName(driverPose.clipName,bike)),driverPose.frame,physicsSteps,
                         available&&signals.hasLookTarget&&mkw::driverLookAllowed(driverPose.clipName,
                             kart->status().onBit(K::Kart::eStatus::InATrick),kart->status().onBit(K::Kart::eStatus::OverZipper)),
-                        signals.lookTarget,seated,true,parameters,driverPose,signals.handleRelativeBike,kart->physics()->pose()[1,0],kart->physics()->pose()[1,2]);
+                        signals.lookTarget,seated,true,parameters,driverPose,signals.handleRelativeBike,kart->physics()->pose()[1,0],kart->physics()->pose()[1,2],signals.lookResponse);
                 }
                 // Clip clocks observe every source tick, including the iterations
                 // where no graphics are submitted.
