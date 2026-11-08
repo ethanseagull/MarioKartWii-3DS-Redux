@@ -20,10 +20,17 @@ struct Guard {
  Guard(){RecursiveLock_Lock(&linearLock);}
  ~Guard(){RecursiveLock_Unlock(&linearLock);}
 };
+// libctru treats an empty free list as "not set up yet": the allocation after
+// one that used the last free byte re-creates the whole heap as free, on top of
+// every live block. So an allocation that would empty the list fails instead.
+void* keepLinearUsable(void* p){
+ if(p&&__real_linearSpaceFree()==0){__real_linearFree(p);return nullptr;}
+ return p;
+}
 }
 extern "C" {
-void* __wrap_linearAlloc(size_t size){Guard g;return __real_linearAlloc(size);}
-void* __wrap_linearMemAlign(size_t size,size_t alignment){Guard g;return __real_linearMemAlign(size,alignment);}
+void* __wrap_linearAlloc(size_t size){Guard g;return keepLinearUsable(__real_linearAlloc(size));}
+void* __wrap_linearMemAlign(size_t size,size_t alignment){Guard g;return keepLinearUsable(__real_linearMemAlign(size,alignment));}
 void* __wrap_linearRealloc(void* mem,size_t size){Guard g;return __real_linearRealloc(mem,size);}
 size_t __wrap_linearGetSize(void* mem){Guard g;return __real_linearGetSize(mem);}
 void __wrap_linearFree(void* mem){Guard g;__real_linearFree(mem);}
@@ -47,10 +54,12 @@ u32 __real_vramSpaceFree(void);
 namespace mkw::gpuGuard {
 #ifndef MKW_RELEASE
 void lockContended();
+void refusedLastBlock();
 void allocated(void* p,size_t size,void* caller);
 void freeing(void* p,void* caller);
 #else
 inline void lockContended(){}
+inline void refusedLastBlock(){}
 inline void allocated(void*,size_t,void*){}
 inline void freeing(void*,void*){}
 #endif
@@ -61,12 +70,19 @@ struct VramGuard {
  VramGuard(){if(RecursiveLock_TryLock(&vramLock)!=0){mkw::gpuGuard::lockContended();RecursiveLock_Lock(&vramLock);}} // TryLock: 0 = acquired
  ~VramGuard(){RecursiveLock_Unlock(&vramLock);}
 };
+// As for LINEAR, but libctru restarts VRAM when both banks' free lists are
+// empty: both screens' render targets then get handed out again, and the two
+// screens draw over each other until the game is closed.
+void* keepVramUsable(void* p){
+ if(p&&__real_vramSpaceFree()==0){__real_vramFree(p);mkw::gpuGuard::refusedLastBlock();return nullptr;}
+ return p;
+}
 }
 extern "C" {
-void* __wrap_vramAlloc(size_t size){VramGuard g;void* p=__real_vramAlloc(size);mkw::gpuGuard::allocated(p,size,__builtin_return_address(0));return p;}
-void* __wrap_vramAllocAt(size_t size,vramAllocPos pos){VramGuard g;void* p=__real_vramAllocAt(size,pos);mkw::gpuGuard::allocated(p,size,__builtin_return_address(0));return p;}
-void* __wrap_vramMemAlign(size_t size,size_t alignment){VramGuard g;void* p=__real_vramMemAlign(size,alignment);mkw::gpuGuard::allocated(p,size,__builtin_return_address(0));return p;}
-void* __wrap_vramMemAlignAt(size_t size,size_t alignment,vramAllocPos pos){VramGuard g;void* p=__real_vramMemAlignAt(size,alignment,pos);mkw::gpuGuard::allocated(p,size,__builtin_return_address(0));return p;}
+void* __wrap_vramAlloc(size_t size){VramGuard g;void* p=keepVramUsable(__real_vramAlloc(size));mkw::gpuGuard::allocated(p,size,__builtin_return_address(0));return p;}
+void* __wrap_vramAllocAt(size_t size,vramAllocPos pos){VramGuard g;void* p=keepVramUsable(__real_vramAllocAt(size,pos));mkw::gpuGuard::allocated(p,size,__builtin_return_address(0));return p;}
+void* __wrap_vramMemAlign(size_t size,size_t alignment){VramGuard g;void* p=keepVramUsable(__real_vramMemAlign(size,alignment));mkw::gpuGuard::allocated(p,size,__builtin_return_address(0));return p;}
+void* __wrap_vramMemAlignAt(size_t size,size_t alignment,vramAllocPos pos){VramGuard g;void* p=keepVramUsable(__real_vramMemAlignAt(size,alignment,pos));mkw::gpuGuard::allocated(p,size,__builtin_return_address(0));return p;}
 void* __wrap_vramRealloc(void* mem,size_t size){VramGuard g;mkw::gpuGuard::freeing(mem,__builtin_return_address(0));void* p=__real_vramRealloc(mem,size);mkw::gpuGuard::allocated(p,size,__builtin_return_address(0));return p;}
 size_t __wrap_vramGetSize(void* mem){VramGuard g;return __real_vramGetSize(mem);}
 void __wrap_vramFree(void* mem){VramGuard g;mkw::gpuGuard::freeing(mem,__builtin_return_address(0));__real_vramFree(mem);}
@@ -228,6 +244,7 @@ void lockContended(){
  static unsigned count=0;
  if(++count<=50)log("VRAM allocator already in use by another thread (contention %u)",count);
 }
+void refusedLastBlock(){log("VRAM exactly full: refusing the last free block (next line) so libctru does not restart");}
 void allocated(void* p,size_t size,void* caller){
  RecursiveLock_Lock(&tableLock);
  noteThread("allocation",caller);
