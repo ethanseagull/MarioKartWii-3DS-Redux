@@ -255,6 +255,7 @@ Changes retained on top of the existing port, grouped by feature; withdrawn expe
 
 # Award ceremonies and staff credits
 
+- The ceremony, its result board and the credits use the original game's buttons: A advances, and START skips the credits' driving section only on an ending already seen.
 - Restored live diffuse lighting and rotating metal reflections for all nine award trophies while retaining their gold, silver and bronze material frames.
 - Moved the award trophy and its emitter left with the result-page exit transition before hiding them off-screen.
 - Added Grand Prix award scenes, camera rails, actors and trophy presentation.

@@ -2701,7 +2701,7 @@ int main() {
             const auto ending=mkw::staffEnding(licenseSaves[slot],awardResults);
             if(outcome==mkw::AwardSceneResult::Complete&&ending!=mkw::StaffEnding::None){
                 outcome=mkw::runStaff(renderer,awardResults,licenseSaves[slot].nativeMii,
-                    ending==mkw::StaffEnding::True,report,scenes);
+                    ending==mkw::StaffEnding::True,mkw::licenseCompleted(licenseSaves[slot].unlockFlags,ending==mkw::StaffEnding::True?56:57),report,scenes);
                 if(outcome==mkw::AwardSceneResult::Complete){
                     auto updated=licenseSaves[slot];const unsigned bit=ending==mkw::StaffEnding::True?56:57;
                     updated.unlockFlags[bit/32]|=1u<<(bit%32);
