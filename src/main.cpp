@@ -690,7 +690,7 @@ int main() {
     // DIAG: memory latency and core-1 share, once, when running as an Old 3DS (mkw/hw_probe.hpp).
     // DIAG sim-profile.txt (or ab-alternate.txt): the per-tick sim profile and this
     // probe. Off otherwise: the profile's ~140 clock syscalls a tick and the probe's
-    // 1 s core-1 spin would slow the Old 3DS play builds.
+    // 1 s core-1 spin would slow Old 3DS release-mode builds.
     const bool simProfileWanted=kQa&&(exists("sdmc:/3ds/mkw-3ds/sim-profile.txt")||exists("sdmc:/3ds/mkw-3ds/ab-alternate.txt"));
     if(simProfileWanted&&!mkw::isNew3ds()){char text[256];mkw::hwprobe::run(text,sizeof text);report(text);}
     if(mkw::old3dsTestBuild){char text[120];snprintf(text,sizeof text,"Old 3DS test build: speedup off, Old 3DS paths, no ZL/ZR/C-stick; application memory %lu KB",(unsigned long)osGetMemRegionSize(MEMREGION_APPLICATION)/1024);report(text);}

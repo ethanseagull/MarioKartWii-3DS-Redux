@@ -25,8 +25,8 @@ if not (WORK / 'generated').is_dir():
 GEN = WORK / 'generated'
 # MKW_DIAG_VARIANT=o3dstest: the Old 3DS test build for a New 3DS (include/mkw/console_model.hpp),
 # in build/diag-o3dstest/ (its own objects, so the two builds don't rebuild each other).
-# MKW_DIAG_VARIANT=o3dsplay: the same Old 3DS test build in release mode (MKW_RELEASE: no QA
-# hooks, runtime log, profiler or SD test files), for play builds; build/diag-o3dsplay/, same title.
+# MKW_DIAG_VARIANT=o3dsrelease: the same Old 3DS test build in release mode (MKW_RELEASE: no QA
+# hooks, runtime log, profiler or SD test files), for testing by hand; build/diag-o3dsrelease/, same title.
 VARIANT = os.environ.get('MKW_DIAG_VARIANT', '')
 OUT = ROOT / ('build/diag-' + VARIANT if VARIANT else 'build/diag')
 NAME = 'mkw-3ds-diag'
@@ -39,7 +39,7 @@ NAME = 'mkw-3ds-diag'
 #   off       ignore tools/pgo/kinoko/.
 #   (unset)   Kinoko sources with a profile in tools/pgo/kinoko/ are built with it
 #             (tools/build.py does the same); the rest as before.
-# Old 3DS variants only (o3dstest, o3dsplay): the port's sources are built with LTO as
+# Old 3DS variants only (o3dstest, o3dsrelease): the port's sources are built with LTO as
 # well (MKW_PORT_LTO=off: without), and with their profiles from tools/pgo/port/
 # (MKW_PORT_PGO=off: without). Kinoko's getters then inline into the port's calls.
 PGO = os.environ.get('MKW_KINOKO_PGO', '')
@@ -47,7 +47,7 @@ if PGO == 'generate':
     OUT = OUT.with_name(OUT.name + '-pgogen')
 KINOKO_SOURCE = ROOT / 'vendor/kinoko/source'
 PGO_DIR = ROOT / 'tools/pgo/kinoko'
-OLD3DS = VARIANT in ('o3dstest', 'o3dsplay')
+OLD3DS = VARIANT in ('o3dstest', 'o3dsrelease')
 PORT_SOURCE = ROOT / 'src'
 PORT_PGO_DIR = ROOT / 'tools/pgo/port'
 PORT_LTO = OLD3DS and os.environ.get('MKW_PORT_LTO', '') != 'off'
@@ -69,12 +69,12 @@ env = dict(os.environ)
 env['PATH'] = os.pathsep.join([str(SDK / 'devkitARM/bin'), str(SDK / 'tools/bin'), env['PATH']])
 
 ARCH = ['-march=armv6k', '-mtune=mpcore', '-mfloat-abi=hard', '-mtp=soft']
-PLAY = VARIANT == 'o3dsplay'
+RELEASE_VARIANT = VARIANT == 'o3dsrelease'
 FLAGS = ARCH + ['-O2', '-g', '-mword-relocations', '-ffunction-sections', '-fdata-sections', '-ffp-contract=off',
-                '-std=gnu++23', '-D__3DS__', '-DREVOLUTION', *(['-DMKW_RELEASE'] if PLAY else ['-DMKW_AUTO_PROFILE', '-DMKW_WRAP_ROMFS_MOUNT']), '-DKINOKO_QUIET',
+                '-std=gnu++23', '-D__3DS__', '-DREVOLUTION', *(['-DMKW_RELEASE'] if RELEASE_VARIANT else ['-DMKW_AUTO_PROFILE', '-DMKW_WRAP_ROMFS_MOUNT']), '-DKINOKO_QUIET',
                 '-fno-exceptions', '-fno-rtti', '-fcheck-new', '-fno-strict-aliasing',
                 '-ffile-prefix-map=' + ROOT.as_posix() + '/=']
-FLAGS += {'': [], 'o3dstest': ['-DMKW_OLD3DS_TEST'], 'o3dsplay': ['-DMKW_OLD3DS_TEST']}[VARIANT]
+FLAGS += {'': [], 'o3dstest': ['-DMKW_OLD3DS_TEST'], 'o3dsrelease': ['-DMKW_OLD3DS_TEST']}[VARIANT]
 FLAGS += ['-I' + p.as_posix() for p in [SHADER, ROOT / 'vendor/kinoko/include', ROOT / 'vendor/kinoko/source', ROOT / 'include',
                                         ROOT / 'vendor/cfl-mii/include', ROOT / 'vendor/citro3d/include', SDK / 'libctru/include', GEN]]
 
@@ -156,7 +156,7 @@ def main():
                 'romfsMountFromTitle',  # DIAG: logs the Mii resource fallback (cfl-fallback-test.txt)
                 'GX_DisplayTransfer',  # DIAG: checks each screen transfer (gpu-guard.log)
                 'C3D_TexBind']  # DIAG: 4-bit VRAM textures on units 1 and 2 (gpu-guard.log)
-    if PLAY:
+    if RELEASE_VARIANT:
         wrappers.remove('romfsMountFromTitle');wrappers.remove('GX_DisplayTransfer');wrappers.remove('C3D_TexBind')
     subprocess.run([str(CXX), *ARCH, '-flto=auto', *(['-fprofile-generate'] if PGO == 'generate' else []), '-specs=3dsx.specs', '-Wl,--gc-sections', '-Wl,-Map=' + str(OUT / (NAME + '.map')),
                     *['-Wl,--wrap=' + w for w in wrappers], '@' + str(rsp), str(WORK / 'libCFL.a'), str(WORK / 'libcitro3d.a'),
