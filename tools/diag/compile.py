@@ -143,9 +143,11 @@ def main():
     rsp = OUT / 'objects.rsp'
     rsp.write_text('\n'.join('"' + p.as_posix() + '"' for p in objects))
     wrappers = ['linearAlloc', 'linearMemAlign', 'linearRealloc', 'linearGetSize', 'linearFree', 'linearSpaceFree', 'fopen',
-                'romfsMountFromTitle']  # DIAG: logs the Mii resource fallback (cfl-fallback-test.txt)
+                'vramAlloc', 'vramAllocAt', 'vramMemAlign', 'vramMemAlignAt', 'vramRealloc', 'vramGetSize', 'vramFree', 'vramSpaceFree',
+                'romfsMountFromTitle',  # DIAG: logs the Mii resource fallback (cfl-fallback-test.txt)
+                'GX_DisplayTransfer']  # DIAG: checks each screen transfer (gpu-guard.log)
     if PLAY:
-        wrappers.remove('romfsMountFromTitle')
+        wrappers.remove('romfsMountFromTitle');wrappers.remove('GX_DisplayTransfer')
     subprocess.run([str(CXX), *ARCH, '-flto=auto', *(['-fprofile-generate'] if PGO == 'generate' else []), '-specs=3dsx.specs', '-Wl,--gc-sections', '-Wl,-Map=' + str(OUT / (NAME + '.map')),
                     *['-Wl,--wrap=' + w for w in wrappers], '@' + str(rsp), str(WORK / 'libCFL.a'), str(WORK / 'libcitro3d.a'),
                     '-L' + str(SDK / 'libctru/lib'), '-lctru', '-lm', '-o', str(OUT / (NAME + '.elf'))], env=env, check=True)

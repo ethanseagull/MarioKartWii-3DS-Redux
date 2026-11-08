@@ -823,7 +823,8 @@ class Builder:
         objects = compile_set('game', gxx, sources, flags, REPO, out / 'objects')
         rsp = out / 'objects.rsp'
         rsp.write_text('\n'.join('"' + p.as_posix() + '"' for p in objects))
-        wrappers = ['linearAlloc', 'linearMemAlign', 'linearRealloc', 'linearGetSize', 'linearFree', 'linearSpaceFree', 'fopen']
+        wrappers = ['linearAlloc', 'linearMemAlign', 'linearRealloc', 'linearGetSize', 'linearFree', 'linearSpaceFree', 'fopen',
+                    'vramAlloc', 'vramAllocAt', 'vramMemAlign', 'vramMemAlignAt', 'vramRealloc', 'vramGetSize', 'vramFree', 'vramSpaceFree']
         elf = out / 'mkw-3ds.elf'
         self.run('link', [gxx, *arch, '-flto=auto', '-specs=3dsx.specs', '-Wl,--gc-sections', '-Wl,-Map=' + str(out / 'mkw-3ds.map'),
                           *['-Wl,--wrap=' + w for w in wrappers], '@' + str(rsp), out / 'libCFL.a', out / 'libcitro3d.a',
