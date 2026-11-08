@@ -1,208 +1,114 @@
 # Mario Kart Wii 3DS Redux
 
-A native Nintendo 3DS port of Mario Kart Wii, based on
-[Epic0522's MarioKartWii-3DS-Redux](https://github.com/Epic0522/MarioKartWii-3DS-Redux),
-dudewhat's original port and MiniBandit's continuation.
+A native Nintendo 3DS port of Mario Kart Wii. This fork builds on
+[Epic0522's Redux](https://github.com/Epic0522/MarioKartWii-3DS-Redux) and adds
+Old 3DS support, ghosts, graphics settings and general optimization.
+
+No game files are included. Everything is converted from your own disc.
 
 ## Features
 
-- Grand Prix in 50cc, 100cc, 150cc and Mirror, with cup progression, unlocks and award ceremonies.
-- Time Trials with saved records, solo and team VS, Balloon Battle and Coin Runners.
-- All characters and vehicles, including unlockables and native 3DS Mii drivers.
-- Four license slots with their own settings, rules and records.
-- Dual-screen menus, race results and maps, with the original materials, animations, particles and audio.
-- Optional dynamic shadows (Settings), and a speedometer and notification LED effects (License Settings).
+- All 32 courses in Grand Prix, Time Trials and VS
+- Grand Prix at 50cc, 100cc, 150cc and Mirror
+- VS solo or in teams, Balloon Battle and Coin Runners
+- All characters and vehicles, unlocks, award ceremonies and credits
+- Mii drivers
+- Four licenses with their own settings and records
+- Staff ghosts, Expert Staff ghosts and your own saved ghosts
+- Dual-screen menus, results and maps using the game's original art, effects and audio
+- Runs on New 3DS and Old 3DS, optimized for both
+- Settings for texture quality, dynamic shadows, bloom and opponent detail
+- Speedometer and notification LED effects
 
 ## What you need
 
-- Your own **Mario Kart Wii USA** disc image (game ID **RMCE01**) as an ISO or WBFS. Convert RVZ or NKit images first.
-- A PC with about 40 GB free and an internet connection. The build is tested on Windows.
-- A 3DS with custom firmware (Luma3DS) and FBI.
-
-No game files are included in this repository. Everything the game needs is
-converted from your own disc.
+- Your own **Mario Kart Wii USA** disc (RMCE01) as an ISO or WBFS
+- A PC with an internet connection and about 30 GB free
+- A 3DS with Luma3DS and FBI, and about 3 GB free on the SD card
+- DSP firmware dumped with DSP1, if your console has never had homebrew sound
 
 ## Building
 
-Already built an older version? See [Updating](#updating).
+On Windows:
 
-The steps are for Windows. On Linux or macOS install the same tools with your
-package manager and use `python3.12` instead of `py -3.12`.
+1. Download this repository and unzip it, or clone it.
+2. Double-click `Build.bat` and select your disc.
 
-### Set up (once)
+Anything missing, including Python, Git and devkitPro, is downloaded for you.
+When it's done it deletes the converted data, leaving about 3 GB.
 
-1. Install [Python](https://www.python.org/downloads/) **3.12 (64-bit)**.
-   Use this version for the build: newer Python versions may require compiling
-   dependencies such as `imagequant` with Microsoft C++ Build Tools. The
-   commands below select 3.12 even if another Python version is installed.
-2. Install [Git](https://git-scm.com/download/win).
-3. Install [devkitPro](https://devkitpro.org/wiki/Getting_Started) and select
-   the 3DS packages (devkitARM, libctru and 3ds-tools).
-4. Open the devkitPro MSYS2 shell from the Start menu and run `pacman -S gcc`.
-   The build compiles a few small helper programs for your PC with it. On
-   Linux or macOS any recent `g++` or `clang++` works.
-5. Get the code with `git clone`.
+Or run the build script yourself. Install Python 3.12, Git, devkitPro with
+`3ds-dev`, and a C++ compiler (on Windows, `pacman -S gcc` in devkitPro's MSYS2
+shell). Then, from a clone:
 
-   ```sh
-   git clone https://github.com/ethanseagull/MarioKartWii-3DS-Redux.git
-   ```
-
-Node.js, ffmpeg, makerom and bannertool are used from `PATH` if you have
-them. Otherwise the build downloads the versions pinned in
-[tools/release/toolchain.lock.json](tools/release/toolchain.lock.json) and
-checks their SHA-256. Node and ffmpeg are only downloaded on Windows. ffmpeg
-needs the soxr resampler, which most builds have.
-
-### Build
-
-6. Open a terminal (PowerShell is fine) in the folder you cloned and run:
-
-   ```sh
-   py -3.12 tools/build.py --disc "C:/Games/RMCE01.wbfs"
-   ```
-
-   The first run takes about an hour on a fast PC and needs nothing from you
-   while it runs. It sets up `.venv`, fetches the converters pinned in
-   [dependencies.json](dependencies.json), extracts the disc, converts every
-   course, kart, menu, movie and sound, compiles Citro3D, CFL and the game,
-   and builds the HOME banner. If it stops with an error, fix what it names
-   and run the same command again: it continues where it stopped. Logs are in
-   `build/standard/logs/`.
-
-The results are in `build/standard/output/`:
-
-- `MKW-3DS-REDUX-v<version>.cia`, the game (shown as "Mario Kart Wii 3DS" on the HOME Menu);
-- `sd/3ds/`, the game data for the SD card;
-- `mkw-3ds.3dsx`, the same game for the Homebrew Launcher.
-
-### If the Python environment uses another version
-
-The builder reuses `.venv`, so installing Python 3.12 does not change an
-environment created with a different version. If the builder reports a
-version mismatch, or `imagequant` fails with "Microsoft Visual C++ 14.0 or
-greater is required", remove only `.venv` from the cloned folder and rerun:
-
-```powershell
-Remove-Item -LiteralPath .venv -Recurse -Force
+```sh
 py -3.12 tools/build.py --disc "C:/Games/RMCE01.wbfs"
 ```
 
-Use your own disc path. On Linux or macOS, remove `.venv` and use
-`python3.12` for the build command. Keep `build/standard`; completed build
-stages are still there and the build resumes from them.
+On Linux or macOS use `python3.12`. Only Windows is tested. Add
+`--delete-converted` to delete the converted data afterwards.
+
+The first build takes about an hour. If it stops, run it again and it picks up
+where it left off. The results are in `build/standard/output`.
+
+## Installing
+
+1. Copy the `sd/3ds` folder to the root of your SD card.
+2. Install the `.cia` file with FBI, or run `mkw-3ds.3dsx` from the Homebrew Launcher.
 
 ## Updating
 
-If you've built an older version, update from the folder you cloned:
-
-Install Python 3.12 if needed. If your existing `.venv` uses another version,
-follow [the environment recovery steps above](#if-the-python-environment-uses-another-version).
-This keeps completed build stages in `build/standard`.
+Run `Build.bat` again, or from your clone:
 
 ```sh
 git pull
 py -3.12 tools/build.py --disc "C:/Games/RMCE01.wbfs"
 ```
 
-Only what changed gets rebuilt, so this usually takes a few minutes (longer
-if an early cook stage changed). Copy the new `sd/3ds` over the old one on
-your SD card and install the new CIA with FBI. Your saves
-(`rksys.dat`, `license-options-*.dat`, `last-license.txt`, `mii-*.3dsmii`,
-`settings.dat` and the `ghosts` folder) aren't touched.
+Only what changed is rebuilt, which usually takes a few minutes. An update that
+changes game data does a full build. Then repeat the install steps. Your saves
+are kept.
 
-The game data is now three packs (`menu.pak`, `race.pak`, `stream.pak`) and
-`mkw-3ds.3dsx`. If your card has data from an older build, delete everything
-else in `sd:/3ds/mkw-3ds/` except your saves before copying: old loose files
-still work but slow down every file the game opens.
+If you're coming from a version before 1.0.0, first delete everything in
+`sd:/3ds/mkw-3ds/` except `rksys.dat`, `settings.dat`, `last-license.txt`, the
+`license-options-*.dat` and `mii-*.3dsmii` files, and the `ghosts` folder.
 
-Builds from Nov 5 to 7, 2026 installed as "Mario Kart WiiDS" and kept their
-data in `sd:/3ds/MKWiiDS/`. This build uses `sd:/3ds/mkw-3ds/` again: move
-your saves (the files above) back there, then delete `sd:/3ds/MKWiiDS/` and
-the Mario Kart WiiDS title in FBI.
-
-If `git pull` complains about local changes, run `git stash` first, or
-`git reset --hard origin/main` to throw them away.
-
-If you downloaded a ZIP instead of cloning, clone the repo (step 5) and do a
-full build; the builder only works in a git clone. The same goes for builds
-made by hand before `tools/build.py` existed: the first run builds everything.
-
-If an updated build fails, fix the reported issue and run the same command
-again; it picks up where it stopped. If the game still looks wrong, add `--from extract` to redo all the
-cooking, or delete `build/standard` to start from scratch.
-
-To see what's new, check [CHANGELOG.md](CHANGELOG.md), or compare
-`git log -1` with the
-[latest commit](https://github.com/ethanseagull/MarioKartWii-3DS-Redux/commits/main).
-The version in the CIA's file name doesn't change with every commit.
-
-## Installing
-
-7. Copy the `sd/3ds` folder to the root of your SD card. The game data ends
-   up in `sd:/3ds/mkw-3ds/`.
-8. Copy the CIA to the SD card and install it with FBI. Or skip the CIA and
-   start `mkw-3ds.3dsx` from the Homebrew Launcher.
-
-If your console has never run a homebrew game with sound, dump its DSP
-firmware once with DSP1.
-
-## Build options
-
-`--work DIR` builds somewhere other than `build/standard`,
-`--cfl FILE` packages your own CFL_Res.dat,
-`--jobs N` sets how many converters run at once (default 4), and
-`--from STAGE` runs one stage and everything after it again
-(`--list-stages` lists them).
+See [CHANGELOG.md](CHANGELOG.md) for what's new.
 
 ## Controls
 
 | Button | Action |
 | --- | --- |
-| Circle Pad | Steer and choose the direction of an item throw |
+| Circle Pad | Steer, tilt in the air, aim items |
 | A | Accelerate |
-| B | Brake / reverse |
-| R | Hop and drift; trick off a ramp |
-| Y / D-pad Up | Trick / bike wheelie |
-| X / ZL | Look behind |
+| B | Brake and reverse |
+| R | Hop and drift, trick off a ramp |
 | L | Use item |
-| D-pad / ZR | Boost panel trick |
+| Y | Trick in the Circle Pad's direction, wheelie on bikes |
+| D-pad | Trick in that direction, Up for a wheelie |
+| ZR (New 3DS) | Same as D-pad Up |
+| X, or ZL on New 3DS | Look behind |
 | START | Pause |
-| SELECT | Toggle the speedometer |
-| Touch screen | Switch the bottom-screen map view |
-
-## Development
-
-- [docs/MANUAL-BUILD.md](docs/MANUAL-BUILD.md): what each build stage does and
-  how to run one by hand.
-- [docs/MANUAL-RESOURCE-STAGES.md](docs/MANUAL-RESOURCE-STAGES.md): every
-  converter with its inputs and outputs.
-- [docs/HOME-BANNER.md](docs/HOME-BANNER.md): how the HOME banner is made.
-- [tools/diag](tools/diag/README.md): the diagnostic build and the benchmark.
-- [docs/NOTIFICATION_LED.md](docs/NOTIFICATION_LED.md): the LED effects.
-
-When reporting a problem, say which console (or emulator) you used, the mode,
-the course and how to make it happen. Keep game files, generated files, saves
-and system resources out of pull requests.
 
 ## Credits
 
-- **dudewhat**: the original Mario Kart Wii 3DS port.
-- **MiniBandit**: the continuation this project builds on.
-- **Epic**: Redux development and integration.
-- **DarthMDev**: Old 3DS drawing performance fix, race sound fixes and menu cadence.
-- **Codiak540**: Old 3DS performance testing and research (course-object detail distance, particle limit, performance log idea).
-- **janedoemk3ds**: Old 3DS performance research with Codiak540 (lighter models, visibility culling, faster course drawing; PR #40 in mkw-3ds).
-- **vabold / Kinoko**: Mario Kart Wii physics.
-- **noclip.website**: BRRES model parsing.
-- **LagoLunatic / gclib**: disc and texture utilities.
-- **devkitPro, libctru and Citro3D**: 3DS development and graphics libraries.
-- **CFL contributors**: native Mii rendering.
-- **ogws and mkw decompilation projects**: references for original behavior.
-- **Project CTR (makerom) and bannertool contributors**: packaging tools.
+- dudewhat: the original port
+- MiniBandit: the continuation this project builds on
+- Epic: Redux
+- DarthMDev: Old 3DS performance, race sound and menu fixes
+- Codiak540 and janedoemk3ds: Old 3DS testing and research
+- smol_bug: console photos for the pause screen
+- vabold: Kinoko, the physics engine
+- noclip.website: BRRES model parsing
+- LagoLunatic: gclib
+- devkitPro, libctru and Citro3D
+- CFL contributors: Mii rendering
+- ogws and the mkw decompilation projects
+- Project CTR (makerom) and bannertool
 
 ## License
 
-See [LICENSE](LICENSE), [NOTICE](NOTICE) and [licenses/](licenses/). The root
-MIT text does not cover every file; NOTICE explains which parts have no
-declared license yet. Mario Kart Wii is copyright Nintendo. This is an
-unofficial fan project, not affiliated with Nintendo.
+See [LICENSE](LICENSE), [NOTICE](NOTICE) and [licenses/](licenses/). The MIT
+text doesn't cover every file; NOTICE explains which parts have no declared
+license yet. Mario Kart Wii is copyright Nintendo. This is an unofficial fan
+project and isn't affiliated with Nintendo.

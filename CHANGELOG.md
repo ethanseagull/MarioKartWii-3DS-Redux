@@ -6,7 +6,7 @@ Changes on top of upstream 0.9.4 (merged Nov 4, 2026; earlier changes were made 
 
 # Title and SD folder
 
-- The game uses upstream's title (`000400000F4B5700`), HOME Menu name and `sd:/3ds/mkw-3ds/` again. Builds from Nov 5 to 7 used their own; see the README to move saves back.
+- The game uses upstream's title (`000400000F4B5700`), HOME Menu name and `sd:/3ds/mkw-3ds/` again. Builds from Nov 5 to 7 used their own.
 
 # Settings
 
@@ -113,6 +113,7 @@ Changes on top of upstream 0.9.4 (merged Nov 4, 2026; earlier changes were made 
 
 # Building
 
+- `Build.bat` builds everything on Windows from just your disc image and deletes the converted data afterwards. Code-only updates still take minutes without it.
 - `tools/build.py` builds the CIA and SD folder from your disc in one command, downloading the pinned converters and tools it needs.
 - After a `git pull`, `tools/build.py` cooks again each stage whose tool or input files changed, and the stages after it, instead of keeping their old output.
 - Rebuilds no longer keep stale textures and models from an earlier cook: the menu text, course mipmap and vehicle LOD cooks check that what they reuse came from the current code (size, format, padding, cook version), so a rebuilt work folder gives the same packs as a fresh clone.

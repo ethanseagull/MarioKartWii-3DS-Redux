@@ -340,8 +340,8 @@ def bootstrap(args):
     sdk = devkitpro()
     work = Path(args.work).expanduser().resolve()
     work.mkdir(parents=True, exist_ok=True)
-    if not (work / 'state.json').is_file() and shutil.disk_usage(work).free < 40 << 30:
-        raise BuildError(f'A full build needs about 40 GB free in {work}.')
+    if not (work / 'state.json').is_file() and shutil.disk_usage(work).free < 30 << 30:
+        raise BuildError(f'A full build needs about 30 GB free in {work}.')
     tools = provision(work, sdk)
     write_json(work / 'tools.json', tools)
     source = work / 'source'
@@ -349,7 +349,8 @@ def bootstrap(args):
     fetch_dependencies(source)
     prepare_venv(source)
     command = [str(VENV_PYTHON), str(Path(__file__).resolve()), '--worker', '--disc', str(disc), *(['--cfl', str(cfl)] if cfl else []),
-               '--work', str(work), '--jobs', str(args.jobs)] + (['--from', args.start] if args.start else [])
+               '--work', str(work), '--jobs', str(args.jobs)] + (['--from', args.start] if args.start else []) + (
+                   ['--delete-converted'] if args.delete_converted else [])
     return subprocess.run(command).returncode
 
 
@@ -466,6 +467,7 @@ class Builder:
         self.state_path = self.work / 'state.json'
         self.disc, self.jobs = Path(args.disc or '-'), max(1, args.jobs)
         self.cfl = Path(args.cfl) if args.cfl else None
+        self.delete_after = args.delete_converted
         self.stages = self.define_stages()
 
     def prepare(self):
@@ -490,6 +492,10 @@ class Builder:
         # One temp folder for every tool: MSYS2's g++ misreads a temp path
         # inherited from another MSYS shell such as Git Bash.
         temp = self.work / 'tmp'
+        # GCC's LTO writes this path into a makefile unquoted, so it can't hold a space.
+        if ' ' in str(temp):
+            temp = Path(temp.anchor if os.name == 'nt' else '/tmp') / 'mkw-3ds-tmp'
+        self.temp = temp
         temp.mkdir(parents=True, exist_ok=True)
         env.update(TMP=temp.as_posix(), TEMP=temp.as_posix(), TMPDIR=temp.as_posix())
         self.env = env
@@ -950,6 +956,46 @@ class Builder:
             'banner_sha256': digest(art / 'banner-startgrid.bnr'), 'disc_sha256': read_json(self.state_path)['disc_sha256']})
         self.cia_path = cia
 
+    # -- after the converted data is deleted ------------------------------
+
+    def delete_converted(self, state, key):
+        """Frees the cooks' output once the packs are built. Compile needs only
+        the generated headers in source/include, so a later code-only update
+        still works; anything that changes game data does a full build."""
+        for folder in (self.root / 'build', self.root / 'sd-card', self.root / 'data', self.root / 'assets',
+                       self.work / 'package', self.work / 'checkpoints'):
+            if folder.exists():
+                shutil.rmtree(folder)
+        state['converted_deleted'] = key
+        write_json(self.state_path, state)
+        log('Deleted the converted data.')
+
+    def packs_present(self):
+        return all((self.output / 'sd/3ds/mkw-3ds' / name).is_file() for name in ('menu.pak', 'race.pak', 'stream.pak'))
+
+    def update_game(self):
+        """The game's files after a code-only update; the packs are unchanged."""
+        out, sd = self.output, self.output / 'sd/3ds/mkw-3ds'
+        (self.work / 'package').mkdir(exist_ok=True)
+        shutil.copy2(self.compile_dir / 'mkw-3ds.3dsx', sd / GAME_3DSX)
+        manifest = read_json(out / 'sd-manifest.json')
+        manifest[GAME_3DSX] = {'storage': 'loose', 'bytes': (sd / GAME_3DSX).stat().st_size, 'sha256': digest(sd / GAME_3DSX)}
+        write_json(out / 'sd-manifest.json', manifest)
+        shutil.copy2(self.compile_dir / 'mkw-3ds.3dsx', out / GAME_3DSX)
+        shutil.copy2(self.compile_dir / 'mkw-3ds.elf', out / 'mkw-3ds.elf')
+        for name in ('LICENSE', 'NOTICE'):
+            shutil.copy2(REPO / name, out / name)
+        shutil.copytree(REPO / 'licenses', out / 'licenses', dirs_exist_ok=True)
+        self.cia()
+
+    def report_done(self, began):
+        if self.temp.parent != self.work:
+            shutil.rmtree(self.temp, ignore_errors=True)
+        log(f'\nDone (this run: {(time.monotonic() - began) / 60:.0f} min):\n'
+            f'  CIA:        {self.cia_path}\n'
+            f'  SD folder:  {self.output / "sd"}  (copy its 3ds folder to the SD card root)\n'
+            f'  3DSX:       {self.output / GAME_3DSX}')
+
     # -- stage table ------------------------------------------------------
 
     def define_stages(self):
@@ -1096,7 +1142,7 @@ class Builder:
         index = index or SourceIndex(read_json(self.work / 'source-files.json', []))
         keys, chain = {}, ''
         for name, action, outputs in self.stages:
-            if outputs is None:
+            if outputs is None and name != 'package':
                 continue
             args, files = self.uses[name]
             used = set().union(*(index.glob(f) for f in files)) if files else set()
@@ -1171,6 +1217,19 @@ class Builder:
         recorded = state['fingerprints']
         write_json(self.state_path, state)
         began = time.monotonic()
+        # package's fingerprint chains every cook's, so a match means the packs still hold.
+        deleted = state.get('converted_deleted')
+        if deleted and not start and deleted == keys['package'] and self.packs_present():
+            log('[1/2] compile  (game data is unchanged, so the packs are kept)')
+            self.compile()
+            log('[2/2] package')
+            self.update_game()
+            self.report_done(began)
+            return
+        if deleted:
+            log('Game data changed, so this is a full build.')
+            del state['converted_deleted']
+            write_json(self.state_path, state)
         for index, (name, action, outputs) in enumerate(self.stages, 1):
             done = name in state['stages'] and outputs is not None and all(p.exists() for p in outputs)
             if done and recorded.get(name) == keys[name]:
@@ -1193,10 +1252,9 @@ class Builder:
                 state['stages'].append(name)
                 recorded[name] = keys[name]
                 write_json(self.state_path, state)
-        log(f'\nDone (this run: {(time.monotonic() - began) / 60:.0f} min):\n'
-            f'  CIA:        {self.cia_path}\n'
-            f'  SD folder:  {self.output / "sd"}  (copy its 3ds folder to the SD card root)\n'
-            f'  3DSX:       {self.output / GAME_3DSX}')
+        if self.delete_after:
+            self.delete_converted(state, keys['package'])
+        self.report_done(began)
 
 
 def disc_identity(path, previous):
@@ -1262,6 +1320,7 @@ def main():
     parser.add_argument('--work', default=str(REPO / 'build/standard'), help='work directory (default: build/standard)')
     parser.add_argument('--jobs', type=int, default=min(4, os.cpu_count() or 4), help='parallel converter jobs (default: 4)')
     parser.add_argument('--from', dest='start', metavar='STAGE', help='run this stage and all later ones again')
+    parser.add_argument('--delete-converted', action='store_true', help='delete the converted data afterwards (about 20 GB); code-only updates still work')
     parser.add_argument('--list-stages', action='store_true', help='print the stage order and exit')
     parser.add_argument('--worker', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
