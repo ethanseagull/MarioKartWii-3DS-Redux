@@ -573,8 +573,8 @@ void Renderer::requestStadiumScreen(const Bounds* screens,unsigned count){
 void Renderer::requestBloom(const CourseBloom& settings,const float* clip){
     if(!recording()){requestBloomNow(settings,clip);return;}
     // Bloom's VRAM targets (unless reserved at load) and LINEAR vertices:
-    // create them here, once, with the render thread idle.
-    if(settings.enabled()&&!bloomVertices_&&!bloomFailed_){drain();initBloom();}
+    // create them here, once, with the render thread idle (never for Bloom: Off).
+    if(bloomEnabled&&settings.enabled()&&!bloomVertices_&&!bloomFailed_){drain();initBloom();}
     auto& c=command<RequestBloomCommand>();c.settings=&settings;c.clipped=clip!=nullptr;
     if(clip)std::memcpy(c.clip,clip,sizeof c.clip);
 }
