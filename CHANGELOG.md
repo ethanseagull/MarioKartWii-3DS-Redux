@@ -1,12 +1,16 @@
 # Changelog
 
-## After 0.9.4
+## 1.0.0
 
 Changes on top of upstream 0.9.4 (merged Nov 4, 2026; earlier changes were made on 0.8.14).
 
 # Title and SD folder
 
 - The game uses upstream's title (`000400000F4B5700`), HOME Menu name and `sd:/3ds/mkw-3ds/` again. Builds from Nov 5 to 7 used their own; see the README to move saves back.
+
+# Old 3DS
+
+- The game now runs on Old 3DS models. Texture Quality, Dynamic Shadows, Bloom and Opponent Detail stay at their lightest settings there.
 
 # Performance (New 3DS)
 
@@ -83,6 +87,10 @@ Changes on top of upstream 0.9.4 (merged Nov 4, 2026; earlier changes were made 
 
 # Fixes
 
+- Both screens no longer draw over each other after a race change or a return to the title. When video memory filled up exactly, libctru handed out the screens' memory again.
+- Bloom: Off no longer allocates Bloom's video memory.
+- Mii faces keep their dark eyes and brows.
+- More course textures fit in video memory on New 3DS.
 - Time Trials no longer place Moonview Highway's Bob-omb cars, as on the Wii.
 - Award ceremonies no longer fail at the driving scene: its effect bank is now cooked.
 - The select and controller sounds no longer play a semitone flat.
