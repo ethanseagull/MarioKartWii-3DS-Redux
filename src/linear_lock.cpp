@@ -198,6 +198,7 @@ FILE* __wrap_fopen(const char* path,const char* mode){
 //  - each screen transfer: the size must match its screen, and the source must
 //    lie in a live VRAM block.
 #include <cstdarg>
+#include <citro3d.h>
 namespace mkw::gpuGuard {
 namespace {
 struct Block {uintptr_t at;size_t size;u32 thread;void* caller;};
@@ -250,6 +251,9 @@ void freeing(void* p,void* caller){
  else if(!tableFull)log("DOUBLE FREE or unknown VRAM free %08lx (caller %08lx)",(unsigned long)uintptr_t(p),(unsigned long)uintptr_t(caller));
  RecursiveLock_Unlock(&tableLock);
 }
+void logUnitFourBit(int unit,const C3D_Tex* tex,void* caller){
+ log("4-BIT VRAM TEXTURE ON UNIT %d: %08lx %ux%u format %d (caller %08lx)",unit,(unsigned long)uintptr_t(tex->data),unsigned(tex->width),unsigned(tex->height),int(tex->fmt),(unsigned long)uintptr_t(caller));
+}
 void checkTransfer(u32* in,u32 indim,u32* out,u32 outdim){
  static unsigned bad=0;
  if(bad>=100)return;
@@ -275,6 +279,22 @@ void checkTransfer(u32* in,u32 indim,u32* out,u32 outdim){
   RecursiveLock_Unlock(&tableLock);
  }
 }
+}
+// A 4-bit texture (ETC1, L4, A4) in VRAM sampled by texture unit 1 or 2 can
+// destabilize the PICA and corrupt later output on both screens (3dbrew
+// GPU/Pitfalls); Azahar doesn't show it. Each such texture is logged once.
+extern "C" void __real_C3D_TexBind(int unit,C3D_Tex* tex);
+extern "C" void __wrap_C3D_TexBind(int unit,C3D_Tex* tex){
+ if(unit>0&&tex&&tex->data){
+  const uintptr_t at=uintptr_t(tex->data);
+  if(at>=0x1F000000&&at<0x1F600000&&(tex->fmt==GPU_ETC1||tex->fmt==GPU_L4||tex->fmt==GPU_A4)){
+   static uintptr_t seen[64];static unsigned seenCount=0;bool known=false;
+   for(unsigned i=0;i<seenCount;++i)known|=seen[i]==at;
+   if(!known){if(seenCount<64)seen[seenCount++]=at;
+    mkw::gpuGuard::logUnitFourBit(unit,tex,__builtin_return_address(0));}
+  }
+ }
+ __real_C3D_TexBind(unit,tex);
 }
 extern "C" Result __real_GX_DisplayTransfer(u32* inadr,u32 indim,u32* outadr,u32 outdim,u32 flags);
 extern "C" Result __wrap_GX_DisplayTransfer(u32* inadr,u32 indim,u32* outadr,u32 outdim,u32 flags){
