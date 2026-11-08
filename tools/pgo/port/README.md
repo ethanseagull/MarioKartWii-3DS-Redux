@@ -12,7 +12,7 @@ Profiles and LTO only steer code generation: physics and the picture are unchang
 (checked with the 12-kart state digest and byte-compared race frames). `tools/build.py`
 (the New 3DS release) does not use them.
 
-Current profiles: old3ds fd71499, DIAG o3dstest, Azahar Old 3DS, Mario Circuit and Coconut
+Current profiles: old3ds ba218cd, DIAG o3dstest, Azahar Old 3DS, Mario Circuit and Coconut
 Mall with 12 racers (CPU AI driving the player), default settings (core-1 jobs off).
 
 A profile that no longer matches its source is ignored for the functions that changed.

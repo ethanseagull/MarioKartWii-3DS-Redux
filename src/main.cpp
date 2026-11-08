@@ -2422,7 +2422,7 @@ int main() {
                 // Old 3DS: under 1.5 MiB of LINEAR left, the pause menu loads its textures
                 // when it opens instead (releasing the racers if needed). Build G stalled
                 // in Azahar right after a load that left 1.4 MiB (SNES Ghost Valley 2), so
-                // this was 3 MiB; at old3ds 4da18ca races that skipped the preload ran
+                // this was 3 MiB; at old3ds 1fadde2 races that skipped the preload ran
                 // whole races with 0.44-2.6 MiB (Bowser's Castle 441 KB), races use under
                 // 64 KB more after their load, and race end has 1.3 MiB more again
                 // (captures/2026-11-08-o3ds-fixes/a-keep).

@@ -20,5 +20,5 @@ Kinoko changes:
 3. Replace this folder's `.gcda` files with the contents of `pgo/vendor/kinoko/source/`
    (and `tools/pgo/port/`'s with `pgo/src/`: the same training run profiles both).
 
-Current profile: old3ds fd71499, Mario Circuit and Coconut Mall, 12 racers (CPU AI driving
+Current profile: old3ds ba218cd, Mario Circuit and Coconut Mall, 12 racers (CPU AI driving
 the player), Azahar Old 3DS mode, DIAG o3dstest build (trained with the port's profiles).
