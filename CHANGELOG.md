@@ -1,13 +1,12 @@
 # Changelog
 
-## This fork, after 0.9.4
+## After 0.9.4
 
-Changes in ethanseagull/MarioKartWii-3DS-Redux on top of upstream 0.9.4 (merged Nov 4, 2026; earlier fork changes were made on 0.8.14).
+Changes on top of upstream 0.9.4 (merged Nov 4, 2026; earlier changes were made on 0.8.14).
 
 # Title and SD folder
 
-- The game installs as its own title (`000400000F4B6000`), next to upstream's instead of over it, and keeps its data and saves in `sd:/3ds/MKWiiDS/` instead of `sd:/3ds/mkw-3ds/`. Move your saves across by hand (see the README).
-- The HOME Menu shows it as "Mario Kart WiiDS" by ethanseagull, and the build's files are `MarioKartWiiDS-v<version>.cia` and `MarioKartWiiDS.3dsx` (the DIAG build's `MarioKartWiiDS-v<version>-DIAG.cia`).
+- The game uses upstream's title (`000400000F4B5700`), HOME Menu name and `sd:/3ds/mkw-3ds/` again. Builds from Nov 5 to 7 used their own; see the README to move saves back.
 
 # Performance (New 3DS)
 

@@ -1,9 +1,8 @@
-# Mario Kart Wii 3DS Redux (New 3DS fork)
+# Mario Kart Wii 3DS Redux
 
-A native Nintendo 3DS port of Mario Kart Wii. This is
-[ethanseagull](https://github.com/ethanseagull)'s fork of
+A native Nintendo 3DS port of Mario Kart Wii, based on
 [Epic0522's MarioKartWii-3DS-Redux](https://github.com/Epic0522/MarioKartWii-3DS-Redux),
-which builds on dudewhat's original port and MiniBandit's continuation.
+dudewhat's original port and MiniBandit's continuation.
 
 ## Features
 
@@ -72,9 +71,9 @@ needs the soxr resampler, which most builds have.
 
 The results are in `build/standard/output/`:
 
-- `MarioKartWiiDS-v<version>.cia`, the game (shown as "Mario Kart WiiDS" on the HOME Menu);
+- `MKW-3DS-v<version>.cia`, the game (shown as "Mario Kart Wii 3DS" on the HOME Menu);
 - `sd/3ds/`, the game data for the SD card;
-- `MarioKartWiiDS.3dsx`, the same game for the Homebrew Launcher.
+- `mkw-3ds.3dsx`, the same game for the Homebrew Launcher.
 
 ### If the Python environment uses another version
 
@@ -112,16 +111,14 @@ your SD card and install the new CIA with FBI. Your saves
 `settings.dat` and the `ghosts` folder) aren't touched.
 
 The game data is now three packs (`menu.pak`, `race.pak`, `stream.pak`) and
-`MarioKartWiiDS.3dsx`. If your card has data from an older build, delete everything
-else in `sd:/3ds/MKWiiDS/` except your saves before copying: old loose files
+`mkw-3ds.3dsx`. If your card has data from an older build, delete everything
+else in `sd:/3ds/mkw-3ds/` except your saves before copying: old loose files
 still work but slow down every file the game opens.
 
-Earlier builds (up to 0.9.4) kept their data in `sd:/3ds/mkw-3ds/` and
-installed over upstream's title. This build is its own title with its own
-folder, `sd:/3ds/MKWiiDS/`. To keep your licenses, records, ghosts and
-settings, move your saves (the files above) from `sd:/3ds/mkw-3ds/` into
-`sd:/3ds/MKWiiDS/`. Then delete `sd:/3ds/mkw-3ds/`, and delete the old title
-in FBI if you no longer want it.
+Builds from Nov 5 to 7, 2026 installed as "Mario Kart WiiDS" and kept their
+data in `sd:/3ds/MKWiiDS/`. This build uses `sd:/3ds/mkw-3ds/` again: move
+your saves (the files above) back there, then delete `sd:/3ds/MKWiiDS/` and
+the Mario Kart WiiDS title in FBI.
 
 If `git pull` complains about local changes, run `git stash` first, or
 `git reset --hard origin/main` to throw them away.
@@ -142,9 +139,9 @@ The version in the CIA's file name doesn't change with every commit.
 ## Installing
 
 7. Copy the `sd/3ds` folder to the root of your SD card. The game data ends
-   up in `sd:/3ds/MKWiiDS/`.
+   up in `sd:/3ds/mkw-3ds/`.
 8. Copy the CIA to the SD card and install it with FBI. Or skip the CIA and
-   start `MarioKartWiiDS.3dsx` from the Homebrew Launcher.
+   start `mkw-3ds.3dsx` from the Homebrew Launcher.
 
 If your console has never run a homebrew game with sound, dump its DSP
 firmware once with DSP1.
@@ -192,7 +189,6 @@ and system resources out of pull requests.
 - **dudewhat**: the original Mario Kart Wii 3DS port.
 - **MiniBandit**: the continuation this project builds on.
 - **Epic**: Redux development and integration.
-- **ethanseagull**: this fork.
 - **DarthMDev**: Old 3DS drawing performance fix, race sound fixes and menu cadence.
 - **Codiak540**: Old 3DS performance testing and research (course-object detail distance, particle limit, performance log idea).
 - **janedoemk3ds**: Old 3DS performance research with Codiak540 (lighter models, visibility culling, faster course drawing; PR #40 in mkw-3ds).

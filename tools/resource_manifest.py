@@ -31,7 +31,7 @@ def roster_asset(relative):
  candidate=roster_overlay/relative
  return candidate if candidate.is_file() else assets/relative
 # Explicit allowlist excludes QA markers, ghosts, receipts and obsolete models.
-files={ROOT/'build/mkw-3ds.3dsx':Path('MarioKartWiiDS.3dsx'),ROOT/'data/extracted/Race/Common.szs':Path('Race/Common.szs')}
+files={ROOT/'build/mkw-3ds.3dsx':Path('mkw-3ds.3dsx'),ROOT/'data/extracted/Race/Common.szs':Path('Race/Common.szs')}
 files[assets/'mii/parts.mpr']=Path('mii/parts.mpr')
 # License portraits use the native 3DS resource supplied by the owner.
 native_mii=ROOT/'build/native-mii-resource'

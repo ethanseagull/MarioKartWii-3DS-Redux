@@ -3,7 +3,7 @@
     slow-job timings, sound stats, full-quality.txt toggle, subsystem logs).
   - MKW_AUTO_PROFILE: every race is profiled automatically from the end of
     the intro to results; per-second, spike and summary CSVs are written to
-    sdmc:/3ds/MKWiiDS/ on pause, race end and exit.
+    sdmc:/3ds/mkw-3ds/ on pause, race end and exit.
 
 Inputs: the standard build's work directory (tools/build.py; MKW_WORK,
 default build/standard): compile/libCFL.a and compile/libcitro3d.a (built

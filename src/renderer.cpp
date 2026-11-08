@@ -2421,7 +2421,7 @@ void Renderer::effectListNow(const RaceEffects& effects,const ef::DrawList& list
         constexpr const char* diagnosed[]={"rk_itemBox","rk_bananaSmk","rk_miniTurbo","rk_spinHalfL","rk_spinHalfR","rk_spinL","rk_spinR","rk_driftSpark1LB_Spark00","rk_driftSpark1LB_Spark01","rk_driftSpark1RB_Spark00","rk_driftSpark1RB_Spark01","rk_driftSpark1CB_Spark00","rk_driftSpark1CB_Spark01"};
         for(unsigned i=0;i<std::size(diagnosed);++i)if(!std::strcmp(b.res->name,diagnosed[i])&&!(state.diagnosticMask&(1u<<i))){
             state.diagnosticMask|=1u<<i;
-            if(FILE* log=std::fopen("sdmc:/3ds/MKWiiDS/effects-state.txt","a")){
+            if(FILE* log=std::fopen("sdmc:/3ds/mkw-3ds/effects-state.txt","a")){
                 std::fprintf(log,"draw generation=%u root=%s vertices=%lu missingTexture=%u linear=%lu\n",effects.generation(),b.res->name,(unsigned long)count,missing,(unsigned long)linearSpaceFree());
                 std::fclose(log);
             }

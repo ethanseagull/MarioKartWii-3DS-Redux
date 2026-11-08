@@ -5,9 +5,9 @@ This source snapshot continues dudewhat's original Mario Kart Wii 3DS port
 and MiniBandit's continuation, with Redux development by epicreds. It does
 not carry the original repositories' commit history.
 
-This repository, github.com/ethanseagull/MarioKartWii-3DS-Redux, is
-ethanseagull's fork of the Redux snapshot (Epic0522/MarioKartWii-3DS-Redux,
-0.8.14). Its own changes are listed at the top of CHANGELOG.md.
+This repository is a fork of the Redux snapshot
+(Epic0522/MarioKartWii-3DS-Redux, 0.8.14). Its own changes are listed at the
+top of CHANGELOG.md.
 
 The inherited LICENSE grants MIT terms for MiniBandit's contributions.
 The inherited upstream notice states that dudewhat's original release did

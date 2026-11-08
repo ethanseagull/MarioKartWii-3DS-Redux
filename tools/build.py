@@ -33,8 +33,8 @@ VENV_PYTHON = VENV / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
 BUILD_PYTHON = (3, 12)
 # Packages needed beyond requirements.txt are listed there too (gltflib for the banner).
 DEPENDENCIES = [('noclip', 'noclip'), ('gclib', 'gclib'), ('cfl_tool', 'cfl-tool'), ('pycgfx', 'pycgfx')]
-TITLE_ID = '000400000F4B6000'
-GAME_3DSX = 'MarioKartWiiDS.3dsx'  # shipped name; the compile stage's own file stays mkw-3ds.3dsx
+TITLE_ID = '000400000F4B5700'
+GAME_3DSX = 'mkw-3ds.3dsx'  # shipped name, the same as the compile stage's file
 CXX_STD = 'c++23'
 
 
@@ -686,8 +686,8 @@ class Builder:
         icon = Image.open(self.root / 'tools/release/artwork/icon.png').convert('RGBA')
         for n in (48, 24):
             icon.resize((n, n), Image.Resampling.LANCZOS).save(art / f'icon{n}.png')
-        self.run('banner-icon', [self.tools['bannertool'], 'makesmdh', '-s', 'Mario Kart WiiDS', '-l', 'Mario Kart WiiDS',
-                                 '-p', 'ethanseagull', '-i', art / 'icon48.png', '-si', art / 'icon24.png', '-o', art / 'icon.icn'])
+        self.run('banner-icon', [self.tools['bannertool'], 'makesmdh', '-s', 'Mario Kart Wii 3DS', '-l', 'Mario Kart Wii 3DS Redux',
+                                 '-p', 'Redux', '-i', art / 'icon48.png', '-si', art / 'icon24.png', '-o', art / 'icon.icn'])
         self.banner_sound(art)
 
     def banner_sound(self, art):
@@ -879,7 +879,7 @@ class Builder:
             self.run('pakpack-' + name, [pakpack, *args, stage / f'{name}-order.txt', archives[-1], '@' + str(stage / f'{name}-loose.txt')])
 
         # SD folder: the three packs and the 3DSX.
-        sd = out / 'sd/3ds/MKWiiDS'
+        sd = out / 'sd/3ds/mkw-3ds'
         if (out / 'sd').exists():
             shutil.rmtree(out / 'sd')
         sd.mkdir(parents=True)
@@ -902,7 +902,6 @@ class Builder:
         report = (self.logs / 'slim-check.log').read_text()
         if not report.startswith('0 packed duplicates'):
             raise BuildError('Loose copies of packed files remain in the SD folder: ' + report.splitlines()[0])
-        (out / 'mkw-3ds.3dsx').unlink(missing_ok=True)  # builds before the rename
         shutil.copy2(self.compile_dir / 'mkw-3ds.3dsx', out / GAME_3DSX)
         shutil.copy2(self.compile_dir / 'mkw-3ds.elf', out / 'mkw-3ds.elf')
         for name in ('LICENSE', 'NOTICE'):
@@ -919,7 +918,7 @@ class Builder:
             raise BuildError('tools/release/mkw-3ds.rsf no longer has the expected RomFs block.')
         # External-SD title: an empty embedded RomFS would hide the SD resources.
         (self.work / 'package/external-sd.rsf').write_text(rsf.replace(block, ''))
-        cia = out / f'MarioKartWiiDS-v{version}.cia'
+        cia = out / f'MKW-3DS-v{version}.cia'
         want = title_version()
         self.run('makerom', [self.tools['makerom'], '-f', 'cia', '-target', 't', '-exefslogo', '-elf', self.compile_dir / 'mkw-3ds.elf',
                              '-rsf', self.work / 'package/external-sd.rsf', '-icon', art / 'icon.icn', '-banner', art / 'banner-startgrid.bnr',
