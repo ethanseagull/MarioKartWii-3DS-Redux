@@ -354,12 +354,14 @@ void RaceHud::stepWorld(const RaceItems& items,Vec3 cameraBackward,bool started)
     {
         auto& m=*impl_;int kind=-1;float nearest=ShellWarningDistance;Vec3 position{};
         const auto& p=Kinoko::Kart::KartObjectManager::Instance()->object(0)->pos();
-        if(started)for(const auto& a:items.actors()){
+        if(started)items.forEachActorSlotRead([&](unsigned slot){
+            const auto& a=items.actors()[slot];
             if(!a.active||a.target!=0||a.explosion||a.scattered||
-               (a.kind!=ItemKind::RedShell&&a.kind!=ItemKind::BlueShell))continue;
+               (a.kind!=ItemKind::RedShell&&a.kind!=ItemKind::BlueShell))return true;
             const float distance=length(a.visualPosition()-Vec3{p.x,p.y,p.z});
             if(distance<=nearest){nearest=distance;kind=int(a.kind);position=a.visualPosition();}
-        }
+            return true;
+        });
         // CtrlRaceChase 807e7260..7324 and807e8f18..9048 also warn of
         // powered racers behind us: Star, Bullet, Mega, then Thunder Cloud.
         // Keep targeted shells above this fallback, and omit team-mates.
@@ -453,9 +455,12 @@ void RaceHud::stepWorld(const RaceItems& items,Vec3 cameraBackward,bool started)
 }
 void RaceHud::drawWorld(Renderer& renderer,const RaceItems& items,Vec3 viewer,unsigned tick){
     std::array<bool,21> needed{};
-    for(const auto& actor:items.actors())if(actor.active&&unsigned(actor.kind)<needed.size()&&
+    // Live slots only (forEachActorSlotRead): every loop here needs actor.active.
+    const auto& actors=items.actors();
+    items.forEachActorSlotRead([&](unsigned n){const auto& actor=actors[n];
+        if(actor.active&&unsigned(actor.kind)<needed.size()&&
         !(actor.kind==ItemKind::Bobomb&&actor.explosion)&&dot(actor.position-viewer,actor.position-viewer)<22000.f*22000.f)
-        needed[unsigned(actor.kind)]=true;
+        needed[unsigned(actor.kind)]=true;return true;});
     for(unsigned player=0;player<Kinoko::System::RaceConfig::Instance()->raceScenario().playerCount;++player){
         const auto& effect=items.hud(player);needed[15]|=bool(effect.bullet);needed[14]|=bool(effect.cloud);
         if(effect.deployed&&unsigned(effect.heldKind)<needed.size())needed[unsigned(effect.heldKind)]=true;
@@ -515,9 +520,10 @@ void RaceHud::drawWorld(Renderer& renderer,const RaceItems& items,Vec3 viewer,un
         t.r[2].x=x.z;t.r[2].y=y.z;t.r[2].z=z.z;t.r[2].w=position.z;
         if(renderer.visible(*model,t))shadows[shadowCount++]={model.get(),t};
     };
-    for(const auto& actor:items.actors())if(actor.active&&!actor.explosion&&
+    items.forEachActorSlotRead([&](unsigned n){const auto& actor=actors[n];
+        if(actor.active&&!actor.explosion&&
         dot(actor.position-viewer,actor.position-viewer)<22000.f*22000.f)
-        shadow(actor.kind,actor.visualPosition(),releasedItemVisual(actor));
+        shadow(actor.kind,actor.visualPosition(),releasedItemVisual(actor));return true;});
     for(unsigned player=0;player<Kinoko::System::RaceConfig::Instance()->raceScenario().playerCount;++player){
         const auto& effect=items.hud(player);if(!effect.deployed)continue;
         for(unsigned slot=0;slot<3;++slot)if(effect.heldMask&(1u<<slot)){
@@ -545,10 +551,11 @@ void RaceHud::drawWorld(Renderer& renderer,const RaceItems& items,Vec3 viewer,un
     }
     // Leave the uniforms as the last drawBox would, whether or not any was drawn.
     if(boxesInRange){renderer.clearEnvironmentUv();renderer.setUvOffset(0,0);}
-    for(const auto& actor:items.actors())if(actor.active&&unsigned(actor.kind)<21&&dot(actor.position-viewer,actor.position-viewer)<22000.f*22000.f){
+    items.forEachActorSlotRead([&](unsigned n){const auto& actor=actors[n];
+        if(!(actor.active&&unsigned(actor.kind)<21&&dot(actor.position-viewer,actor.position-viewer)<22000.f*22000.f))return true;
         const bool blast=(actor.kind==ItemKind::Bobomb||actor.kind==ItemKind::BlueShell)&&actor.explosion;
         const bool fullFake=actor.kind==ItemKind::FakeBox&&fullBoxDetail(actor.visualPosition(),viewer);
-        auto& model=blast?impl_->bombCore:impl_->staticModels[unsigned(actor.kind)];if(!model)continue;
+        auto& model=blast?impl_->bombCore:impl_->staticModels[unsigned(actor.kind)];if(!model)return true;
         Vertex* originalVertices=model->vertices;
         if(blast&&impl_->bombFrames)model->vertices=impl_->bombFrames+std::min(unsigned(actor.age),impl_->bombFrameCount-1)*model->vertexCount;
         const Vec3 position=actor.visualPosition();
@@ -556,7 +563,7 @@ void RaceHud::drawWorld(Renderer& renderer,const RaceItems& items,Vec3 viewer,un
         if(actor.kind==ItemKind::FakeBox){
             fakeBoxTransform(t,position,{actor.scale,actor.scale,actor.scale},actor.age);
             if(fullFake||!quality.tooSmall({model->minimum,model->maximum},t,camera))drawBox(renderer,*model,FakeBoxMaterials,FakeBoxInnerSRT,t,tick,true,boxEnvironmentBlend(position,viewer));
-            model->vertices=originalVertices;continue;
+            model->vertices=originalVertices;return true;
         }
         const auto visual=releasedItemVisual(actor);
         const auto x=visual.right*visual.scale.x,y=visual.up*visual.scale.y,z=visual.forward*visual.scale.z;
@@ -569,7 +576,7 @@ void RaceHud::drawWorld(Renderer& renderer,const RaceItems& items,Vec3 viewer,un
             else renderer.draw(*model,t);
         }
         model->vertices=originalVertices;
-    }
+        return true;});
     if(blooper.clip&&impl_->models[12]&&impl_->animations[12]){
         // GessoScreen::UpdateModel anchors the model to the racer position:
         // start (0,150,-100), attack (0,180,-weightDistance), weight scale.

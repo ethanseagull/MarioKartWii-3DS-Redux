@@ -3,6 +3,7 @@
 // Hardware rules (docs/HARDWARE.md, Galaxy/BOTW ports): dspfirm.cdc may be
 // absent (silent run), DSP_FlushDataCache before queueing, and teardown resets
 // channels, drops wave buffer references, then frees memory a frame later.
+#include "mkw/console_model.hpp"
 #include <mkw/sound_system.hpp>
 #include <mkw/sound_scene.hpp>
 #include <mkw/menu_movie_audio.hpp>
@@ -1075,7 +1076,7 @@ bool SoundSystem::start() {
  // (the system core is time sliced; docs/AUDIO_SOURCE.md); else core 0
  // above the main thread (short bursts once per DSP frame).
  s32 mainPriority = 0x30; svcGetThreadPriority(&mainPriority, CUR_THREAD_HANDLE);
- bool n3ds = false; APT_CheckNew3DS(&n3ds);
+ bool n3ds=mkw::isNew3ds();
  int core = n3ds ? 2 : 1;
  if (!n3ds) { u32 limit = 0; APT_GetAppCpuTimeLimit(&limit); if (limit < 30) APT_SetAppCpuTimeLimit(30); }
  s->audioThread = threadCreate(&Impl::audioEntry, s, 32 * 1024, 0x18, core, false);

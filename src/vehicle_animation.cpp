@@ -56,7 +56,7 @@ void VehicleAnimation::reset(){
     luma_.reset();lumaFrame_=0;
     body_=handle_=handleBase_=identity();for(auto& m:wheels_)m=identity();for(auto& m:wheelFrames_)m=identity();
     for(auto& m:accessories_)m=identity();accessorySet_=0;roll_={};travel_={};radii_={};display_={};wheelLocal_={};count_=0;vehicle_=~0u;bike_=false;driveFrame_=15;
-    base_=handleSource_=identity();for(auto& m:wheelSources_)m=identity();tirePositions_={};bspRadii_={};kartScale_={1,1,1};steering_=0;wheelMotion_={};dirty_=false;
+    base_=handleSource_=identity();for(auto& m:wheelSources_)m=identity();tirePositions_={};bspRadii_={};kartScale_={1,1,1};steering_=0;wheelMotion_={};dirty_=partsDirty_=false;
 }
 Vec3 VehicleAnimation::displayVec(unsigned offset) const{return {display_[offset/4],display_[offset/4+1],display_[offset/4+2]};}
 void VehicleAnimation::readParameters(unsigned vehicle){
@@ -73,10 +73,25 @@ float VehicleAnimation::advanceRoll(float phase,float signedDistance,float radiu
     if(!std::isfinite(signedDistance)||!std::isfinite(radius)||radius<=.0001f)return phase;
     return std::remainder(phase+signedDistance/radius,2*Pi);
 }
-void VehicleAnimation::step(Kinoko::Kart::KartObject& kart){
+void VehicleAnimation::step(Kinoko::Kart::KartObject& kart,bool snapshot,unsigned frames){
     bike_=kart.param()->isBike();count_=std::min(4u,unsigned(kart.param()->tireCount()));
-    const unsigned vehicle=unsigned(Kinoko::System::RaceConfig::Instance()->raceScenario().players[kart.param()->playerIdx()].vehicle);
-    if(vehicle_!=vehicle){roll_={};wheelMotion_={};readParameters(vehicle);}
+    const auto& player=Kinoko::System::RaceConfig::Instance()->raceScenario().players[kart.param()->playerIdx()];
+    const unsigned vehicle=unsigned(player.vehicle);
+    if(vehicle_!=vehicle){roll_={};wheelMotion_={};readParameters(vehicle);snapshot=true;}
+    // Luma follows the pose every tick.
+    if(unsigned(player.character)==23)snapshot=true;
+    if(!snapshot){
+        // Roll needs this tick's speed and effective radius only.
+        using S=Kinoko::Kart::eStatus;const auto& status=kart.status();
+        const float speed=wheelMotion_.step({
+            unsigned(Kinoko::System::RaceManager::Instance()->stage()),
+            kart.move()->speed(),kart.state()->startBoostCharge(),display_[2],display_[1],
+            status.onBit(S::Accelerate),status.onBit(S::Brake),status.onBit(S::TouchingGround),
+            status.onBit(S::WallCollision,S::Wall3Collision),status.onBit(S::InAction),
+            status.onBit(S::ChargingSSMT),status.onBit(S::Burnout),status.onBit(S::ChargeStartBoost)});
+        for(unsigned i=0;i<count_;++i){radii_[i]=kart.tirePhysics(i)->effectiveRadius();roll_[i]=advanceRoll(roll_[i],speed*float(frames),radii_[i]);}
+        return;
+    }
     base_=fromSource(kart.body()->visualPose());kartScale_=vec(kart.scale());
     steering_=std::clamp(kart.model()->steeringInput(),-1.f,1.f);
     const auto& bsp=kart.param()->bsp();
@@ -105,6 +120,9 @@ void VehicleAnimation::step(Kinoko::Kart::KartObject& kart){
         status.onBit(S::Accelerate),status.onBit(S::Brake),status.onBit(S::TouchingGround),
         status.onBit(S::WallCollision,S::Wall3Collision),status.onBit(S::InAction),
         status.onBit(S::ChargingSSMT),status.onBit(S::Burnout),status.onBit(S::ChargeStartBoost)});
+    // KartBody::wheelMatrix ignores the wheel for karts (one makeQT of the body's
+    // rotation and position); only bikes' handle wheel differs. Build it once.
+    C3D_Mtx kartWheel;if(!bike_&&count_)kartWheel=fromSource(kart.body()->wheelMatrix(0));
     for(unsigned i=0;i<count_;++i){
         auto* physics=kart.tirePhysics(i);
         const unsigned bspIndex=bike_?i:(count_==3?(i+1)/2:i/2);
@@ -113,8 +131,8 @@ void VehicleAnimation::step(Kinoko::Kart::KartObject& kart){
         // Retail Wheel::UpdateMatrix (USA 0x8059444c) uses the unscaled
         // effective radius at WheelPhysics+0x6c. Scaling only affects the
         // rendered mesh below, not the roll denominator a second time.
-        roll_[i]=advanceRoll(roll_[i],speed,radii_[i]);
-        wheelSources_[i]=fromSource(kart.body()->wheelMatrix(i));
+        roll_[i]=advanceRoll(roll_[i],speed*float(frames),radii_[i]);
+        wheelSources_[i]=bike_?fromSource(kart.body()->wheelMatrix(i)):kartWheel;
         bspRadii_[i]=bsp.wheels[bspIndex].wheelRadius;
     }
     if(bike_)handleSource_=count_?wheelSources_[0]:fromSource(kart.body()->wheelMatrix(0));
@@ -170,9 +188,12 @@ bool VehicleAnimation::setSnapshot(const Snapshot& p){
     kartScale_=p.scale;steering_=std::clamp(p.steering,-1.f,1.f);vehicle_=p.vehicle;count_=p.count;bike_=p.bike;
     dirty_=true;return true;
 }
-void VehicleAnimation::evaluate() const{
-    if(!dirty_)return;
-    dirty_=false;
+void VehicleAnimation::evaluateBody() const{
+    if(!lazyParts){evaluate();return;}
+    if(dirty_)buildBody();
+}
+void VehicleAnimation::buildBody() const{
+    dirty_=false;partsDirty_=true;
     const auto& base=base_;const auto kartScale=kartScale_;
     body_=base;scale(body_,kartScale);
     const float steering=steering_;
@@ -186,6 +207,12 @@ void VehicleAnimation::evaluate() const{
         const Vec3 steeredZ{handle_.r[0].z,handle_.r[1].z,handle_.r[2].z};
         driveFrame_=std::clamp(15.f+std::atan2(dot(baseX,steeredZ),dot(baseZ,steeredZ))/Degrees,0.f,29.f);
     }
+}
+void VehicleAnimation::evaluate() const{
+    if(dirty_)buildBody();
+    if(!partsDirty_)return;
+    partsDirty_=false;
+    const auto& base=base_;const auto kartScale=kartScale_;const float steering=steering_;
     for(unsigned i=0;i<count_;++i){
         const unsigned bspIndex=bike_?i:(count_==3?(i+1)/2:i/2);
         const bool front=bspIndex==0;

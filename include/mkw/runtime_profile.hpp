@@ -1,4 +1,5 @@
 #pragma once
+#include "mkw/console_model.hpp"
 #include <mkw/renderer.hpp>
 #include <mkw/render_metrics.hpp>
 #include <array>
@@ -168,7 +169,7 @@ private:
     std::array<double,StageCount> ms{};double gpu=0,draws=0,triangles=0;unsigned rendered=0,loops=0,late1=0,late2=0;
     for(unsigned i=0;i<seconds_;++i){const auto& s=second_[i];rendered+=s.rendered;loops+=s.loops;late1+=s.late1;late2+=s.late2;
      for(unsigned j=0;j<StageCount;++j)ms[j]+=s.ms[j];gpu+=s.gpu;draws+=s.draws;triangles+=s.triangles;}
-    const double n=std::max(1u,rendered);bool n3ds=false;APT_CheckNew3DS(&n3ds);
+    const double n=std::max(1u,rendered);bool n3ds=mkw::isNew3ds();
     std::fprintf(f,"%d,%u,%u,%u,%.1f,%u,%u,%.2f,%u,%u,%.1f,%.1f,%.1f,%.2f",index_,course_,unsigned(n3ds),unsigned(renderQuality().reduced),elapsed_/1000.f,loops,rendered,
      elapsed_>0?rendered*1000.0/elapsed_:0.0,late1,late2,percentile(.5f),percentile(.9f),percentile(.99f),intervalMax_);
     for(double v:ms)std::fprintf(f,",%.3f",v/n);

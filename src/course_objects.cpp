@@ -117,6 +117,8 @@ Tracks ObjectAssets::tracks(const ObjModel* model,const char* name) const {
     }
     return t;
 }
+// Which file and step failed in the last ObjectAssets::load (runtime.log).
+char objectLoadFailure[160]="";
 bool ObjectAssets::load(int course){
     char path[64];std::snprintf(path,sizeof path,"models/course_%02d_visuals.list",course);
     FILE* list=std::fopen(path,"r");if(!list)return course>=32;
@@ -133,7 +135,7 @@ bool ObjectAssets::load(int course){
         if(course>=32&&course<=41&&!std::strcmp(resource,"coin"))continue;
         auto m=std::make_unique<ObjModel>();m->resource=resource;m->name=name;m->model=std::make_unique<Model>();
         char file[128];std::snprintf(file,sizeof file,"models/%s.gmdl",mesh);
-        if(!m->model->load(file)){ok=false;break;}
+        if(!m->model->load(file)){std::snprintf(objectLoadFailure,sizeof objectLoadFailure,"model %s",file);ok=false;break;}
         if((course==18&&!std::strcmp(resource,"WLscreenGC")&&!std::strcmp(name,"WLscreenGC"))||
            (course==6&&!std::strcmp(resource,"dkmonitor")&&!std::strcmp(name,"dkmonitor"))||
            (course==35&&!std::strcmp(resource,"fks_screen_wii")&&!std::strcmp(name,"fks_screen_wii"))){
@@ -158,7 +160,7 @@ bool ObjectAssets::load(int course){
         m->bounds={m->model->minimum,m->model->maximum};
         if(std::strcmp(bankName,"-")){
             m->bank=std::make_unique<ObjectBank>();std::snprintf(file,sizeof file,"models/%s.dobj",bankName);
-            if(!m->bank->load(file)){ok=false;break;}
+            if(!m->bank->load(file)){std::snprintf(objectLoadFailure,sizeof objectLoadFailure,"bank %s",file);ok=false;break;}
             if(m->resource=="pakkun_f"&&!m->bank->hasJointCallbacks()){
                 std::fprintf(stderr,"pakkun_f bank missing original joint callbacks\n");ok=false;break;
             }
@@ -185,7 +187,7 @@ bool ObjectAssets::load(int course){
                         // per-instance copies may respect the overlay reserve; the first
                         // visible instance must never disappear because of that reserve.
                         auto first=cloneModel(*m->model);
-                        if(!first){ok=false;break;}
+                        if(!first){std::snprintf(objectLoadFailure,sizeof objectLoadFailure,"pose copy %s",file);ok=false;break;}
                         m->skins.push_back(std::move(first));m->skinKeys.push_back({-1,0.f});
                     }
                 }
@@ -205,8 +207,10 @@ bool ObjectAssets::load(int course){
             // Leave ordinary heap headroom for racers, menus and live effects.
             const size_t heapBytes=envGetHeapSize(),usedBytes=mallinfo().uordblks;
             const size_t budget=heapBytes>usedBytes+(8u<<20)?heapBytes-usedBytes-(8u<<20):0;
-            if(!m->firePhases->open("textures/firebar-indirect.ftan",budget)||
-               !C3D_TexInit(&texture->gpu,256,256,GPU_LA8)){ok=false;break;}
+            // Old 3DS (reduced): at least 10 of the 100 phases (1.3 MB), not none.
+            const size_t phaseBudget=renderQuality().reduced?std::max<size_t>(budget,10u*131072u):budget;
+            if(!m->firePhases->open("textures/firebar-indirect.ftan",phaseBudget)||
+               !C3D_TexInit(&texture->gpu,256,256,GPU_LA8)){std::snprintf(objectLoadFailure,sizeof objectLoadFailure,"fire phases (budget %u)",unsigned(phaseBudget));ok=false;break;}
             texture->ready=true;
             if(!m->firePhases->read(0,texture->gpu.data,texture->gpu.size)){ok=false;break;}
             C3D_TexSetFilter(&texture->gpu,GPU_LINEAR,GPU_LINEAR);
@@ -524,7 +528,9 @@ void CourseObjects::prepare(const Renderer& renderer,unsigned tick,Vec3 camera){
     d.skyJob.reset([](void* c){static_cast<Impl*>(c)->recordSky();},&d);
     d.objectJob.reset([](void* c){static_cast<Impl*>(c)->recordObjects();},&d);
     auto& worker=jobWorker();
-    d.queued=worker.running();
+    // Recorded right here on a slow worker: the object draws follow the course
+    // draw, too soon for a fraction of a core to have finished them.
+    d.queued=worker.running()&&!worker.slow();
     if(d.queued){worker.submit(d.skyJob);worker.submit(d.objectJob);}
     else{d.recordSky();d.recordObjects();}
 }

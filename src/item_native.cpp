@@ -1,4 +1,5 @@
 #include "mkw/race_items.hpp"
+#include "mkw/sim_profile.hpp"
 #include "mkw/item_box.hpp"
 #include "mkw/item_road_follow.hpp"
 #include "mkw/item_rules.hpp"
@@ -21,6 +22,8 @@
 #include <game/kart/KartCollide.hh>
 #include <game/kart/KartMove.hh>
 #include <game/kart/KartObjectManager.hh>
+#include <game/kart/KartParam.hh>
+#include <game/kart/KartPhysics.hh>
 #include <game/kart/KartState.hh>
 #include <game/system/CourseMap.hh>
 #include <game/system/RaceManager.hh>
@@ -117,7 +120,55 @@ std::shared_ptr<K::Field::RailInterpolator> boxRail(int path,float speed,unsigne
     r->init(0.f,start<r->pointCount()?start:0);
     return r;
 }
-ItemRacer snapshot(unsigned i){
+// The same reads as snapshotProxy below, with the kart's parts fetched once: each
+// KartObjectProxy getter is an out-of-line call (Kinoko is a separate LTO unit),
+// and the item step takes 36 snapshots a tick (before the step, in each kart's
+// pass, after it). Off: RaceItems::fastSnapshot (no-fast-snapshot.txt).
+ItemRacer snapshotFast(unsigned i){
+    const K::Kart::KartObject* k=kart(i);
+    const auto* move=k->move();const auto* state=k->state();const auto* physics=k->physics();
+    const auto* dynamics=physics->dynamics();const auto* param=k->param();
+    const auto& status=state->status();const auto& pose=physics->pose();
+    const auto& player=K::System::RaceManager::Instance()->player(i);
+    using S=K::Kart::eStatus;
+    ItemRacer r{};
+    r.position=nativeVec(dynamics->pos());r.forward={pose[0,2],pose[1,2],pose[2,2]};
+    r.movementDirection=nativeVec(move->vel1Dir());r.smoothedUp=nativeVec(move->smoothedUp());
+    r.progress=player.raceCompletion();r.speed=move->speed();
+    r.radius=k->collide()->boundingRadius();
+    r.grounded=status.onBit(S::TouchingGround);
+    r.unavailable=status.onBit(S::BeforeRespawn,S::InRespawn,S::TriggerRespawn,S::InCannon);
+    r.finished=player.finished();
+    const auto& scenario=K::System::RaceConfig::Instance()->raceScenario();
+    r.team=scenario.teams?RaceTeam(scenario.players[i].team):RaceTeam::None;
+    r.controlLocked=status.onBit(S::InAction,S::Burnout);
+    r.itemLocked=status.onBit(S::BeforeRespawn,S::InAction,S::TriggerRespawn,S::CannonStart,S::InCannon)||
+        status.onBit(static_cast<S>(72),static_cast<S>(82),static_cast<S>(83),static_cast<S>(89));
+    r.afterCannon=status.onBit(S::AfterCannon);
+    r.inCannon=status.onBit(S::InCannon);
+    r.wallCollision=status.onBit(S::WallCollision,S::Wall3Collision);
+    r.up={pose[0,1],pose[1,1],pose[2,1]};r.scale=nativeVec(move->scale());
+    const auto& stats=param->stats();
+    r.itemGeometry={stats.itemUnk170,stats.itemUnk174,stats.itemUnk178,stats.itemUnk17c};
+    r.speedRatio=move->speedRatioCapped();r.hop=move->hopPosY();
+    r.shellTargetUnavailable=status.onBit(S::TriggerRespawn,S::InRespawn,S::AfterRespawn,static_cast<S>(83));
+    auto bit=[&](unsigned n){return status.onBit(static_cast<S>(n));};
+    r.shellAcquireUnavailable=r.shellTargetUnavailable||bit(40)||bit(82)||bit(89);
+    r.shellTargetProtected=r.shellAcquireUnavailable||bit(4)||bit(32)||bit(35)||bit(36)||bit(63)||bit(79)||bit(91);
+    r.mushroomBoost=status.onBit(S::MushroomBoost);
+    r.inkCleaningBoost=move->boostActive(K::Kart::KartBoost::Type::MushroomAndBoostPanel);
+    r.trickRotating=status.onBit(S::ZipperTrick,S::TrickRot);
+    r.damageAction=int8_t(k->action()->currentAction());r.zipperStick=status.onBit(S::ZipperStick);
+    r.damageProtected=status.onBit(S::BeforeRespawn,S::TriggerRespawn,S::InRespawn,S::AfterRespawn,S::InCannon,
+        S::BattleDamageProtection,S::BattleVanish,S::BattleHidden);
+    r.bike=param->isBike();r.velocity=nativeVec(dynamics->velocity());r.haveVelocity=true;
+    r.star=status.onBit(S::Star)?uint16_t(std::max<int>(1,move->starTimer())):0;
+    r.mega=status.onBit(S::Mega)?uint16_t(std::max<int>(1,move->megaTimer())):0;
+    r.bullet=status.onBit(S::Bullet);r.shocked=status.onBit(S::Shocked);r.crushed=status.onBit(S::Crushed);
+    r.inAction=status.onBit(S::InAction);
+    return r;
+}
+ItemRacer snapshotProxy(unsigned i){
     auto* k=kart(i);const auto& status=k->state()->status();const auto& pose=k->pose();
     const auto& player=K::System::RaceManager::Instance()->player(i);
     using S=K::Kart::eStatus;
@@ -163,6 +214,7 @@ ItemRacer snapshot(unsigned i){
     r.inAction=status.onBit(S::InAction);
     return r;
 }
+ItemRacer snapshot(unsigned i){return RaceItems::fastSnapshot?snapshotFast(i):snapshotProxy(i);}
 }
 ItemSurface queryCourseItemSurface(Vec3 previous,Vec3 position,float radius){return nativeSurface(previous,position,radius);}
 ItemSurface queryCourseItemSurfaceAt(Vec3 previous,Vec3 position,float radius,unsigned timeOffset){return nativeSurfaceAt(previous,position,radius,timeOffset);}
@@ -398,7 +450,7 @@ void RaceItems::beforeStepNative(const ItemInput* inputs,unsigned count,bool act
 void RaceItems::afterStepNative(unsigned count){
     // Retail Item globals read RaceManager +0x20, not the active-item clock.
     reclaimPhase_=K::System::RaceManager::Instance()->timer()&7;nativeReclaimPhase_=true;
-    std::array<ItemRacer,MaxRacers> states;snapshotNative(count,states);
+    std::array<ItemRacer,MaxRacers> states;{MKW_SIM_SCOPE(ItSnapshot);snapshotNative(count,states);}
     for(unsigned i=0;i<std::min(count,MaxRacers);++i)
         states[i].inkCleaningBoost=kart(i)->move()->takeFloorInkClear()||states[i].inkCleaningBoost;
     afterStep(states.data(),count,nativeSurface);

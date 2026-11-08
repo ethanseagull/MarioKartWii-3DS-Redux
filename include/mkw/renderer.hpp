@@ -217,6 +217,16 @@ public:
     void drain();
     // Race simulation may continue while both recording lists are occupied.
     bool canRecordFrame() const;
+    // Immediate frames with the job worker on another core (Old 3DS core 1):
+    // job threads queue their GPU-visible writes here and the main thread runs
+    // them in queue order (runJobWrites, after JobWorker::finish), so every
+    // write and its cache flush happen on the core that draws, as a deferred
+    // frame's render thread runs them. reset also frees the payloads.
+    void queueJobWrites(bool on);
+    void runJobWrites(bool reset);
+    // Frees the job-write arena's chunks (kept for reuse between frames); call with
+    // no job running, when a race is released. Returns the bytes freed.
+    std::size_t releaseJobWrites();
     // Race bottom screen (docs/BOTTOM_SCREEN.md): a 320x240 RGBA8 VRAM target
     // with depth/stencil for menu icons and dual-screen intros; transferred only when drawn.
     // Create and release with the render thread idle, outside a frame:
@@ -264,7 +274,8 @@ public:
     // to 1024) uploaded to VRAM in chunks through an idle LINEAR staging
     // region: no temporary LINEAR or heap allocation. On failure the texture
     // is left empty. Main thread, render thread idle (it waits for the GPU).
-    bool loadVramTexture(Texture& texture,const char* path,GPU_TEXTURE_WRAP_PARAM wrap=GPU_CLAMP_TO_EDGE);
+    // rgba4: an RGBA8 file is stored as RGBA4 (half the VRAM; Old 3DS lower screen).
+    bool loadVramTexture(Texture& texture,const char* path,GPU_TEXTURE_WRAP_PARAM wrap=GPU_CLAMP_TO_EDGE,bool rgba4=false);
     // Moves a loaded single-level LINEAR texture into VRAM (a GPU copy, then
     // its LINEAR block is freed), unless that would leave under `reserve`
     // bytes of VRAM free. False leaves it untouched in LINEAR. Main thread;
@@ -506,6 +517,8 @@ public:
     // Shadow volumes shade only the screen rectangle their bounds project to,
     // not the whole screen (shadowVolumesNow). A/B: no-shadow-rect.txt.
     bool shadowRects=false;
+    // Effect batches set only the state that differs from the last drawn batch (no-effect-state-skip.txt: all).
+    bool effectStateSkip=true;
     // Course objects past retail's draw distance (ObjFlow) are not drawn
     // (CourseObjects). A/B: no-draw-distance.txt.
     bool drawDistance=false;
@@ -527,6 +540,14 @@ public:
     // moveToVram widens texture-unit-1 ETC1 textures to ETC1A4 (opaque
     // alpha) instead of leaving them in LINEAR. A/B: no-unit1-vram.txt.
     bool unitOneEtc1a4=false;
+    // Immediate mono frames (Old 3DS): bloom's GPU commands, the same every
+    // frame of a race, are recorded once and copied into later frames
+    // (applyBloomNow). A/B: no-bloom-list.txt.
+    bool bloomList=false;
+    // The sampled light textures blend through tables (the same bytes) and are
+    // rewritten and flushed only when their bytes change (retailBeginFrame).
+    // A/B: no-light-blend.txt.
+    bool lightTextureSkip=false;
     void setSkyBehind(bool on){skyBehind_=on;}
     uint32_t animationFrame=0;
     // RRGGBB00 added after the model's material colour, preserving texture alpha.
@@ -587,6 +608,7 @@ private:
     std::atomic<unsigned> submitted_{0},completed_{0},gpuDone_{0};
     std::atomic<bool> quit_{false};
     std::atomic<FrameList*> writeTarget_{nullptr};
+    std::unique_ptr<DeferredWrites::Storage> jobStorage_;DeferredWrites jobWrites_;std::vector<DeferredWrites::Write> jobRun_;bool jobQueue_=false;
     bool deferred_=false;
     // No recorded frame since the last waitForGpu() (this thread's view).
     bool gpuIdle_=true;
@@ -761,6 +783,17 @@ private:
     void freeBloom();
     void bloomPass(C3D_RenderTarget* target,unsigned width,unsigned height);
     void bloomQuad(const C3D_Tex& source,unsigned sourceWidth,unsigned sourceHeight,float width,float height,float du,float dv,unsigned secondWidth=0,unsigned secondHeight=0,const C3D_Tex* secondSource=nullptr,float secondDu=0,float secondDv=0);
+    void bloomPasses();
+    // bloomList: what the recorded commands depend on, the commands, and the
+    // vertex slots and counters the passes leave.
+    struct BloomListKey {
+        const CourseBloom* settings=nullptr;const void* scene=nullptr;const void* bloom[4]{};const C3D_RenderTarget* top=nullptr;
+        const Vertex* vertices=nullptr;unsigned first=0,rounds=0;bool merge=false;
+        bool operator==(const BloomListKey&) const=default;
+    };
+    BloomListKey bloomListKey_{};bool bloomListValid_=false;
+    std::vector<uint32_t> bloomListWords_;std::vector<Vertex> bloomListVertices_;
+    C3D_BufInfo bloomListBuffer_{};unsigned bloomListDraws_=0,bloomListTriangles_=0;
     void freeStadiumScreen();
     void captureStadiumScreenNow();
     C3D_Tex stadiumTex_[2]{};

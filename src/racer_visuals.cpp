@@ -1,4 +1,8 @@
 #include <mkw/racer_visuals.hpp>
+#include <mkw/sim_profile.hpp>
+#include <mkw/asset_pack.hpp>
+#include <3ds.h>
+#include <malloc.h>
 #include <mkw/diag.hpp>
 #include <mkw/racer_lod.hpp>
 #include <mkw/vehicle_lod_layout.hpp>
@@ -39,6 +43,12 @@ struct RacerVisuals::Impl {
         struct Clock {int clip=-1;unsigned start=0;} bodyClock;
         std::array<Clock,9> extraClocks;
         bool ghost=false;
+        // Set by the last drawn frame (prepareRacer): the animated driver (LOD 1)
+        // was in view. Reduced quality (Old 3DS) aims heads only for those.
+        bool headShown=true;
+        unsigned presentedTick=0; // last tick step() presented it (thinHidden)
+        // One-tick driver events seen on ticks it was not presented (thinHidden).
+        int pendingThrow=0;bool pendingCelebrate=false;
     };
     std::array<std::unique_ptr<Racer>,11> racers;
     unsigned count=0;
@@ -70,12 +80,23 @@ void RacerVisuals::reset(){for(auto& r:impl_->racers)r.reset();impl_->count=0;}
 unsigned RacerVisuals::count() const{return impl_->count;}
 bool RacerVisuals::load(){
     reset();const auto& config=K::System::RaceConfig::Instance()->raceScenario();
+    // Banks kept from the last race (DriverAnimation::keepReleased) that this
+    // lineup doesn't use go now, before its own banks are allocated.
+    {std::vector<std::string> banks;
+     for(unsigned i=1;i<config.playerCount&&i<=11;++i){const auto& player=config.players[i];
+      VehicleVisualAssets::bankPaths(unsigned(player.character),unsigned(player.vehicle),config.teams?RaceTeam(player.team):RaceTeam::None,diag::unlitBanks,banks);}
+     DriverAnimation::keepOnly(banks);}
     for(unsigned i=1;i<config.playerCount&&i<=11;++i){
         auto r=std::make_unique<Impl::Racer>();const auto& player=config.players[i];
         std::string failure;
         if(!r->load(unsigned(player.character),unsigned(player.vehicle),config.teams?RaceTeam(player.team):RaceTeam::None,&failure,diag::unlitBanks)){
             if(auto* log=std::fopen("sdmc:/3ds/mkw-3ds/opponent-load-error.txt","w")){
-                std::fprintf(log,"slot=%u character=%u vehicle=%u team=%u\nasset=%s\nlinear=%lu\n",i,unsigned(player.character),unsigned(player.vehicle),unsigned(player.team),failure.c_str(),static_cast<unsigned long>(linearSpaceFree()));
+                // Free heap and the largest LINEAR block (a free total says nothing about fragmentation).
+                const struct mallinfo m=mallinfo();const size_t heapTotal=envGetHeapSize();
+                const size_t heapFree=(heapTotal>size_t(m.arena)?heapTotal-size_t(m.arena):0)+size_t(m.fordblks);
+                size_t lo=0,hi=linearSpaceFree();
+                while(hi-lo>4096){const size_t mid=lo+(hi-lo)/2;if(void* p=linearAlloc(mid)){linearFree(p);lo=mid;}else hi=mid;}
+                std::fprintf(log,"slot=%u character=%u vehicle=%u team=%u\nasset=%s\nbank_failure=%s\npack_failure=%s\nlinear=%lu\nlinear_largest=%lu\nheap_free=%lu\n",i,unsigned(player.character),unsigned(player.vehicle),unsigned(player.team),failure.c_str(),driverBankFailure,pack::lastReadFailure,static_cast<unsigned long>(linearSpaceFree()),static_cast<unsigned long>(lo),static_cast<unsigned long>(heapFree));
                 std::fclose(log);
             }
             reset();return false;
@@ -117,10 +138,19 @@ void RacerVisuals::resetAnimation(){
         r->vehicle.reset();r->vehicle.step(*K::Kart::KartObjectManager::Instance()->object(i+1));
     }
 }
-void RacerVisuals::step(unsigned tick,const RaceItems& items){
+void RacerVisuals::step(unsigned tick,const RaceItems& items,bool drawNext){
     for(unsigned i=0;i<11;++i)if(auto* r=impl_->racers[i].get()){
         auto* kart=K::Kart::KartObjectManager::Instance()->object(i+1);auto& status=kart->status();
-        r->vehicle.step(*kart);DriverSignals s;
+        const bool hidden=thinHidden&&!r->headShown;
+        if(hidden&&!drawNext){
+            for(const auto& event:items.sounds())if(event.player==i+1){
+                if(event.cue==ItemSoundCue::HitSuccess)r->pendingCelebrate=true;
+                else if(event.cue==ItemSoundCue::Release)r->pendingThrow=event.flag?1:-1;
+            }
+            continue;
+        }
+        const unsigned frames=hidden?std::clamp(tick-r->presentedTick,1u,8u):1u;r->presentedTick=tick;
+        {MKW_SIM_SCOPE(OppVehicle);r->vehicle.step(*kart,drawNext||r->headShown,frames);}DriverSignals s;
         s.bike=kart->param()->isBike();s.handleRelativeBike=kart->param()->stats().body==K::Kart::KartParam::Stats::Body::Handle_Relative_Bike;s.wheelie=status.onBit(K::Kart::eStatus::Wheelie);
         s.airborne=status.offBit(K::Kart::eStatus::TouchingGround);s.hopping=status.onBit(K::Kart::eStatus::Hop);
         s.steering=kart->move()->cpuSteer()?kart->move()->cpuStick():kart->inputs()->currentState().stick.x;
@@ -140,12 +170,19 @@ void RacerVisuals::step(unsigned tick,const RaceItems& items){
         s.finishType=driverFinishType(rank,K::System::RaceConfig::Instance()->raceScenario().playerCount);
         s.countdown=unsigned(race->stage())<=1;
         driverItemSignals(s,items,i+1);
-        s.blink=(tick+i*13)%180==0;
-        r->pose=r->controller.step(s);
-        if(r->animation){
+        if(!s.itemThrowDirection)s.itemThrowDirection=r->pendingThrow;
+        s.celebrate|=r->pendingCelebrate;r->pendingThrow=0;r->pendingCelebrate=false;
+        // A step standing for several ticks blinks if any of them would have.
+        s.blink=(tick+i*13)%180<frames;
+        {MKW_SIM_SCOPE(OppController);r->pose=r->controller.step(s,frames);}
+        // Reduced quality: a racer drawn with its static low-detail driver, or not
+        // drawn at all, shows no head aim; its look filters resume (from where they
+        // stopped) once it is drawn up close again. ~0.18 ms a racer a tick on Old 3DS.
+        if(r->animation&&(r->headShown||!renderQuality().reduced)){MKW_SIM_SCOPE(OppLook);
             DriverLookParameters parameters;
             const bool available=driverLookParameters(r->choice->character,r->choice->vehicle,parameters);
             C3D_Mtx seated=r->vehicle.body();Mtx_Translate(&seated,0,r->choice->seatY,r->choice->seatZ,true);
+            r->animation->lookPhase=i;
             r->animation->stepLook(r->animation->find(driverVehicleClipName(r->pose.clipName,r->choice->bike)),r->pose.frame,tick,
                 available&&s.hasLookTarget&&driverLookAllowed(r->pose.clipName,
                     status.onBit(K::Kart::eStatus::InATrick),status.onBit(K::Kart::eStatus::OverZipper)),
@@ -161,8 +198,12 @@ void RacerVisuals::step(unsigned tick,const RaceItems& items){
     }
 }
 void RacerVisuals::Impl::prepareRacer(unsigned i){
-    auto& out=prepared[i];out=Prepared{};
+    // Flags and counts only (not out=Prepared{}, ~3 KB a racer a frame): every matrix a
+    // reader uses is written before its flag or count says so.
+    auto& out=prepared[i];out.draw=out.bodyVisible=out.driverVisible=out.lowHandleVisible=false;
+    out.lod=1;out.additive=0;out.wheels=0;out.wheelVisible={};out.extras=0;
     auto* r=racers[i].get();if(!r)return;
+    r->headShown=false;
     if(!r->body||!r->driver||!r->animation)return;
     const auto& items=*frame.items;const unsigned tick=frame.tick;const auto& view=frame.view;
     if(items.hud(i+1).bullet)return;
@@ -198,6 +239,7 @@ void RacerVisuals::Impl::prepareRacer(unsigned i){
     auto frustum=view.model(seated);
     out.draw=K::Kart::KartObjectManager::Instance()->object(i+1)->move()->battleVisible();out.body=transform;out.seated=seated;
     if(r->luma&&out.lod<4)r->luma->prepare(view,r->vehicle,tick);
+    r->headShown=out.lod==1;
     if(out.lod==1){r->animation->setBraidWorld(seated);
     out.driverVisible=!tiny(*r->driver,seated)&&r->animation->apply(*r->driver,r->animation->find(name),frame,tick,expression,faceFrame,&frustum);
     }else if(out.lod<4)out.driverVisible=view.visible(*r->driverLod,seated);
@@ -243,8 +285,9 @@ void RacerVisuals::prepare(const Renderer& renderer,const RaceItems& items,Vec3 
         if(!gpu||!worker.running())continue;
         d.jobContext[i]={&d,i};
         d.jobs[i].reset([](void* c){auto* p=static_cast<std::pair<Impl*,unsigned>*>(c);p->first->prepareRacer(p->second);},&d.jobContext[i]);
-        worker.submit(d.jobs[i]);d.queued[i]=true;
+        worker.submit(d.jobs[i],false);d.queued[i]=true;
     }
+    worker.wake();
 }
 void RacerVisuals::draw(Renderer& renderer,const RaceItems& items,Vec3 viewer,unsigned tick,const Model* playerShadow,const C3D_Mtx* playerTransform){
     auto& d=*impl_;

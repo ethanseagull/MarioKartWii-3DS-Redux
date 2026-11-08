@@ -40,6 +40,10 @@ public:
  // Retires every texture and stream (GPU-safe) and cancels pending loads.
  void release(Renderer&);
  void release();
+ // Old 3DS race load (pause preload): moves the loaded sprite textures of 8 or
+ // more bits a texel, largest first, from LINEAR to VRAM while `reserve` bytes
+ // of VRAM stay free (Renderer::moveToVram). Returns the bytes moved.
+ std::size_t moveToVram(Renderer&,std::size_t reserve);
  std::uint32_t residentBytes() const;
  unsigned loadsPending() const;
  void logPending(const std::vector<UiQuad>& resident,const char* path)const;

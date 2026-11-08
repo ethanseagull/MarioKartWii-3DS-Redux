@@ -1696,5 +1696,14 @@ std::uint32_t uiResidentTextureBytes(const std::vector<UiQuad>& quads){
  for(unsigned i=0;i<needed.size();++i)if(needed[i])bytes+=UiSprites[i].gpuBytes;
  return bytes;
 }
+void uiResidentTextureList(const std::vector<UiQuad>& quads,char* out,std::size_t size){
+ std::array<bool,std::size(UiSprites)> needed{};
+ for(const auto& q:quads)if(q.vehicleIcon>=12&&q.movie>=std::size(UiMovieRegions)&&q.sprite<needed.size())needed[q.sprite]=true;
+ std::size_t at=0;if(size)out[0]=0;
+ for(unsigned i=0;i<needed.size()&&at+1<size;++i)if(needed[i]){
+  const int n=std::snprintf(out+at,size-at,"%s%s %u",at?", ":"",UiSprites[i].key,UiSprites[i].gpuBytes/1024);
+  if(n<0)break;at+=std::size_t(n);
+ }
+}
 
 }

@@ -127,16 +127,18 @@ void fillRaceAudioFrame(RaceAudioFrame& f, snd::Vec3f eye, snd::Vec3f target) {
 void fillRaceAudioItems(RaceAudioFrame& f, const RaceItems& items) {
  f.items = 0;
  const auto& actors = items.actors();
- for (unsigned i = 0; i < actors.size() && f.items < f.item.size(); ++i) {
+ items.forEachActorSlot([&](unsigned i) {
+  if (f.items >= f.item.size()) return false;
   const ItemActor& a = actors[i];
-  if (!a.active) continue;
+  if (!a.active) return true;
   RaceAudioItem& o = f.item[f.items++];
   const Vec3 p = a.visualPosition();
   o.position = {p.x, p.y, p.z}; o.index = std::uint8_t(i); o.kind = std::uint8_t(a.kind);
   o.object = std::uint8_t(items::retailObjectId(a.kind));
   o.phase = a.guidance.phase; o.target = a.target;
   o.explosion = a.explosion; o.scattered = a.scattered; o.settled = a.settled;
- }
+  return true;
+ });
  for (const ItemSound& s : items.sounds()) {
   if (f.itemSounds >= f.itemSound.size()) break;
   RaceAudioItemSound& o = f.itemSound[f.itemSounds++];

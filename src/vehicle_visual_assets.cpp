@@ -42,4 +42,21 @@ bool VehicleVisualAssets::load(unsigned character,unsigned vehicle,RaceTeam team
  }
  *this=std::move(next);if(failure)failure->clear();return true;
 }
+void VehicleVisualAssets::bankPaths(unsigned character,unsigned vehicle,RaceTeam team,bool unlitBanks,std::vector<std::string>& out){
+ const GarageChoice* choice=nullptr;
+ for(const auto& entry:GarageChoices)if(entry.character==character&&entry.vehicle==vehicle){choice=&entry;break;}
+ if(!choice)for(const auto& entry:MiiGarageChoices)if(entry.character==character&&entry.vehicle==vehicle){choice=&entry;break;}
+ if(!choice)return;
+ auto path=[&](const char* part,const char* extension){
+  const char* suffix=!std::strcmp(part,"driver")||!std::strcmp(part,"shadow")?"":teamVehicleSuffix(vehicle,team);
+  char name[160];std::snprintf(name,sizeof name,"models/%s%s%s.%s",choice->prefix,suffix,part,extension);
+  return std::string(name);
+ };
+ // Same order and choice as load(): the compact driver bank when it would be read.
+ if(const auto compact=path("driver","dsku");unlitBanks&&pack::contains(compact.c_str()))out.push_back(compact);
+ else out.push_back(path("driver","dskm"));
+ if(choice->bodyAnimation)out.push_back(path("body","dskm"));
+ for(unsigned i=0;i<std::tuple_size_v<decltype(VehicleVisualAssets::extras)>;++i)
+  if((choice->extrasMask&(1u<<i))&&(choice->extraAnimationMask&(1u<<i)))out.push_back(path(GarageExtraNames[i],"dskm"));
+}
 }

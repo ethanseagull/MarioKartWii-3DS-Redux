@@ -88,35 +88,41 @@ public:
         if(!name||!std::isfinite(frames)||frames<1)return;
         for(unsigned i=0;i<Count;++i)if(std::strcmp(names[i],name)==0)durations_[i]=frames;
     }
-    DriverPose step(const DriverSignals& input) {
+    // frames > 1: one step stands for that many ticks (Old 3DS, racers whose animated
+    // driver is not drawn): the clip, blink, one-shot, finish and blend clocks advance
+    // by frames; edges between the stepped ticks are not seen.
+    DriverPose step(const DriverSignals& input,unsigned frames=1) {
         DriverSignals s=input;
         s.steering=std::isfinite(s.steering)?std::clamp(s.steering,-1.0f,1.0f):0;
         // DriverController::vf_1c (PAL 807CD32C), also recovered in
         // Kinoko Render/KartModel.cc: burnout pitch, cannon response and
         // Sherbet Land ice rescue all alter the normal steering sweep.
-        if(s.burnout){
-            steeringEnvelope_=1;
-            const float pitch=std::isfinite(s.burnoutPitch)?s.burnoutPitch:0;
-            const float response=pitch+75.f*(pitch-previousBurnoutPitch_);
-            const float amount=std::min(.2f,.04f*std::fabs(response));
-            steering_+=response>0?amount:-amount;
-            previousBurnoutPitch_=pitch;
-        }else{
-            previousBurnoutPitch_=0;
-            steering_*=.9f;
+        // The steering sweep runs once per tick the step stands for (same input).
+        for(unsigned f=0;f<frames;++f){
+            if(s.burnout){
+                steeringEnvelope_=1;
+                const float pitch=std::isfinite(s.burnoutPitch)?s.burnoutPitch:0;
+                const float response=pitch+75.f*(pitch-previousBurnoutPitch_);
+                const float amount=std::min(.2f,.04f*std::fabs(response));
+                steering_+=response>0?amount:-amount;
+                previousBurnoutPitch_=pitch;
+            }else{
+                previousBurnoutPitch_=0;
+                steering_*=.9f;
+            }
+            const float previousSteering=steering_;
+            const float stick=s.frozenInIce?0:s.steering;
+            const float inputRate=s.inCannon?.02f:.1f;
+            if(stick<-.2f)steering_-=inputRate;
+            else if(stick>.2f)steering_+=inputRate;
+            const float envelope=s.inCannon?.8f*std::fabs(stick):std::fabs(stick);
+            steeringEnvelope_+=(s.inCannon?.05f:.1f)*(envelope-steeringEnvelope_);
+            if(previousSteering < -steeringEnvelope_ || steeringEnvelope_ < previousSteering) {
+                if(steering_ < -steeringEnvelope_)steering_+=0.1f;
+                else if(steering_ > steeringEnvelope_)steering_-=0.1f;
+            } else steering_=std::clamp(steering_,-steeringEnvelope_,steeringEnvelope_);
+            steering_=std::clamp(steering_,-1.0f,1.0f);
         }
-        const float previousSteering=steering_;
-        const float stick=s.frozenInIce?0:s.steering;
-        const float inputRate=s.inCannon?.02f:.1f;
-        if(stick<-.2f)steering_-=inputRate;
-        else if(stick>.2f)steering_+=inputRate;
-        const float envelope=s.inCannon?.8f*std::fabs(stick):std::fabs(stick);
-        steeringEnvelope_+=(s.inCannon?.05f:.1f)*(envelope-steeringEnvelope_);
-        if(previousSteering < -steeringEnvelope_ || steeringEnvelope_ < previousSteering) {
-            if(steering_ < -steeringEnvelope_)steering_+=0.1f;
-            else if(steering_ > steeringEnvelope_)steering_-=0.1f;
-        } else steering_=std::clamp(steering_,-steeringEnvelope_,steeringEnvelope_);
-        steering_=std::clamp(steering_,-1.0f,1.0f);
 
         // A drift hop is already present in the vehicle's physics pose. Playing
         // the full takeoff/landing body clips on every hop adds a second lurch.
@@ -146,7 +152,7 @@ public:
 
         // Retail controller waits until its finish counter exceeds 60
         // (USA 807bdc9c..807bdcd4) before selecting the result motion.
-        finishFrames_=s.finished?std::min(finishFrames_+1,61u):0;
+        finishFrames_=s.finished?std::min(finishFrames_+frames,61u):0;
         Clip wanted=Drive;
         bool parameterized=false;
         if(cannonJump){
@@ -163,7 +169,7 @@ public:
                 parameterized=true;finishMotionFrames_=0;
             }else{
                 wanted=s.finishType==0?First:s.finishType==1?Good:Bad;
-                finishMotionFrames_=std::min(finishMotionFrames_+1,31u);
+                finishMotionFrames_=std::min(finishMotionFrames_+frames,31u);
             }
             oneShot_=Count;
         } else if(s.hit) {
@@ -198,7 +204,8 @@ public:
             previousMotion_=active_;active_=wanted;clipFrame_=0;
             motionBlend_.start(rate,posePresent_);
         }
-        motionBlend_.advance();posePresent_=true;
+        for(unsigned f=0;f<frames;++f)motionBlend_.advance();
+        posePresent_=true;
         parameterized=wanted==Drive||wanted==Dash||wanted==Back||wanted==DriftLeft||wanted==DriftRight||wanted==Wheelie;
         DriverPose pose;pose.clipName=names[wanted];
         pose.state=retailState(wanted);pose.previousState=retailState(previousMotion_);
@@ -218,9 +225,9 @@ public:
         // Retail FaceController (USA807b7fe4): drive/drift states 3/7
         // stop PAT(type3) and SRT(type2). left/right are special look-back
         // faces, not a response to ordinary steering input.
-        ++clipFrame_;
-        if(blinkFrame_<8)++blinkFrame_;
-        if(wanted==oneShot_ && ++oneShotFrame_>=durations_[oneShot_]) {
+        clipFrame_+=float(frames);
+        if(blinkFrame_<8)blinkFrame_=std::min(blinkFrame_+frames,8u);
+        if(wanted==oneShot_ && (oneShotFrame_+=float(frames))>=durations_[oneShot_]) {
             if(oneShot_==BikeTrickStart)startOneShot(pendingTrick_);
             else if(oneShot_==ThrowForward)startOneShot(ThrowForwardEnd);
             else {oneShot_=Count;oneShotFrame_=0;}

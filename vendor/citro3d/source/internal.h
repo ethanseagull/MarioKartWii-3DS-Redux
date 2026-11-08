@@ -7,6 +7,9 @@
 #include <c3d/texenv.h>
 #include <c3d/fog.h>
 
+#include <string.h>
+#include <c3d/uniforms.h>
+
 #define C3D_UNUSED __attribute__((unused))
 
 typedef struct
@@ -107,6 +110,69 @@ enum
 	C3DiG_SetAccMax   = BIT(2),
 	C3DiG_RenderStage = BIT(3),
 };
+
+// memcmp(a, b, bytes) == 0 for word-aligned state whose size is a multiple
+// of four, without the library call (mkw-3ds: the shadows below are compared
+// on every draw). The same bytes are compared, padding included.
+typedef u32 __attribute__((may_alias)) C3Di_Word;
+static inline bool C3Di_SameWords(const void* a, const void* b, unsigned bytes)
+{
+	if (!C3D_FastState)
+		return memcmp(a, b, bytes) == 0;
+	const C3Di_Word* x = (const C3Di_Word*)a;
+	const C3Di_Word* y = (const C3Di_Word*)b;
+	unsigned i;
+	for (i = 0; i < bytes/4; i ++)
+		if (x[i] != y[i])
+			return false;
+	return true;
+}
+
+// libctru's GPUCMD_Add (one command of at most 256 parameters: the first
+// parameter, the header with the count, the rest, a zero to an even length)
+// written in place (mkw-3ds: state is written on almost every draw). Larger
+// commands, a full buffer or !C3D_FastState take GPUCMD_Add itself.
+static inline void C3Di_CmdAdd(u32 header, const u32* param, u32 count)
+{
+	if (!C3D_FastState || !param || count - 1 >= 256 || !gpuCmdBuf || gpuCmdBufOffset + count + 2 > gpuCmdBufSize)
+	{
+		GPUCMD_Add(header, param, count);
+		return;
+	}
+	u32* p = gpuCmdBuf + gpuCmdBufOffset;
+	u32 i;
+	p[0] = param[0];
+	p[1] = header | ((count - 1) << 20);
+	for (i = 1; i < count; i ++)
+		p[1 + i] = param[i];
+	gpuCmdBufOffset += count + 1;
+	if ((count - 1) & 1)
+		gpuCmdBuf[gpuCmdBufOffset ++] = 0;
+}
+static inline void C3Di_CmdAddOne(u32 header, u32 param)
+{
+	if (!C3D_FastState || !gpuCmdBuf || gpuCmdBufOffset + 2 > gpuCmdBufSize)
+	{
+		GPUCMD_Add(header, &param, 1);
+		return;
+	}
+	u32* p = gpuCmdBuf + gpuCmdBufOffset;
+	p[0] = param;
+	p[1] = header;
+	gpuCmdBufOffset += 2;
+}
+#undef GPUCMD_AddMaskedWrite
+#undef GPUCMD_AddWrite
+#undef GPUCMD_AddMaskedWrites
+#undef GPUCMD_AddWrites
+#undef GPUCMD_AddMaskedIncrementalWrites
+#undef GPUCMD_AddIncrementalWrites
+#define GPUCMD_AddMaskedWrite(reg, mask, val) C3Di_CmdAddOne(GPUCMD_HEADER(0, (mask), (reg)), (val))
+#define GPUCMD_AddWrite(reg, val) GPUCMD_AddMaskedWrite((reg), 0xF, (val))
+#define GPUCMD_AddMaskedWrites(reg, mask, vals, num) C3Di_CmdAdd(GPUCMD_HEADER(0, (mask), (reg)), (vals), (num))
+#define GPUCMD_AddWrites(reg, vals, num) GPUCMD_AddMaskedWrites((reg), 0xF, (vals), (num))
+#define GPUCMD_AddMaskedIncrementalWrites(reg, mask, vals, num) C3Di_CmdAdd(GPUCMD_HEADER(1, (mask), (reg)), (vals), (num))
+#define GPUCMD_AddIncrementalWrites(reg, vals, num) GPUCMD_AddMaskedIncrementalWrites((reg), 0xF, (vals), (num))
 
 static inline C3D_Context* C3Di_GetContext(void)
 {

@@ -69,6 +69,7 @@ class MenuState {
 public:
  UiPage page=UiPage::Strap;UiSelection selection{};
  UiSettings settings{}; // Settings page; saved by main when the page is left
+ bool old3dsSettings=false; // Old 3DS: every row locked (lockOld3dsSettings)
  unsigned cursor=0,age=0,focusAge=0;bool unavailable=false;
  int previewCourse=-1;
  LicenseRecords licenseRecords{};
@@ -189,5 +190,7 @@ void layoutMenuScreens(const MenuState&,const std::vector<UiQuad>& source,
 // Allocation size of the actual sprite-index set requested by MenuRenderer.
 // Does not read or retain textures; movies and live vehicle icons are excluded.
 std::uint32_t uiResidentTextureBytes(const std::vector<UiQuad>&);
+// DIAG: the same set as "key KB" pairs (runtime.log).
+void uiResidentTextureList(const std::vector<UiQuad>&,char* out,std::size_t size);
 std::vector<UiQuad> composeMenu(const MenuState&,const UiRaceView&);
 }

@@ -80,10 +80,56 @@ traced order). `no-race-cache.txt` turns off the New 3DS RAM cache that keeps
 the racers, items, effects, Lakitu and pause menu textures read by one race
 load for the next.
 `no-pause-keep.txt` releases the racers' graphics on every pause, as before.
+`no-bank-keep.txt` makes a race load read every animation bank again instead of
+reusing the banks the last race had loaded (`runtime.log`: `animation banks reused N, unused M`).
 `no-prefetch.txt` turns off the background thread that reads the next 128 KB
 of a repacked pack's traced entries while the game parses the last read.
 `pack-trace.txt` writes every pack read to `pack-trace.csv` (archive, offset,
 size, ms, read-ahead hit, matches a direct read) for `tools/pak_order.py`.
+
+Old 3DS only:
+`o3ds-core1.txt` puts the render thread and the job worker back on core 1
+(with an 80% CPU time limit), as before; by default every race frame is
+recorded and drawn on core 0 and core 1 keeps only audio (`runtime.log`:
+`Old 3DS: race frames and presentation jobs on core 0`).
+`bottom-half-rate.txt` redraws the race's lower screen on every second frame
+(15 Hz on Old 3DS); by default it redraws every frame (30 Hz there, like the
+upper screen).
+`bottom-rgba8.txt` keeps the lower screen's UI atlas in RGBA8; by default Old 3DS
+stores it as RGBA4 (256 KB less VRAM, so more course textures leave LINEAR).
+`full-quality.txt` turns off every Old 3DS detail reduction.
+On Old 3DS the pause textures move to the VRAM the course textures left above
+their 1 MiB reserve (`no-pause-vram.txt` keeps them in LINEAR), and the pause
+menu is not preloaded when that would leave under 1.5 MiB of LINEAR
+(`runtime.log`: `pause preload linear KB: ... (pause textures in VRAM N)`, or
+`Old 3DS: pause menu not preloaded (LINEAR)`; race end lines add `linear_low`,
+the lowest LINEAR seen at the 300-step heartbeats). A failed
+`new` writes `FAIL out of heap: ...` to `runtime.log` before the game aborts.
+
+Render CPU switches (each change is exact unless noted; both consoles unless
+noted): `no-light-blend.txt` blends the course light textures with the
+reference loop and rewrites and flushes them every frame, instead of through
+tables and only when their bytes change. `no-bloom-list.txt` builds bloom's
+GPU commands every frame instead of copying the commands recorded on the
+race's first bloom frame (immediate mono frames: Old 3DS). `no-c3d-fast.txt`
+makes citro3d compare its register shadows with memcmp and scan every uniform
+on each draw, instead of word compares and a per-shader "any uniform dirty"
+flag (the same GPU commands). `no-lazy-parts.txt` builds a racer's wheel and
+accessory matrices together with its chassis matrix instead of on their first
+read (the same values). `no-pose-share.txt` evaluates an animation bank's pose
+again for each model it is applied to (race items pose a lit and an unlit
+copy) instead of reusing the pose its other model already holds.
+Old 3DS runs the presentation jobs (racer posing, the local racer's pose) on a
+job worker on core 1 at 30%; `no-core1-jobs.txt` keeps them on core 0. The worker stops for the award ceremony and starts
+again with the next race load; `core1-ceremony-keep.txt` keeps it running.
+The ceremony logs `ceremony hb: ...` lines (phase, frame, tick, drive, sound,
+loader, worker) about once a second and `ceremony watchdog ...` when the main
+thread stops coming round a loop for 3 s or more; `award-load-times.jsonl` gets
+`board` when the result board shows (a GP finished 4th or lower has no
+`podium` and waits there for A).
+`no-opp-pres-thin.txt` presents opponents not drawn up close every tick
+instead of once per drawn frame; `no-kartfx-lod-thin.txt` steps LOD racers'
+kart effects every tick instead of every 4th.
 
 ## Repacked packs
 

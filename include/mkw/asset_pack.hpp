@@ -28,8 +28,21 @@ bool decodeLz4(const unsigned char* in,size_t n,unsigned char* out,size_t size);
 long size(const char* path);
 // Reads exactly `bytes` (must equal size(path)) into destination.
 bool readInto(const char* path,void* destination,size_t bytes);
+// Why the last failed read failed ("lz4 buffer allocation", "direct short read"...).
+extern const char* lastReadFailure;
 // Reads `bytes` starting `offset` bytes into the asset; false past its end.
 bool readRange(const char* path,size_t offset,void* destination,size_t bytes);
+// An entry as stored in the pack: LZ4 block or raw bytes (-1 if absent).
+long storedSize(const char* path);
+bool readStored(const char* path,void* destination,size_t bytes);
+// Decodes an LZ4 block of `size` bytes keeping only its first `head` bytes
+// (into header) and every stride-th frame of frameBytes after them, up to
+// count frames (into out, packed). Memory: a 64 KiB window, not `size`.
+bool decodeLz4Frames(const unsigned char* in,size_t n,size_t size,unsigned char* header,size_t head,
+                     size_t frameBytes,unsigned stride,unsigned count,unsigned char* out);
+// The same, reading the pack entry `path` (an LZ4 block) 64 KiB at a time.
+bool decodeLz4Frames(const char* path,size_t size,unsigned char* header,size_t head,
+                     size_t frameBytes,unsigned stride,unsigned count,unsigned char* out);
 // Race-load RAM cache (asset_pack.cpp): the races of a VS set or Grand Prix
 // re-read the same racers, items, effects and pause menu textures. enableCache sets the most it
 // may keep (0: off; cacheLimitFor gives it for a heap size). While

@@ -5,6 +5,7 @@
 #include <array>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace mkw {
 // Owned meshes and banks, independent of KartObject / RaceConfig lifetimes.
@@ -21,5 +22,7 @@ struct VehicleVisualAssets {
  // unlitBanks (opponents, DIAG): the driver bank comes from its compact .dsku
  // when race.pak has one (tools/pack_unlit_banks.py), else the .dskm.
  bool load(unsigned character,unsigned vehicle,RaceTeam team,std::string* failure=nullptr,bool unlitBanks=false);
+ // The animation bank paths load() would read, for DriverAnimation::keepOnly.
+ static void bankPaths(unsigned character,unsigned vehicle,RaceTeam team,bool unlitBanks,std::vector<std::string>& out);
 };
 }

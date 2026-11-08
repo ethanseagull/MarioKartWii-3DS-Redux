@@ -1,4 +1,5 @@
 #include "mkw/race_items.hpp"
+#include "mkw/sim_profile.hpp"
 #include "mkw/bullet_bill.hpp"
 #include "mkw/blooper.hpp"
 #include "mkw/item_box.hpp"
@@ -88,7 +89,7 @@ bool RaceItems::startRoulette(unsigned player){
 unsigned RaceItems::objectCount(unsigned type) const{
     unsigned n=0;
     auto add=[&](ItemKind kind,unsigned copies){if(unsigned(kind)<19&&ItemObjects[unsigned(kind)].type==type)n+=copies;};
-    for(const auto& a:actors_)if(a.active)add(a.kind,1);
+    for(unsigned i=nextActorSlot(0);i<MaxActors;i=nextActorSlot(i+1))if(actors_[i].active)add(actors_[i].kind,1);
     for(unsigned i=0;i<count_;++i){
         const auto& h=hud_[i];
         if(h.item!=ItemKind::None&&!(h.item==ItemKind::ThunderCloud&&!h.charges))add(h.item,h.charges);
@@ -99,6 +100,21 @@ unsigned RaceItems::objectCount(unsigned type) const{
     }
     if(frame_<blooperBusyUntil_)add(ItemKind::Blooper,1);
     return n;
+}
+void RaceItems::objectCounts(std::array<unsigned,15>& out) const{
+    // objectCount(type) for every type at once: the same sums.
+    out.fill(0);
+    auto add=[&](ItemKind kind,unsigned copies){if(unsigned(kind)<19){const unsigned type=ItemObjects[unsigned(kind)].type;if(type<15)out[type]+=copies;}};
+    for(unsigned i=nextActorSlot(0);i<MaxActors;i=nextActorSlot(i+1))if(actors_[i].active)add(actors_[i].kind,1);
+    for(unsigned i=0;i<count_;++i){
+        const auto& h=hud_[i];
+        if(h.item!=ItemKind::None&&!(h.item==ItemKind::ThunderCloud&&!h.charges))add(h.item,h.charges);
+        if(h.deployed)add(h.heldKind,h.heldCharges);
+        if(h.cloud)add(ItemKind::ThunderCloud,1);
+        if(h.bullet)add(ItemKind::Bullet,1);
+        if(h.pow)add(ItemKind::Pow,i==powUser_?1:0);
+    }
+    if(frame_<blooperBusyUntil_)add(ItemKind::Blooper,1);
 }
 unsigned RaceItems::courseDropWeight(unsigned slot)const{
     if(slot!=6||!woodboxOdds_.ready())return 0;
@@ -122,7 +138,7 @@ bool RaceItems::createCourseDrop(unsigned slot,Vec3 position,Vec3 velocity,uint8
     auto it=std::find_if(actors_.begin(),actors_.end(),[](const ItemActor& a){return !a.active;});
     if(it==actors_.end())return false; // direct generation never evicts a live actor
     forgetReclaimSlot(unsigned(it-actors_.begin()));
-    auto& a=*it;a={};a.active=true;a.kind=kind;a.owner=int8_t(owner);
+    auto& a=*it;a={};a.active=true;++actorSerial_;a.kind=kind;a.owner=int8_t(owner);
     reclaimOrder_[ItemObjects[unsigned(kind)].type].add(unsigned(it-actors_.begin()));
     a.position=a.previous=position;a.velocity=velocity+Vec3{0,timeTrial?35.f:25.f,0};
     a.scattered=true;a.up={0,1,0};a.yaw=std::atan2(velocity.x,velocity.z);
@@ -662,7 +678,7 @@ void RaceItems::beforeStep(const ItemRacer* racers,const ItemInput* inputs,unsig
     karts_->bind(racers_.data(),count_);
     for(unsigned i=0;i<count_;++i)karts_->overlay(i,racers_[i]);
     trackShellRacers(false);
-    for(unsigned i=0;i<MaxActors;++i)freeAtStepStart_[i]=!actors_[i].active;
+    freeAtStepStart_.fill(true);for(unsigned i=nextActorSlot(0);i<MaxActors;i=nextActorSlot(i+1))freeAtStepStart_[i]=!actors_[i].active;
     // Course objects animate during the starting countdown as on Wii. Their
     // presentation clock is independent of item roulette/RNG and draw rate.
     for(auto& box:boxes_)box.phase=(box.phase+1)%181;
@@ -711,8 +727,8 @@ void RaceItems::afterStep(const ItemRacer* racers,unsigned count,ItemWorldQuery 
         blooperCaster_=MaxRacers;
     }
     updatePow();
-    updateActors(query);
-    for(unsigned i=0;i<count_;++i){updateHolder(i);updateHeldItems(i,query);resolveHeldCourseObjects(i);}
+    {MKW_SIM_SCOPE(ItActors);updateActors(query);}
+    {MKW_SIM_SCOPE(ItHolders);for(unsigned i=0;i<count_;++i){updateHolder(i);updateHeldItems(i,query);resolveHeldCourseObjects(i);}}
     // Re-read the kart's power-up state after this step's item effects (host models overlay it
     // on the racers the caller supplied).
     for(unsigned i=0;i<count_;++i){

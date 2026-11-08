@@ -1,6 +1,8 @@
 #pragma once
 #include "mkw/renderer.hpp"
 #include <array>
+#include <string>
+#include <vector>
 #include <mkw/visibility.hpp>
 #include <mkw/skin_positions.hpp>
 #include <mkw/toadette_braids.hpp>
@@ -11,11 +13,22 @@
 namespace mkw {
 // Cooked original driver animation: local vertices, matrix palettes, visibility
 // and facial texture tracks. Only the selected character is resident.
+extern const char* driverBankFailure;
 class DriverAnimation {
 public:
     ~DriverAnimation(){reset();}
     bool load(const char* path,const Model& model);
     void reset();
+    // Race loads: while keepReleased(true) (a race's graphics being released
+    // for the next race), a released bank keeps its bytes by path and the next
+    // load of that path reuses them (no read, no decode). A Grand Prix reloads
+    // the same racers every race: this saves their reads and the heap churn
+    // that fragmented the Old 3DS heap. keepOnly frees the kept banks a lineup
+    // doesn't use; dropKept frees the rest (end of the load).
+    static void keepReleased(bool on);
+    static void dropKept();
+    static void keepOnly(const std::vector<std::string>& paths);
+    static unsigned keptCount(),reusedCount();
     // Menu PlayAnmNoBlend replaces the active palette without a gameplay blend.
     void clearPoseTransition(){lastClip_=-1;hasPreviousPose_=false;cachedSettled_=false;}
     void setLookAngles(float yaw,float pitch){
@@ -25,7 +38,7 @@ public:
     void stepLook(int clip,float frame,unsigned tick,bool active,Vec3 target,
         const C3D_Mtx& seated,bool body,const DriverLookParameters& parameters,
         const DriverPose& motion,bool handleRelativeBike,float xAxisY,float zAxisY);
-    void resetLook(){motionBlendValid_=false;vehicleResponse_.reset();lookMotion_.reset();lookTickValid_=false;cachedSettled_=false;setLookAngles(0,0);}
+    void resetLook(){motionBlendValid_=false;vehicleResponse_.reset();lookMotion_.reset();lookTickValid_=false;lookPoseValid_=false;cachedSettled_=false;setLookAngles(0,0);}
     DriverLookMotion::Angles lookAngles() const {return lookMotion_.angles();}
     int find(const char* name) const;
     // Vehicle-part clips chosen every tick, resolved at load (-1 if absent).
@@ -58,6 +71,17 @@ public:
     bool makeRigid(Model& model);
     bool rigid() const {return !rigidParts_.empty();}
     const std::vector<std::vector<RigidPart>>& rigidParts() const {return rigidParts_;}
+    // DIAG look-verify.txt: stepLook also evaluates the full pose and counts
+    // queries whose head/pivot slots differ from the subset (expected 0).
+    static bool verifyLook;static unsigned lookChecks,lookMismatches;
+    // DIAG A/B (ab-alternate.txt): false evaluates the full pose as before.
+    static bool subsetLook;
+    // Old 3DS (no-look-stagger.txt turns it off): an opponent's head query poses
+    // its skeleton on every 2nd tick only (staggered by lookPhase); the tick between
+    // reuses the last posed head on the current seat. The look filters still step
+    // every tick, so head speed is unchanged. The player always poses.
+    static bool staggerLook;
+    unsigned lookPhase=0;
     // Evaluates the palette for clip/frame, including transition blends.
     const float* pose(int clip,float frame,unsigned tick=0,bool simulateBraids=true);
     // GPU skinning rewrites positions to bone-local space. Lit models keep
@@ -86,7 +110,16 @@ public:
     bool ready=false;
     // Local player must never hold a pose for adaptive presentation budgeting.
     bool fullRate=false;
+    // A second model applied with the inputs of the last evaluation reuses its
+    // pose instead of evaluating again (the same pose). A/B: no-pose-share.txt.
+    static inline bool sharePose=true;
 private:
+    // stepLook's head query: only the slots it reads (see animation.cpp).
+    const float* lookPose(int clip,float frame,unsigned tick);
+    bool lookPoseValid_=false;
+    void releaseData();
+    bool takeKept(const char* path,size_t& size);
+    std::string path_;size_t size_=0;
     struct Clip { char name[32];unsigned duration,loop,count;const uint8_t* data; };
     struct SourceVertex {float p[3],n[3];uint32_t matrix;};
     struct Range {uint32_t first,count;};
@@ -151,6 +184,9 @@ private:
     // Cache only an identical completed pose on the same destination buffer.
     // Secondary hair keeps its independent tick; clip transitions never skip.
     const Vertex* cachedVertices_=nullptr;
+    // The other buffer written from the cached pose; palette_ holds apply()'s
+    // last evaluation (pose() and lookPose() overwrite it).
+    const Vertex* cachedVertices2_=nullptr;bool paletteApplied_=false;
     int cachedClip_=-1,cachedExpression_=-2;
     float cachedFrame_=-1,cachedExpressionFrame_=-1;
     unsigned cachedTick_=0;

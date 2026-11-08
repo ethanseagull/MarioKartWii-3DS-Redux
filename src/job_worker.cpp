@@ -1,3 +1,4 @@
+#include "mkw/console_model.hpp"
 #include <mkw/job_worker.hpp>
 #include <mkw/render_metrics.hpp>
 #include <mkw/skin_positions.hpp>
@@ -5,18 +6,21 @@
 
 namespace mkw {
 JobWorker& jobWorker(){static JobWorker worker;return worker;}
+namespace {thread_local bool jobThread=false;}
+bool onJobWorker(){return jobThread;}
 void JobWorker::entry(void* self){static_cast<JobWorker*>(self)->loop();}
-bool JobWorker::start(){
+bool JobWorker::start(unsigned cpuLimit){
     if(thread_)return true;
     LightEvent_Init(&wake_,RESET_ONESHOT);LightEvent_Init(&done_,RESET_ONESHOT);
     // Same VFP mode (flush-to-zero, default NaN, rounding) as the main thread,
     // so a job computes identical floats on either core.
     fpscr_=__builtin_arm_get_fpscr();
-    bool n3ds=false;APT_CheckNew3DS(&n3ds);
+    bool n3ds=mkw::isNew3ds();
     // Old 3DS core 1 is time sliced with the system; the audio threads there
     // already require a limit (sound_system.cpp). Higher-priority system and
     // audio threads still preempt this one.
-    if(!n3ds){u32 limit=0;APT_GetAppCpuTimeLimit(&limit);if(limit<80)APT_SetAppCpuTimeLimit(80);}
+    if(!n3ds){u32 limit=0;APT_GetAppCpuTimeLimit(&limit);if(limit<cpuLimit)APT_SetAppCpuTimeLimit(cpuLimit);}
+    slow_=!n3ds&&cpuLimit<80;
     // New 3DS: prepare on the main core while it waits for jobs/render slots.
     // Keep the render core free of higher-priority animation jobs. finish()
     // still executes unclaimed work immediately; physics preempts this worker.
@@ -30,17 +34,18 @@ void JobWorker::stop(){
     quit_.store(true,std::memory_order_release);LightEvent_Signal(&wake_);
     threadJoin(thread_,U64_MAX);threadFree(thread_);thread_=nullptr;quit_.store(false);
 }
-void JobWorker::submit(Job& job){
+void JobWorker::submit(Job& job,bool wake){
     const unsigned n=count_.load(std::memory_order_relaxed);
     if(!thread_||n>=Capacity)return; // finish() runs it on this thread
     jobs_[n]=&job;count_.store(n+1,std::memory_order_release);
-    LightEvent_Signal(&wake_);
+    if(wake)LightEvent_Signal(&wake_);
 }
 void JobWorker::finish(Job& job){
     if(claim(job)){execute(job);return;}
     while(job.state.load(std::memory_order_acquire)!=2){
         if(LightEvent_WaitTimeout(&done_,20000000LL))svcSleepThread(500000LL);
     }
+    if(drain_)drain_(false);
 }
 void JobWorker::finishAll(){
     const unsigned n=count_.load(std::memory_order_relaxed);
@@ -50,6 +55,7 @@ void JobWorker::finishAll(){
         if(LightEvent_WaitTimeout(&done_,20000000LL))svcSleepThread(500000LL);
     }
     count_.store(0,std::memory_order_relaxed);next_.store(0,std::memory_order_relaxed);
+    if(drain_)drain_(true);
     if(auto* worker=static_cast<RenderMetrics*>(metrics_)){
         renderMetrics.animationHolds+=worker->animationHolds;renderMetrics.scenePoseSamples+=worker->scenePoseSamples;
         renderMetrics.scenePoseReuses+=worker->scenePoseReuses;renderMetrics.fireReads+=worker->fireReads;
@@ -60,7 +66,7 @@ void JobWorker::finishAll(){
 }
 void JobWorker::loop(){
     __builtin_arm_set_fpscr(fpscr_);
-    metrics_=&renderMetrics;positionScratchIndex=1;
+    metrics_=&renderMetrics;positionScratchIndex=1;jobThread=true;
     for(;;){
         LightEvent_Wait(&wake_);
         if(quit_.load(std::memory_order_acquire))break;

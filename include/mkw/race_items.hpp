@@ -235,6 +235,8 @@ public:
     bool startRoulette(unsigned player);
     /// Live objects and inventory copies of a retail object type (ItemHolderItem_getCount).
     unsigned objectCount(unsigned type) const;
+    /// objectCount of every retail type 0..14 in one pass.
+    void objectCounts(std::array<unsigned,15>& out) const;
     /// The prize the running roulette will give (decided at the box, RMCU 0x807ab550).
     ItemKind rouletteChoice(unsigned player) const { return player<MaxRacers?rouletteChoice_[player]:ItemKind::None; }
     /// A racer-contact bump (RMCU fn_1_609F4): the attacker's Thunder Cloud may pass to the
@@ -258,6 +260,50 @@ private:
     void resolveCourseObjects(ItemActor& actor);
     void resolveHeldCourseObjects(unsigned player);
     std::array<ItemActor,MaxActors> actors_{};
+    // Kart contacts scan only the slots in contactMask_: every actor active when
+    // it was built (a superset; each slot still checks active). Activation goes
+    // through spawn() and the direct generation, which bump actorSerial_; a
+    // changed serial rebuilds the mask, also in the middle of a racer's scan.
+    // Old 3DS: an ItemActor is 376 B, so the full scan read 96 cache lines per
+    // racer per step (~0.25 ms a step at 268 MHz without L2).
+    uint32_t actorSerial_=0,contactMaskSerial_=~0u;
+    std::array<uint32_t,(MaxActors+31)/32> contactMask_{};
+    void refreshContactMask();
+public:
+    // DIAG A/B (ab-alternate.txt): true scans every slot as before.
+    static inline bool fullContactScan=false;
+    // Old 3DS: item snapshots fetch the kart's parts once (item_native.cpp); off: no-fast-snapshot.txt.
+    static inline bool fastSnapshot=true;
+    // Old 3DS: the actor step skips holder syncs and object counts that nothing changed since
+    // the last one, and held-item scans of racers holding nothing (item_world.cpp); off:
+    // no-fast-actor-step.txt.
+    static inline bool fastActorStep=true;
+    // Calls f(slot) for the actor slots in ascending order, as a scan of actors()
+    // would visit them, but only those in the contact mask (a superset of the
+    // active ones: f still checks active). f returns false to stop. Tick thread
+    // only (it may rebuild the mask). fullContactScan visits every slot.
+    template<class F> void forEachActorSlot(F&& f) const {
+        for(unsigned i=nextActorSlot(0);i<MaxActors;i=nextActorSlot(i+1))if(!f(i))return;
+    }
+    // Read-only form for draw-time readers (they may run on the job worker): the
+    // mask when it is current, else every slot; never rebuilds it. f returns false to stop.
+    template<class F> void forEachActorSlotRead(F&& f) const {
+        if(fullContactScan||contactMaskSerial_!=actorSerial_){for(unsigned i=0;i<MaxActors;++i)if(!f(i))return;return;}
+        for(unsigned w=0;w<contactMask_.size();++w)for(uint32_t bits=contactMask_[w];bits;bits&=bits-1)if(!f(w*32+unsigned(__builtin_ctz(bits))))return;
+    }
+    // The first slot >= i in the contact mask (MaxActors if none), rebuilding the
+    // mask first when an actor was activated since: an ascending walk over it
+    // sees the same active actors as a full scan, also ones activated during the
+    // walk. Old 3DS: each actor is 376 B, so a full scan of the 96 slots read 96
+    // cache lines; the item step ran ~50 such scans a tick. fullContactScan: every slot.
+    unsigned nextActorSlot(unsigned i) const {
+        if(fullContactScan||i>=MaxActors)return i<MaxActors?i:MaxActors;
+        if(contactMaskSerial_!=actorSerial_)const_cast<RaceItems*>(this)->refreshContactMask();
+        unsigned w=i>>5;uint32_t bits=contactMask_[w]&(~0u<<(i&31));
+        while(!bits&&++w<contactMask_.size())bits=contactMask_[w];
+        return bits?w*32+unsigned(__builtin_ctz(bits)):MaxActors;
+    }
+private:
     std::array<GroundReclaimOrder<MaxActors>,15> reclaimOrder_{};
     int reclaimPressure_=0;
     unsigned reclaimPhase_=0;

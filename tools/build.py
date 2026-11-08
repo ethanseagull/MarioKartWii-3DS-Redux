@@ -759,12 +759,28 @@ class Builder:
             if not dst.is_file() or dst.read_bytes() != src.read_bytes():
                 shutil.copyfile(src, dst)
 
+        # Kinoko profile-guided optimization: a Kinoko source with a profile in
+        # tools/pgo/kinoko/ (tools/diag/compile.py MKW_KINOKO_PGO=generate makes them) is
+        # built with it; MKW_KINOKO_PGO=off ignores them. Same flags as the DIAG build.
+        kinoko_source, pgo_dir = REPO / 'vendor/kinoko/source', REPO / 'tools/pgo/kinoko'
+        pgo_use = os.environ.get('MKW_KINOKO_PGO', '') != 'off'
+        pgo_flags = ['-fprofile-use', '-fprofile-partial-training', '-Wno-missing-profile', '-Wno-coverage-mismatch',
+                     '-fno-unroll-loops', '-fno-peel-loops']
+
         def compile_set(label, compiler, sources, flags, base, objdir):
             def one(src):
                 obj = objdir / src.relative_to(base).with_suffix('.o')
                 obj.parent.mkdir(parents=True, exist_ok=True)
                 f = flags + (['-flto=auto'] if src.suffix == '.cc' else [])
-                key = hashlib.sha256(src.read_bytes() + signature + ' '.join(f).encode()).hexdigest()
+                profile = b''
+                if pgo_use and src.suffix == '.cc' and src.is_relative_to(kinoko_source):
+                    gcda = (pgo_dir / src.relative_to(kinoko_source)).with_suffix('.gcda')
+                    if gcda.is_file():
+                        # GCC reads the profile beside the object (its -o path with .gcda).
+                        profile = gcda.read_bytes()
+                        obj.with_suffix('.gcda').write_bytes(profile)
+                        f = f + pgo_flags
+                key = hashlib.sha256(src.read_bytes() + signature + ' '.join(f).encode() + profile).hexdigest()
                 stamp = obj.with_suffix('.sha256')
                 if obj.is_file() and stamp.is_file() and stamp.read_text() == key:
                     return obj, None

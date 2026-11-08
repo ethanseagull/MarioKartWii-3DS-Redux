@@ -79,7 +79,7 @@ ItemActor& RaceItems::spawn(unsigned player,ItemKind kind,bool backwards,const V
     if(it==actors_.end())it=std::find_if(actors_.begin(),actors_.end(),[](const ItemActor& a){return !a.active;});
     if(it==actors_.end())it=std::max_element(actors_.begin(),actors_.end(),[](const ItemActor& a,const ItemActor& b){return a.age<b.age;});
     forgetReclaimSlot(unsigned(it-actors_.begin()));
-    auto& a=*it;a={};a.kind=kind;a.owner=int8_t(player);a.active=true;a.lifetime=kind==ItemKind::Banana?0:1800;
+    auto& a=*it;a={};a.kind=kind;a.owner=int8_t(player);a.active=true;++actorSerial_;a.lifetime=kind==ItemKind::Banana?0:1800;
     reclaimOrder_[retailObjectId(kind)].add(unsigned(it-actors_.begin()));
     Vec3 direction=normalized(racers_[player].forward,{0,0,1});
     const bool trap=kind==ItemKind::Banana||kind==ItemKind::FakeBox;
@@ -224,7 +224,7 @@ void RaceItems::syncReclaimOrder(){
             if(!a.active||retailObjectId(a.kind)!=type)h.remove(slot);else ++i;
         }
     }
-    for(unsigned i=0;i<MaxActors;++i){
+    for(unsigned i=nextActorSlot(0);i<MaxActors;i=nextActorSlot(i+1)){
         const auto& a=actors_[i];if(!a.active)continue;
         auto& h=reclaimOrder_[retailObjectId(a.kind)];h.add(i);
         if(a.settled&&(a.scattered||a.kind==ItemKind::Banana))h.land(i);
@@ -238,36 +238,53 @@ void RaceItems::updateActors(ItemWorldQuery query){
     // USA8078d464 uses the gameplay limit, not allocated capacity. USA80790844
     // computes the global pressure AFTER all holders, so every holder reads the
     // previous step's value. All fifteen retail +0x5c weights are one.
+    // fastActorStep (Old 3DS): the sync and the object counts change only when a holder's
+    // step below touched an actor (a reclaim or a member's update). After a holder with
+    // neither, a sync is a no-op (it is idempotent) and the counts are unchanged, so both
+    // are skipped until the next change; racers holding nothing skip the held-item scan.
+    const bool fast=fastActorStep;
+    bool changed=false;std::array<unsigned,15> counts{};bool countsValid=false;
     for(unsigned type=0;type<15;++type){
-        syncReclaimOrder();
+        if(!fast||changed)syncReclaimOrder();
+        changed=false;
         auto& h=reclaimOrder_[type];
-        const int free=int(ItemObjectLimits[type])-int(objectCount(type));
+        if(fast&&!countsValid){objectCounts(counts);countsValid=true;}
+        const int free=int(ItemObjectLimits[type])-int(fast?counts[type]:objectCount(type));
         if(ItemObjectLimits[type]>1&&(free<2||reclaimPressure_>-5)){
             h.sort(phase,type==2,eligible,
                 [&](unsigned slot){return actors_[slot].floorTypes;},
                 [&](unsigned slot){return actors_[slot].explosion;});
             if(phase==0&&(free<1||reclaimPressure_>0)&&h.count&&eligible(h.slots[0])){
                 const auto slot=h.slots[0];actors_[slot].active=false;h.remove(slot);
+                changed=true;
             }
         }
         // Keep holder order for movement and contacts, too. Copy the slot list
         // because a contact can remove another actor during this holder's step.
         const auto order=h.slots;const unsigned n=h.count;
+        if(n)changed=true;
+        if(changed)countsValid=false;
         for(unsigned k=0;k<n;++k){
             auto& a=actors_[order[k]];if(!a.active)continue;
             updateActor(a,query);
             if(!a.active){h.remove(order[k]);continue;}
             if(a.settled&&(a.scattered||a.kind==ItemKind::Banana))h.land(order[k]);
             resolveCourseObjects(a);if(!a.active)continue;
-            for(unsigned owner=0;owner<count_&&a.active;++owner)
+            for(unsigned owner=0;owner<count_&&a.active;++owner){
+                // resolveActorHeld returns at once for an empty slot.
+                if(fast&&!hud_[owner].heldMask)continue;
                 for(unsigned slot=0;slot<3&&a.active;++slot)resolveActorHeld(a,owner,slot);
-            for(unsigned other=0;other<MaxActors&&a.active;++other)
+            }
+            for(unsigned other=nextActorSlot(0);other<MaxActors&&a.active;other=nextActorSlot(other+1))
                 if(other!=order[k]&&actors_[other].active)resolveActorPair(a,actors_[other]);
         }
     }
-    syncReclaimOrder();
+    if(!fast||changed)syncReclaimOrder();
     reclaimPressure_=-30;
-    for(unsigned type=0;type<15;++type)reclaimPressure_+=int(objectCount(type));
+    if(fast){
+        if(!countsValid)objectCounts(counts);
+        for(unsigned type=0;type<15;++type)reclaimPressure_+=int(counts[type]);
+    }else for(unsigned type=0;type<15;++type)reclaimPressure_+=int(objectCount(type));
 }
 
 void RaceItems::updateActor(ItemActor& a,ItemWorldQuery query){
@@ -486,6 +503,7 @@ void RaceItems::heldKartContacts(unsigned player){
     for(unsigned owner=0;owner<count_;++owner){
         if(owner==player)continue;
         auto& h=hud_[owner];auto& state=deployments_[owner];
+        if(fastActorStep&&!h.heldMask)continue; // every slot below would be skipped
         for(unsigned slot=0;slot<3;++slot){
             if(!(h.heldMask&(1u<<slot))||state.scales[slot]<HeldContactMinimumScale)continue;
             const float radius=heldItemContactRadius(owner,slot);
@@ -521,8 +539,24 @@ void RaceItems::kartContacts(unsigned player){
     const auto& r=racers_[player];
     boxContacts(player);
     if(r.finished)return;
-    // Actor pool order stands in for the retail entity search order.
-    for(auto& a:actors_)if(a.active&&itemTouchesKart(a,player))actorKartContact(a,player);
+    // Actor pool order stands in for the retail entity search order. Forward
+    // through the mask's slots: one a contact spawns is found in a rebuilt mask
+    // when it lies ahead, as the full scan would.
+    for(unsigned i=0;i<MaxActors;++i){
+        if(fullContactScan){auto& a=actors_[i];if(a.active&&itemTouchesKart(a,player))actorKartContact(a,player);continue;}
+        if(contactMaskSerial_!=actorSerial_)refreshContactMask();
+        unsigned w=i>>5;uint32_t bits=contactMask_[w]&(~0u<<(i&31));
+        while(!bits&&++w<contactMask_.size())bits=contactMask_[w];
+        if(!bits)break;
+        i=w*32+unsigned(__builtin_ctz(bits));
+        auto& a=actors_[i];
+        if(a.active&&itemTouchesKart(a,player))actorKartContact(a,player);
+    }
     heldKartContacts(player);
+}
+void RaceItems::refreshContactMask(){
+    contactMask_={};
+    for(unsigned i=0;i<MaxActors;++i)if(actors_[i].active)contactMask_[i>>5]|=1u<<(i&31);
+    contactMaskSerial_=actorSerial_;
 }
 }

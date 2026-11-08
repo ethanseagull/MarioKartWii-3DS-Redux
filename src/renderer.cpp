@@ -1,8 +1,10 @@
+#include "mkw/console_model.hpp"
 #include "mkw/env_animation.hpp"
 #include "mkw/road_sampler_policy.hpp"
 #include "mkw/course_phase_ranges.hpp"
 #include "mkw/rainbow_shadow.hpp"
 #include "mkw/renderer.hpp"
+#include "mkw/sim_profile.hpp"
 #include "mkw/diag.hpp"
 #include <mkw/normal_matrix.hpp>
 #include "mkw/castle_regions.hpp"
@@ -23,6 +25,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <new>
 #include <sys/stat.h>
 #include <map>
 #include <algorithm>
@@ -91,8 +95,8 @@ bool readExact(FILE* f,void* p,size_t size) { return std::fread(p,1,size,f)==siz
 // also the console's stereo display settings (config block 0x50005), which
 // Mario Kart 7's stereo camera reads; the defaults stand if they are absent.
 bool stereoScreen(mkw::stereo::Display& display){
-    bool n3ds=false;
-    if(R_FAILED(APT_CheckNew3DS(&n3ds))||!n3ds||R_FAILED(cfguInit()))return false;
+    const bool n3ds=mkw::isNew3ds(); // false in the Old 3DS test build: no stereo there
+    if(!n3ds||R_FAILED(cfguInit()))return false;
     u8 model=CFG_MODEL_N2DSXL,threeD=0;
     const bool ok=R_SUCCEEDED(CFGU_GetSystemModel(&model))&&R_SUCCEEDED(CFGU_GetModelNintendo2DS(&threeD))
         &&threeD&&(model==CFG_MODEL_N3DS||model==CFG_MODEL_N3DSXL);
@@ -131,13 +135,30 @@ C3D_Tex* Texture::sampledGpu(const MaterialSampler* s,unsigned unit){
     if(!renderQuality().mipmaps||s->minFilter<2)view.minLevel=view.maxLevel=0;
     return &view;
 }
-bool Texture::load(const char* path,int halveLarge) {
+namespace {
+// A texture file in a temporary buffer for loadMemory: from the packs, else a loose
+// file. After many races in a row (Old 3DS, 15 VS races) the heap can have megabytes
+// free but no block the size of a results texture (512 KB), and the throwing
+// allocation stopped the game at the finish line. The pack copy then borrows LINEAR,
+// as compressed pack reads do (asset_pack.cpp readEntry).
+template<class Use> bool withTextureFile(const char* path,Use&& use){
+    if(const long packed=pack::size(path);packed>=0){
+        const size_t bytes=size_t(packed);
+        std::unique_ptr<uint8_t[]> heap(new(std::nothrow) uint8_t[bytes?bytes:1]);
+        struct LinearScratch{void* p=nullptr;~LinearScratch(){if(p)linearFree(p);}} borrowed;
+        uint8_t* data=heap.get();
+        if(!data)data=static_cast<uint8_t*>(borrowed.p=linearAlloc(bytes?bytes:1));
+        if(data&&pack::readInto(path,data,bytes))return use(data,bytes);
+    }
     std::vector<uint8_t> file;
-    return (pack::read(path,file)||readFile(path,file))&&loadMemory(file.data(),file.size(),false,halveLarge);
+    return readFile(path,file)&&use(file.data(),file.size());
+}
+}
+bool Texture::load(const char* path,int halveLarge) {
+    return withTextureFile(path,[&](const uint8_t* data,size_t size){return loadMemory(data,size,false,halveLarge);});
 }
 bool Texture::loadVram(const char* path) {
-    std::vector<uint8_t> file;
-    return (pack::read(path,file)||readFile(path,file))&&loadMemory(file.data(),file.size(),true);
+    return withTextureFile(path,[&](const uint8_t* data,size_t size){return loadMemory(data,size,true);});
 }
 bool Texture::loadMemory(const void* data,size_t size,bool vram,int halveLarge) {
     reset();
@@ -669,7 +690,7 @@ bool Renderer::reserveBloom(){
     drain();
     return initBloomTargets();
 }
-bool Renderer::loadVramTexture(Texture& texture,const char* path,GPU_TEXTURE_WRAP_PARAM wrap){
+bool Renderer::loadVramTexture(Texture& texture,const char* path,GPU_TEXTURE_WRAP_PARAM wrap,bool rgba4){
     texture.reset();
     if(!ready_||!text_)return false;
     // The GPU and the render thread are idle: nothing reads the staging region.
@@ -696,16 +717,26 @@ bool Renderer::loadVramTexture(Texture& texture,const char* path,GPU_TEXTURE_WRA
     ok=ok&&!(header[2]&0x40)&&header[4]==0&&width<=1024&&height<=1024&&
         (format==GPU_ETC1||format==GPU_RGBA8||format==GPU_RGBA4)&&
         bytes==C3D_TexCalcTotalSize(baseBytes,0);
+    // Same texel order in both formats (8x8 Morton tiles): RGBA8 [A,B,G,R] bytes
+    // become RGBA4 u16 R<<12|G<<8|B<<4|A, chunk by chunk, at half the offset.
+    const bool narrow=rgba4&&format==GPU_RGBA8;
     // VRAM only: a failure leaves the texture empty and never falls back to LINEAR.
-    ok=ok&&C3D_TexInitVRAM(&texture.gpu,uint16_t(width),uint16_t(height),GPU_TEXCOLOR(format));
+    ok=ok&&C3D_TexInitVRAM(&texture.gpu,uint16_t(width),uint16_t(height),narrow?GPU_RGBA4:GPU_TEXCOLOR(format));
     if(!ok){texture.gpu={};if(f)std::fclose(f);return false;}
     uint8_t* staging=reinterpret_cast<uint8_t*>(text_);
     for(std::size_t done=0;ok&&done<bytes;){
         const std::size_t chunk=std::min(kStagingBytes,bytes-done);
         ok=read(staging,chunk);
+        if(ok&&narrow){
+            auto four=[](unsigned v){return (v*15u+127u)/255u;};
+            auto* out=reinterpret_cast<uint16_t*>(staging);
+            for(std::size_t i=0;i<chunk/4;++i){const uint8_t* t=staging+4*i;
+                out[i]=uint16_t(four(t[3])<<12|four(t[2])<<8|four(t[1])<<4|four(t[0]));}
+        }
         if(ok){
-            GSPGPU_FlushDataCache(staging,u32(chunk));
-            C3D_SyncTextureCopy(reinterpret_cast<u32*>(staging),0,reinterpret_cast<u32*>(static_cast<uint8_t*>(texture.gpu.data)+done),0,u32(chunk),8);
+            const std::size_t stored=narrow?chunk/2:chunk,at=narrow?done/2:done;
+            GSPGPU_FlushDataCache(staging,u32(stored));
+            C3D_SyncTextureCopy(reinterpret_cast<u32*>(staging),0,reinterpret_cast<u32*>(static_cast<uint8_t*>(texture.gpu.data)+at),0,u32(stored),8);
         }
         done+=chunk;
     }
@@ -2320,8 +2351,8 @@ void Renderer::buildEffectList(RaceEffects& effects,const C3D_Mtx& viewMatrix,ef
 // The immediate path; recorded frames build the list in drawEffects (render_thread.cpp).
 void Renderer::drawEffectsImmediate(RaceEffects& effects,const Texture* textures){
     updateEffectState(effects);
-    buildEffectList(effects,view_,effectDraw_->list);
-    effectListNow(effects,effectDraw_->list,textures);
+    {MKW_SIM_SCOPE(EfBuild);buildEffectList(effects,view_,effectDraw_->list);}
+    MKW_SIM_SCOPE(EfSubmit);effectListNow(effects,effectDraw_->list,textures);
 }
 EffectLayerBuffer::~EffectLayerBuffer(){
     if(vertices)linearFree(vertices);
@@ -2395,14 +2426,25 @@ void Renderer::effectListNow(const RaceEffects& effects,const ef::DrawList& list
     C3D_TexEnvBufColor(0);
     // Unit 0 in projection mode for projected layers; bound by pointer until the draw.
     C3D_Tex projected{};
+    // Consecutive batches often share their emitter resource (material, blend, depth,
+    // alpha compare) and textures: only what differs from the last drawn batch is set
+    // again (same GPU state, fewer citro3d updates and commands). no-effect-state-skip.txt: every batch sets everything.
+    const ef::DrawBatch* last=nullptr;
     for(const ef::DrawBatch& b:list.batches){
         if(b.first>=vertexCount)break;
         const uint32_t count=ef::drawBatchVertexCount(b,vertexCount);
         if(!count)continue;
         const ef::Material& m=state.materials[b.res->index];
         const ef::DrawSetting& d=b.res->desc.draw;
+        const bool sameRes=effectStateSkip&&last&&last->res->index==b.res->index;
+        const bool sameTextures=sameRes&&last->texture[0]==b.texture[0]&&last->texture[1]==b.texture[1]&&last->wrap[0]==b.wrap[0]&&last->wrap[1]==b.wrap[1];
+        const bool sameCombiner=sameRes&&!std::memcmp(last->constant,b.constant,sizeof b.constant);
+        if(sameTextures&&sameCombiner&&last->alphaRef0==b.alphaRef0&&last->alphaRef1==b.alphaRef1&&last->cull==b.cull){
+            C3D_DrawArrays(GPU_TRIANGLES,int(b.first),int(count));
+            stats_.triangles+=count/3;++stats_.drawCalls;last=&b;continue;
+        }
         bool missing=false;
-        for(int u=0;u<2;++u){
+        if(!sameTextures)for(int u=0;u<2;++u){
             const uint32_t t=b.texture[u];
             if(t==0xffffffffu||t>=effects.textures.size()){C3D_TexBind(u,nullptr);continue;}
             const Texture& tex=textures[t];
@@ -2427,7 +2469,8 @@ void Renderer::effectListNow(const RaceEffects& effects,const ef::DrawList& list
             }
         }
 #endif
-        if(missing)continue;
+        if(missing){last=nullptr;continue;}
+        if(!sameCombiner){
         int rgbBuffer=0,alphaBuffer=0;
         for(int i=0;i<6;++i){
             C3D_TexEnv* env=C3D_GetTexEnv(i);C3D_TexEnvInit(env);
@@ -2445,6 +2488,7 @@ void Renderer::effectListNow(const RaceEffects& effects,const ef::DrawList& list
             if(st.bufferAlpha)alphaBuffer|=1<<i;
         }
         C3D_TexEnvBufUpdate(C3D_RGB,rgbBuffer);C3D_TexEnvBufUpdate(C3D_Alpha,alphaBuffer);
+        }
         C3D_AlphaBlend(GPU_BLEND_ADD,GPU_BLEND_ADD,blendFactor(d.blendSrc),blendFactor(d.blendDst),blendFactor(d.blendSrc),blendFactor(d.blendDst));
         const bool zTest=d.flags&ef::DrawSetting::ZTest;
         C3D_DepthTest(zTest,zTest?depthTest(d.zCompare):GPU_ALWAYS,(d.flags&ef::DrawSetting::ZUpdate)?GPU_WRITE_ALL:GPU_WRITE_COLOR);
@@ -2459,7 +2503,7 @@ void Renderer::effectListNow(const RaceEffects& effects,const ef::DrawList& list
         // GPU_CULL_FRONT_CCW): GX_CULL_FRONT (1) is GPU_CULL_BACK_CCW, GX_CULL_BACK (2) the other.
         C3D_CullFace(cameraCull(b.cull==1?GPU_CULL_BACK_CCW:b.cull==2?GPU_CULL_FRONT_CCW:GPU_CULL_NONE,view_));
         C3D_DrawArrays(GPU_TRIANGLES,int(b.first),int(count));
-        stats_.triangles+=count/3;++stats_.drawCalls;
+        stats_.triangles+=count/3;++stats_.drawCalls;last=&b;
     }
     // Back to the scene program and its state.
     C3D_TexEnvBufUpdate(C3D_Both,0);
@@ -2816,7 +2860,7 @@ bool Renderer::capturePausedTop(){
     return true;
 }
 static const char* pauseControlsPath(){
-    bool new3ds=false;APT_CheckNew3DS(&new3ds);
+    bool new3ds=mkw::isNew3ds();
     return new3ds?"textures/pause_controls_new3ds.t3x":"textures/pause_controls_old3ds.t3x";
 }
 bool Renderer::pauseControlsAvailable() const{
@@ -2895,6 +2939,7 @@ bool Renderer::initBloom(){
     return true;
 }
 void Renderer::freeBloom(){
+    bloomListValid_=false;
     for(auto*& t:bloomTarget_){if(t)C3D_RenderTargetDelete(t);t=nullptr;}
     if(sceneTarget_)C3D_RenderTargetDelete(sceneTarget_);
     sceneTarget_=nullptr;
@@ -2936,8 +2981,61 @@ void Renderer::bloomQuad(const C3D_Tex& source,unsigned sourceWidth,unsigned sou
     auto* buf=C3D_GetBufInfo();BufInfo_Init(buf);BufInfo_Add(buf,v,sizeof(Vertex),4,0x3210);
     C3D_DrawArrays(GPU_TRIANGLES,0,6);bloomCount_+=6;stats_.triangles+=2;++stats_.drawCalls;
 }
+// citro3d's context and its "already on the GPU" shadows (vendor/citro3d).
+extern "C" {
+#include "../vendor/citro3d/source/internal.h"
+}
 void Renderer::applyBloomNow(){
     flushSprites();bloomFrame_=false;
+    // The commands depend only on these (and on the vertex slots holding the
+    // recorded quads): immediate mono frames, no clip rectangle.
+    const bool listed=bloomList&&!execPipelined_&&!execStereo_.active()&&!execDualScreenIntro_&&!bloomClipped_&&!bottomPass_;
+    if(!listed){bloomListValid_=false;bloomPasses();return;}
+    BloomListKey key{bloomSettings_,sceneTex_.data,{bloomTex_[0].data,bloomTex_[1].data,bloomTex_[2].data,bloomTex_[3].data},topTarget(),
+                     bloomVertices_,bloomCount_,renderQuality().bloomBlurRounds,bloomMerge};
+    // State set before bloom reaches the frame's own commands first, so the
+    // recorded commands hold only what the passes set.
+    C3Di_UpdateContext();
+    const std::size_t quadBytes=bloomListVertices_.size()*sizeof(Vertex);
+    if(bloomListValid_&&key==bloomListKey_&&bloomCount_+bloomListVertices_.size()<=kBloomVertices&&
+       !std::memcmp(bloomVertices_+bloomCount_,bloomListVertices_.data(),quadBytes)&&
+       gpuCmdBufOffset+bloomListWords_.size()+0x4000<=gpuCmdBufSize){
+        GPUCMD_AddRawCommands(bloomListWords_.data(),uint32_t(bloomListWords_.size()));
+        bloomCount_+=unsigned(bloomListVertices_.size());
+        stats_.triangles+=bloomListTriangles_;stats_.drawCalls+=bloomListDraws_;
+        // The context exactly as the passes leave it (their last target, the
+        // composite's state, then the reset below).
+        bloomPass(topTarget(),400,240);
+        C3D_TexUnit2UseCoord1(false);
+        for(int unit=0;unit<3;++unit)C3D_TexBind(unit,nullptr);
+        C3D_TexEnvBufUpdate(C3D_Both,0);for(int i=0;i<6;++i)C3D_TexEnvInit(C3D_GetTexEnv(i));
+        auto* env0=C3D_GetTexEnv(0);C3D_TexEnvSrc(env0,C3D_Both,GPU_TEXTURE0,GPU_PRIMARY_COLOR);C3D_TexEnvFunc(env0,C3D_Both,GPU_MODULATE);
+        C3D_AlphaBlend(GPU_BLEND_ADD,GPU_BLEND_ADD,GPU_SRC_ALPHA,GPU_ONE_MINUS_SRC_ALPHA,GPU_ONE,GPU_ONE_MINUS_SRC_ALPHA);
+        *C3D_GetBufInfo()=bloomListBuffer_;
+        uploadProjection(projectionLoc_,projection_);
+        spriteStateReady_=false;
+        // The GPU holds the commands' last values, not what the shadows say:
+        // the next draw writes every state the passes touch again.
+        C3Di_InvalidateStateShadows();C3Di_InvalidateUniformShadows();
+        auto& ctx=*C3Di_GetContext();
+        ctx.flags|=C3DiF_FrameBuf|C3DiF_Viewport|C3DiF_Effect|C3DiF_TexEnvBuf|C3DiF_TexAll|C3DiF_TexEnvAll|C3DiF_BufInfo|C3DiF_DrawUsed;
+        return;
+    }
+    // Record: every state the passes set is written, whatever the GPU held.
+    u32* start=nullptr;u32 startOffset=0;GPUCMD_GetBuffer(&start,nullptr,&startOffset);
+    C3Di_InvalidateStateShadows();C3Di_InvalidateUniformShadows();
+    const unsigned first=bloomCount_;const uint32_t triangles=stats_.triangles,draws=stats_.drawCalls;
+    bloomPasses();
+    u32* end=nullptr;u32 endOffset=0;GPUCMD_GetBuffer(&end,nullptr,&endOffset);
+    bloomListValid_=end==start&&endOffset>startOffset&&bloomCount_>first;
+    if(!bloomListValid_)return;
+    bloomListKey_=key;
+    bloomListWords_.assign(start+startOffset,start+endOffset);
+    bloomListVertices_.assign(bloomVertices_+first,bloomVertices_+bloomCount_);
+    bloomListBuffer_=*C3D_GetBufInfo();
+    bloomListTriangles_=stats_.triangles-triangles;bloomListDraws_=stats_.drawCalls-draws;
+}
+void Renderer::bloomPasses(){
     const auto& settings=*bloomSettings_;
     auto pica=[](uint32_t rgba){return ((rgba>>24)&255)|((rgba>>8)&0xff00)|((rgba<<8)&0xff0000)|((rgba<<24)&0xff000000);};
     auto env=[](){C3D_TexEnvBufUpdate(C3D_Both,0);for(int i=0;i<6;++i)C3D_TexEnvInit(C3D_GetTexEnv(i));return C3D_GetTexEnv(0);};

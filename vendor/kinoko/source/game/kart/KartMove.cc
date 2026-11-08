@@ -394,11 +394,25 @@ void KartMove::calcSlipstream() {
 }
 
 void KartMove::calc() {
+    if (calcPart1()) {
+        calcPart2();
+    }
+}
+
+bool KartMove::calcPart1() {
+    if (!calcPart1A()) {
+        return false;
+    }
+    calcPart1B();
+    return true;
+}
+
+bool KartMove::calcPart1A() {
     auto &status = KartObjectProxy::status();
 
     if (status.onBit(eStatus::InRespawn)) {
         calcInRespawn();
-        return;
+        return false;
     }
 
     dynamics()->resetInternalVelocity();
@@ -415,6 +429,12 @@ void KartMove::calc() {
 
     calcAutoDrift();
     calcDirs();
+    return true;
+}
+
+void KartMove::calcPart1B() {
+    auto &status = KartObjectProxy::status();
+
     calcStickyRoad();
     calcOffroad();
     calcTurn();
@@ -429,6 +449,11 @@ void KartMove::calc() {
     calcMushroomBoost();
     calcZipperBoost();
     calcSlipstream();
+}
+
+void KartMove::calcPart2() {
+    auto &status = KartObjectProxy::status();
+
     // RMCU PlayerSub10 update order: POW (0x8057a844), Mega, Star, shock, crush.
     calcPow();
     calcMega();
