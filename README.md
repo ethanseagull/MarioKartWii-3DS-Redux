@@ -11,7 +11,7 @@ dudewhat's original port and MiniBandit's continuation.
 - All characters and vehicles, including unlockables and native 3DS Mii drivers.
 - Four license slots with their own settings, rules and records.
 - Dual-screen menus, race results and maps, with the original materials, animations, particles and audio.
-- Optional dynamic shadows and notification LED effects (License Settings).
+- Optional dynamic shadows (Settings), and a speedometer and notification LED effects (License Settings).
 
 ## What you need
 
@@ -71,7 +71,7 @@ needs the soxr resampler, which most builds have.
 
 The results are in `build/standard/output/`:
 
-- `MKW-3DS-v<version>.cia`, the game (shown as "Mario Kart Wii 3DS" on the HOME Menu);
+- `MKW-3DS-REDUX-v<version>.cia`, the game (shown as "Mario Kart Wii 3DS" on the HOME Menu);
 - `sd/3ds/`, the game data for the SD card;
 - `mkw-3ds.3dsx`, the same game for the Homebrew Launcher.
 

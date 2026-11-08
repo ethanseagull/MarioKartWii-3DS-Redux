@@ -753,10 +753,8 @@ int main() {
      // the shared menu autosave path. Rules must never be replaced by UiSelection defaults.
      if(licenseSaves[last].occupied)menu.selection=licenseSaves[last].settings;
      else menu.selection.license=last;
-     // Whole-game settings (the Settings page). The first boot takes Dynamic
-     // Shadows from the last license, where it used to be stored.
-     if(!mkw::loadGameSettings(SettingsFile,menu.settings)&&licenseSaves[last].occupied)
-         menu.settings.dynamicShadows=licenseSaves[last].settings.dynamicShadows;
+     // Whole-game settings (the Settings page); UiSettings defaults on first boot.
+     mkw::loadGameSettings(SettingsFile,menu.settings);
      // Old 3DS: Texture Quality Low, Dynamic Shadows Off, Bloom Off and
      // Opponent Detail Low, whatever the file says; the page answers every row
      // with "Not available". Applied before savedSettings, so the Old 3DS title
@@ -2034,7 +2032,7 @@ int main() {
     int trackCourse=-1; // Course whose scenery is completely resident, or -1.
     auto resetRaceSystems=[&](bool reload){
         if(!fullRace)return;
-        battleTicks=0;raceHud.speedometer=false;raceHud.resetBattleView();
+        battleTicks=0;raceHud.speedometer=menu.selection.speedometer;raceHud.resetBattleView();
         if(battleMode){
             size_t ruleSize=0;
             const void* ruleData=K::System::ResourceManager::Instance()->getFile("minigame.kmg",&ruleSize,K::System::ArchiveId::Core);
@@ -4070,6 +4068,7 @@ int main() {
             profiler->mark(Profile::Opponents);
             renderer.diagPass(mkw::diag::PassItems);
             if(fullRace)raceHud.drawWorld(renderer,*raceItems,vec(cameraKart->pos()),physicsSteps);
+            if(fullRace&&!playerDynamicShadow)lakitu.drawGroundVolume(renderer);
             if(fullRace)lakitu.draw(renderer);
             profiler->mark(Profile::Items);
             renderer.diagPass(mkw::diag::PassPlayer);
@@ -4170,11 +4169,11 @@ int main() {
                 const auto& objectReceivers=courseObjects.shadowReceivers(origin,std::max(320.f,320.f*cameraKart->scale().y)*4.f);
                 renderer.drawPlayerShadow(casters.data(),casterCount,receivers.data(),receiverCount,origin,playerShadowLight,cameraKart->scale().y,playerCastsShadow&&!insideSoftTerrain?&fallback:nullptr,objectReceivers.data(),unsigned(objectReceivers.size()));
             }
-            if(fullRace&&lakitu.shadowVisible()){
+            if(mergeJudgeShadow){
                 std::array<const mkw::Model*,256> receivers{};unsigned count=0;
                 for(const auto& model:track)if(count<receivers.size())receivers[count++]=model.get();
                 const auto& objects=courseObjects.shadowReceivers(lakitu.position(),2400.f);
-                lakitu.drawShadow(renderer,receivers.data(),count,playerShadowLight,menu.settings.dynamicShadows,
+                lakitu.drawShadow(renderer,receivers.data(),count,playerShadowLight,
                                   objects.data(),unsigned(objects.size()));
             }
             if(mergeJudgeShadow)renderer.setShadowUnion(false);

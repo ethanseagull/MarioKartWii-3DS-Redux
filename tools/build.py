@@ -935,7 +935,7 @@ class Builder:
             raise BuildError('tools/release/mkw-3ds.rsf no longer has the expected RomFs block.')
         # External-SD title: an empty embedded RomFS would hide the SD resources.
         (self.work / 'package/external-sd.rsf').write_text(rsf.replace(block, ''))
-        cia = out / f'MKW-3DS-v{version}.cia'
+        cia = out / f'MKW-3DS-REDUX-v{version}.cia'
         want = title_version()
         self.run('makerom', [self.tools['makerom'], '-f', 'cia', '-target', 't', '-exefslogo', '-elf', self.compile_dir / 'mkw-3ds.elf',
                              '-rsf', self.work / 'package/external-sd.rsf', '-icon', art / 'icon.icn', '-banner', art / 'banner-startgrid.bnr',

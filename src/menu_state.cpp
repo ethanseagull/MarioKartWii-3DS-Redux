@@ -91,7 +91,8 @@ unsigned MenuState::count()const{
  switch(page){
  case UiPage::License:return 4;
  case UiPage::Drift:case UiPage::VSMode:return 3;
- case UiPage::Settings:case UiPage::LicenseSettings:return 4;
+ case UiPage::Settings:return 4;
+ case UiPage::LicenseSettings:return 5;
  case UiPage::VSRules:return 7;
  case UiPage::BattleRules:return 6;
  case UiPage::Mode:return 4;
@@ -300,9 +301,10 @@ UiAction MenuState::input(UiInput key){
   focusAge=0;unavailable=false;
   return UiAction::None;
  }
- if(page==UiPage::LicenseSettings&&cursor>=2&&cursor<4&&(key.left||key.right)){
+ if(page==UiPage::LicenseSettings&&cursor>=2&&cursor<5&&(key.left||key.right)){
   if(cursor==2)selection.ledMode=(selection.ledMode+(key.left?3:1))%4;
-  else selection.ledBrightness=unsigned(std::clamp(int(selection.ledBrightness)+(key.left?-10:10),50,100));
+  else if(cursor==3)selection.ledBrightness=unsigned(std::clamp(int(selection.ledBrightness)+(key.left?-10:10),50,100));
+  else selection.speedometer=!selection.speedometer;
   focusAge=0;return UiAction::None;
  }
  // Every Settings row is a two-way choice: left, right and A all switch it.
@@ -385,6 +387,7 @@ UiAction MenuState::input(UiInput key){
   else if(cursor==1)enter(UiPage::EraseLicense);
   else if(cursor==2)selection.ledMode=(selection.ledMode+1)%4;
   else if(cursor==3)selection.ledBrightness=selection.ledBrightness>=100?50:selection.ledBrightness+10;
+  else if(cursor==4)selection.speedometer=!selection.speedometer;
   break;
  case UiPage::EraseLicense:if(cursor==0){eraseLicenseRequest=int(selection.license);enter(UiPage::License);}else{enter(UiPage::LicenseSettings);cursor=1;uiFocusReset(*this);}break;
  case UiPage::MainMenu:if(cursor==0)enter(UiPage::Mode);else unavailable=true;break;

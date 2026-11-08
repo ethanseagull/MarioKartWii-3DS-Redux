@@ -393,28 +393,37 @@ void Lakitu::draw(Renderer& renderer){
     renderer.draw(*board,hookWorld,false,bindLakitu,binding);append(board,hookWorld);
 }
 bool Lakitu::shadowVisible()const{return impl_->ready&&impl_->kart&&impl_->mode!=Mode::Away&&!impl_->shadowCasters.empty();}
-void Lakitu::drawShadow(Renderer& renderer,const Model* const* receivers,unsigned receiverCount,Vec3 light,bool dynamic,
-                        const Renderer::ShadowReceiver* objects,unsigned objectCount){
-    auto& m=*impl_;if(!m.ready||!m.kart||m.mode==Mode::Away||m.shadowCasters.empty())return;
+bool Lakitu::shadowPose(C3D_Mtx& pose)const{
+    auto& m=*impl_;if(!m.ready||!m.kart||m.mode==Mode::Away)return false;
     // RMCU 8071eb3c..8071ec70: identity rotation, kart Y + 100,
     // X/Z at the judge; horizontal scale 9 -> 0 over height 500 -> 1500,
     // vertical volume scale 30. No invented ground ray or blob placement.
     const Vec3 at=position();const float kartY=m.kart->pos().y;
     const float size=9.f*(1.f-std::clamp((at.y-kartY-500.f)/1000.f,0.f,1.f));
-    if(size<=0.f)return;
+    if(size<=0.f)return false;
     // The exporter has already applied jg_shadow's authored root bind.
     // Retail overwrites palette matrix 0 (8006daf0), rather than multiplying
     // that bind again. Undo it here before the original shadow scale/pose.
     constexpr float inverseBind=1.f/9.581673622131348f;
     constexpr float bindY=-3.1829841136932373f;
-    C3D_Mtx pose;Mtx_Identity(&pose);
+    Mtx_Identity(&pose);
     Mtx_Translate(&pose,at.x,kartY+100.f-30.f*bindY*inverseBind,at.z,false);
     Mtx_Scale(&pose,size*inverseBind,30.f*inverseBind,size*inverseBind);
+    return true;
+}
+// Resolved before Lakitu is drawn: the column reaches him, and resolving it
+// against his own depth stamps a dark band across his cloud as he moves.
+void Lakitu::drawGroundVolume(Renderer& renderer){
+    C3D_Mtx pose;if(!impl_->shadow||!shadowPose(pose))return;
+    const Renderer::ShadowVolume volume{impl_->shadow.get(),pose};
+    renderer.drawShadowVolumes(&volume,1,.5f);
+}
+void Lakitu::drawShadow(Renderer& renderer,const Model* const* receivers,unsigned receiverCount,Vec3 light,
+                        const Renderer::ShadowReceiver* objects,unsigned objectCount){
+    auto& m=*impl_;C3D_Mtx pose;if(m.shadowCasters.empty()||!shadowPose(pose))return;
     const Renderer::ShadowVolume fallback{m.shadow.get(),pose};
-    if(dynamic&&renderer.playerShadowReady())
-        renderer.drawPlayerShadow(m.shadowCasters.data(),unsigned(m.shadowCasters.size()),receivers,receiverCount,at,light,1.f,
-                                  m.shadow?&fallback:nullptr,objects,objectCount,true);
-    else if(m.shadow)renderer.drawShadowVolumes(&fallback,1,.5f);
+    renderer.drawPlayerShadow(m.shadowCasters.data(),unsigned(m.shadowCasters.size()),receivers,receiverCount,position(),light,1.f,
+                              m.shadow?&fallback:nullptr,objects,objectCount,true);
 }
 
 }

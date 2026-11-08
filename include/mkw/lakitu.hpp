@@ -37,14 +37,17 @@ public:
     void reset();
     void step(const LakituInput&);
     void draw(Renderer&);
+    // Dynamic Shadows Off: call before draw (see lakitu.cpp).
+    void drawGroundVolume(Renderer&);
     bool shadowVisible()const;
-    void drawShadow(Renderer&,const Model* const*,unsigned,Vec3,bool,const Renderer::ShadowReceiver*,unsigned);
+    void drawShadow(Renderer&,const Model* const*,unsigned,Vec3,const Renderer::ShadowReceiver*,unsigned);
     // Audio::ObjectActor on Lakitu::Player (+0x214): the sound held this tick
     // (UpdateRespawn 80720314 SE_JUGEM_RESCUE, UpdateBackwards 80720abc
     // SE_JUGEM_REVERSE; 0 for none), and where Lakitu is.
     uint16_t soundLoop()const;
     Vec3 position()const;
 private:
+    bool shadowPose(C3D_Mtx&)const;
     struct Impl;std::unique_ptr<Impl> impl_;
 };
 }

@@ -8,6 +8,12 @@ Changes on top of upstream 0.9.4 (merged Nov 4, 2026; earlier changes were made 
 
 - The game uses upstream's title (`000400000F4B5700`), HOME Menu name and `sd:/3ds/mkw-3ds/` again. Builds from Nov 5 to 7 used their own; see the README to move saves back.
 
+# Settings
+
+- New 3DS now starts with Dynamic Shadows and Bloom Off, Texture Quality High and Opponent Detail Full. Saved settings are kept.
+- License Settings has a Speedometer option. SELECT still switches it during a race.
+- The CIA is now `MKW-3DS-REDUX-v<version>.cia`.
+
 # Old 3DS
 
 - The game now runs on Old 3DS models. Texture Quality, Dynamic Shadows, Bloom and Opponent Detail stay at their lightest settings there.
@@ -57,7 +63,7 @@ Changes on top of upstream 0.9.4 (merged Nov 4, 2026; earlier changes were made 
 
 - The Wii's Settings button is back on the license screen, in the lower screen's top right corner as on the Wii (Up from the top row or Right from the right column). It opens the Wii's Settings page (its buttons, background and music) with this port's options, saved for the whole game in `settings.dat`:
   - Texture Quality: High keeps every texture at its cooked size; Low loads textures of 256x256 or more one mip level down.
-  - Dynamic Shadows (moved here from License Settings; the first start takes the last license's choice).
+  - Dynamic Shadows (moved here from License Settings).
   - Bloom: On or Off. Off also leaves bloom's VRAM to the course.
   - Opponent Detail: Full, or Low (distant opponents use the Wii's split-screen models).
   - Changes apply to the next race.

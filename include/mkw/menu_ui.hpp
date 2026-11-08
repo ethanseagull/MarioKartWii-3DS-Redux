@@ -37,8 +37,10 @@ struct UiSelection {
  // together between their restricted type and the combined kart/bike list.
  bool mixedEngineTypes=false;
  // Per-license port options, separate from retail RKSD. dynamicShadows is
- // only read once, to seed the whole-game setting (UiSettings) on first boot.
+ // unused now (see UiSettings); it only keeps the file layout.
  unsigned ledMode=0,ledBrightness=100;bool dynamicShadows=true;
+ // Speedometer at the start of a race; SELECT still switches it during one.
+ bool speedometer=false;
  bool operator==(const UiSelection&)const=default;
 };
 struct UiCharacterInfo {const char* name;unsigned retailId,weight;};
