@@ -128,7 +128,9 @@ Include paths, in order: the shader header directory, `vendor/kinoko/include`,
 Link with the same architecture flags, `-flto=auto -specs=3dsx.specs
 -Wl,--gc-sections`, the objects, `libCFL.a`, `libcitro3d.a` and
 `-L<libctru/lib> -lctru -lm`, wrapping `linearAlloc`, `linearMemAlign`,
-`linearRealloc`, `linearGetSize`, `linearFree`, `linearSpaceFree` and `fopen`
+`linearRealloc`, `linearGetSize`, `linearFree`, `linearSpaceFree`, `fopen`
+and the `vram*` allocator functions (`vramAlloc`, `vramAllocAt`, `vramMemAlign`,
+`vramMemAlignAt`, `vramRealloc`, `vramGetSize`, `vramFree`, `vramSpaceFree`)
 with `-Wl,--wrap=<name>`. Then
 `3dsxtool mkw-3ds.elf mkw-3ds.3dsx --smdh=icon.icn`.
 

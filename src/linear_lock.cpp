@@ -20,14 +20,73 @@ struct Guard {
  Guard(){RecursiveLock_Lock(&linearLock);}
  ~Guard(){RecursiveLock_Unlock(&linearLock);}
 };
+// libctru treats an empty free list as "not set up yet": the allocation after
+// one that used the last free byte re-creates the whole heap as free, on top of
+// every live block. So an allocation that would empty the list fails instead.
+void* keepLinearUsable(void* p){
+ if(p&&__real_linearSpaceFree()==0){__real_linearFree(p);return nullptr;}
+ return p;
+}
 }
 extern "C" {
-void* __wrap_linearAlloc(size_t size){Guard g;return __real_linearAlloc(size);}
-void* __wrap_linearMemAlign(size_t size,size_t alignment){Guard g;return __real_linearMemAlign(size,alignment);}
+void* __wrap_linearAlloc(size_t size){Guard g;return keepLinearUsable(__real_linearAlloc(size));}
+void* __wrap_linearMemAlign(size_t size,size_t alignment){Guard g;return keepLinearUsable(__real_linearMemAlign(size,alignment));}
 void* __wrap_linearRealloc(void* mem,size_t size){Guard g;return __real_linearRealloc(mem,size);}
 size_t __wrap_linearGetSize(void* mem){Guard g;return __real_linearGetSize(mem);}
 void __wrap_linearFree(void* mem){Guard g;__real_linearFree(mem);}
 u32 __wrap_linearSpaceFree(void){Guard g;return __real_linearSpaceFree();}
+}
+
+// libctru's VRAM allocator is not thread-safe either (-Wl,--wrap=vram*). Two
+// threads in it at once can corrupt its block list and hand one block to two
+// owners, such as both screens' render targets. DIAG (gpu_guard.cpp) logs
+// contention, double frees, overlapping blocks and bad screen transfers.
+extern "C" {
+void* __real_vramAlloc(size_t size);
+void* __real_vramAllocAt(size_t size,vramAllocPos pos);
+void* __real_vramMemAlign(size_t size,size_t alignment);
+void* __real_vramMemAlignAt(size_t size,size_t alignment,vramAllocPos pos);
+void* __real_vramRealloc(void* mem,size_t size);
+size_t __real_vramGetSize(void* mem);
+void __real_vramFree(void* mem);
+u32 __real_vramSpaceFree(void);
+}
+namespace mkw::gpuGuard {
+#ifndef MKW_RELEASE
+void lockContended();
+void refusedLastBlock();
+void allocated(void* p,size_t size,void* caller);
+void freeing(void* p,void* caller);
+#else
+inline void lockContended(){}
+inline void refusedLastBlock(){}
+inline void allocated(void*,size_t,void*){}
+inline void freeing(void*,void*){}
+#endif
+}
+namespace {
+RecursiveLock vramLock;
+struct VramGuard {
+ VramGuard(){if(RecursiveLock_TryLock(&vramLock)!=0){mkw::gpuGuard::lockContended();RecursiveLock_Lock(&vramLock);}} // TryLock: 0 = acquired
+ ~VramGuard(){RecursiveLock_Unlock(&vramLock);}
+};
+// As for LINEAR, but libctru restarts VRAM when both banks' free lists are
+// empty: both screens' render targets then get handed out again, and the two
+// screens draw over each other until the game is closed.
+void* keepVramUsable(void* p){
+ if(p&&__real_vramSpaceFree()==0){__real_vramFree(p);mkw::gpuGuard::refusedLastBlock();return nullptr;}
+ return p;
+}
+}
+extern "C" {
+void* __wrap_vramAlloc(size_t size){VramGuard g;void* p=keepVramUsable(__real_vramAlloc(size));mkw::gpuGuard::allocated(p,size,__builtin_return_address(0));return p;}
+void* __wrap_vramAllocAt(size_t size,vramAllocPos pos){VramGuard g;void* p=keepVramUsable(__real_vramAllocAt(size,pos));mkw::gpuGuard::allocated(p,size,__builtin_return_address(0));return p;}
+void* __wrap_vramMemAlign(size_t size,size_t alignment){VramGuard g;void* p=keepVramUsable(__real_vramMemAlign(size,alignment));mkw::gpuGuard::allocated(p,size,__builtin_return_address(0));return p;}
+void* __wrap_vramMemAlignAt(size_t size,size_t alignment,vramAllocPos pos){VramGuard g;void* p=keepVramUsable(__real_vramMemAlignAt(size,alignment,pos));mkw::gpuGuard::allocated(p,size,__builtin_return_address(0));return p;}
+void* __wrap_vramRealloc(void* mem,size_t size){VramGuard g;mkw::gpuGuard::freeing(mem,__builtin_return_address(0));void* p=__real_vramRealloc(mem,size);mkw::gpuGuard::allocated(p,size,__builtin_return_address(0));return p;}
+size_t __wrap_vramGetSize(void* mem){VramGuard g;return __real_vramGetSize(mem);}
+void __wrap_vramFree(void* mem){VramGuard g;mkw::gpuGuard::freeing(mem,__builtin_return_address(0));__real_vramFree(mem);}
+u32 __wrap_vramSpaceFree(void){VramGuard g;return __real_vramSpaceFree();}
 }
 
 // QA: counts file opens and the time spent opening (fopen is wrapped at link).
@@ -143,3 +202,135 @@ FILE* __wrap_fopen(const char* path,const char* mode){
  return file;
 }
 }
+
+#ifndef MKW_RELEASE
+// DIAG GPU memory guard (see the VRAM wrappers above). Writes
+// sdmc:/3ds/mkw-3ds/gpu-guard.log at once, outside the race log deferral, so a
+// hang still leaves the lines. Checks:
+//  - two threads in the VRAM allocator at once (the lock serializes them);
+//  - a free of a block that is not live (double free) and a new block that
+//    overlaps a live one (a corrupted allocator);
+//  - the first VRAM call from each thread;
+//  - each screen transfer: the size must match its screen, and the source must
+//    lie in a live VRAM block.
+#include <cstdarg>
+#include <citro3d.h>
+namespace mkw::gpuGuard {
+namespace {
+struct Block {uintptr_t at;size_t size;u32 thread;void* caller;};
+constexpr unsigned MaxBlocks=1024;
+Block blocks[MaxBlocks];unsigned blockCount=0;bool tableFull=false;
+RecursiveLock tableLock; // zero-initialized: valid before static constructors
+u32 threads[8]{};unsigned threadCount=0;
+unsigned lines=0;
+u32 threadId(){u32 id=0;svcGetThreadId(&id,CUR_THREAD_HANDLE);return id;}
+void log(const char* format,...){
+ if(lines>=400)return;++lines;
+ char text[224];va_list args;va_start(args,format);std::vsnprintf(text,sizeof text,format,args);va_end(args);
+ if(FILE* f=__real_fopen("sdmc:/3ds/mkw-3ds/gpu-guard.log","a")){
+  std::fprintf(f,"%.1f s thread %lu: %s\n",double(svcGetSystemTick())/SYSCLOCK_ARM11,(unsigned long)threadId(),text);std::fclose(f);
+ }
+}
+void noteThread(const char* what,void* caller){
+ const u32 id=threadId();
+ for(unsigned i=0;i<threadCount;++i)if(threads[i]==id)return;
+ if(threadCount<8)threads[threadCount++]=id;
+ log("first VRAM %s from this thread (caller %08lx)",what,(unsigned long)uintptr_t(caller));
+}
+Block* find(uintptr_t at){for(unsigned i=0;i<blockCount;++i)if(blocks[i].at==at)return &blocks[i];return nullptr;}
+const Block* containing(uintptr_t at){for(unsigned i=0;i<blockCount;++i)if(at>=blocks[i].at&&at<blocks[i].at+blocks[i].size)return &blocks[i];return nullptr;}
+}
+void lockContended(){
+ static unsigned count=0;
+ if(++count<=50)log("VRAM allocator already in use by another thread (contention %u)",count);
+}
+void refusedLastBlock(){log("VRAM exactly full: refusing the last free block (next line) so libctru does not restart");}
+void allocated(void* p,size_t size,void* caller){
+ RecursiveLock_Lock(&tableLock);
+ noteThread("allocation",caller);
+ if(!p){log("VRAM allocation of %lu bytes failed (caller %08lx)",(unsigned long)size,(unsigned long)uintptr_t(caller));RecursiveLock_Unlock(&tableLock);return;}
+ const uintptr_t at=uintptr_t(p);
+ for(unsigned i=0;i<blockCount;++i){
+  const Block& b=blocks[i];
+  if(at<b.at+b.size&&b.at<at+size)
+   log("OVERLAP: new VRAM block %08lx+%lu (caller %08lx) overlaps live %08lx+%lu (thread %lu, caller %08lx)",
+       (unsigned long)at,(unsigned long)size,(unsigned long)uintptr_t(caller),(unsigned long)b.at,(unsigned long)b.size,(unsigned long)b.thread,(unsigned long)uintptr_t(b.caller));
+ }
+ if(blockCount<MaxBlocks)blocks[blockCount++]={at,size,threadId(),caller};
+ else if(!tableFull){tableFull=true;log("VRAM table full (%u blocks): later blocks are not checked",MaxBlocks);}
+ RecursiveLock_Unlock(&tableLock);
+}
+void freeing(void* p,void* caller){
+ if(!p)return;
+ RecursiveLock_Lock(&tableLock);
+ noteThread("free",caller);
+ if(Block* b=find(uintptr_t(p)))*b=blocks[--blockCount];
+ else if(!tableFull)log("DOUBLE FREE or unknown VRAM free %08lx (caller %08lx)",(unsigned long)uintptr_t(p),(unsigned long)uintptr_t(caller));
+ RecursiveLock_Unlock(&tableLock);
+}
+void logUnitFourBit(int unit,const C3D_Tex* tex,void* caller){
+ log("4-BIT VRAM TEXTURE ON UNIT %d: %08lx %ux%u format %d (caller %08lx)",unit,(unsigned long)uintptr_t(tex->data),unsigned(tex->width),unsigned(tex->height),int(tex->fmt),(unsigned long)uintptr_t(caller));
+}
+void checkTransfer(u32* in,u32 indim,u32* out,u32 outdim){
+ static unsigned bad=0;
+ if(bad>=100)return;
+ u16 w=0,h=0;
+ const u32* bottom=reinterpret_cast<u32*>(gfxGetFramebuffer(GFX_BOTTOM,GFX_LEFT,&w,&h));
+ const u32* topLeft=reinterpret_cast<u32*>(gfxGetFramebuffer(GFX_TOP,GFX_LEFT,nullptr,nullptr));
+ const u32* topRight=reinterpret_cast<u32*>(gfxGetFramebuffer(GFX_TOP,GFX_RIGHT,nullptr,nullptr));
+ const char* screen=out==bottom?"bottom":out==topLeft?"top-left":out==topRight&&topRight!=topLeft?"top-right":nullptr;
+ if(!screen)return; // captures and copies into textures
+ const u32 expected=out==bottom?GX_BUFFER_DIM(240,320):GX_BUFFER_DIM(240,400);
+ if(indim!=expected||outdim!=expected){
+  ++bad;log("SCREEN TRANSFER to %s with size %lux%lu (expected %lux%lu), source %08lx",screen,
+      (unsigned long)(indim&0xffff),(unsigned long)(indim>>16),(unsigned long)(expected&0xffff),(unsigned long)(expected>>16),(unsigned long)uintptr_t(in));
+ }
+ const uintptr_t at=uintptr_t(in);
+ // Each screen's source normally changes only when its target is re-created
+ // (the bottom one per race). Log every change: a source inside another
+ // screen's block (not at a block start) means a corrupted target address.
+ static uintptr_t lastSource[3]{};
+ const unsigned slot=out==bottom?0:out==topLeft?1:2;
+ if(lastSource[slot]!=at){
+  RecursiveLock_Lock(&tableLock);
+  const Block* b=containing(at);
+  log("%s screen now transfers from %08lx (%s %08lx+%lu)",screen,(unsigned long)at,
+      !b?"no live block":b->at==at?"start of block":"INSIDE block",(unsigned long)(b?b->at:0),(unsigned long)(b?b->size:0));
+  for(unsigned i=0;i<3;++i)if(i!=slot&&lastSource[i]&&b&&lastSource[i]>=b->at&&lastSource[i]<b->at+b->size)
+   log("SCREENS SHARE VRAM: %s source %08lx and the other screen's %08lx are in one block",screen,(unsigned long)at,(unsigned long)lastSource[i]);
+  RecursiveLock_Unlock(&tableLock);
+  lastSource[slot]=at;
+ }
+ if(at>=0x1F000000&&at<0x1F600000){
+  RecursiveLock_Lock(&tableLock);
+  const Block* b=containing(at);
+  const size_t need=size_t(indim&0xffff)*(indim>>16)*4;
+  if(!tableFull&&(!b||at+need>b->at+b->size)){
+   ++bad;log("SCREEN TRANSFER to %s from VRAM %08lx that is %s",screen,(unsigned long)at,b?"smaller than the image":"not allocated (freed?)");
+  }
+  RecursiveLock_Unlock(&tableLock);
+ }
+}
+}
+// A 4-bit texture (ETC1, L4, A4) in VRAM sampled by texture unit 1 or 2 can
+// destabilize the PICA and corrupt later output on both screens (3dbrew
+// GPU/Pitfalls); Azahar doesn't show it. Each such texture is logged once.
+extern "C" void __real_C3D_TexBind(int unit,C3D_Tex* tex);
+extern "C" void __wrap_C3D_TexBind(int unit,C3D_Tex* tex){
+ if(unit>0&&tex&&tex->data){
+  const uintptr_t at=uintptr_t(tex->data);
+  if(at>=0x1F000000&&at<0x1F600000&&(tex->fmt==GPU_ETC1||tex->fmt==GPU_L4||tex->fmt==GPU_A4)){
+   static uintptr_t seen[64];static unsigned seenCount=0;bool known=false;
+   for(unsigned i=0;i<seenCount;++i)known|=seen[i]==at;
+   if(!known){if(seenCount<64)seen[seenCount++]=at;
+    mkw::gpuGuard::logUnitFourBit(unit,tex,__builtin_return_address(0));}
+  }
+ }
+ __real_C3D_TexBind(unit,tex);
+}
+extern "C" Result __real_GX_DisplayTransfer(u32* inadr,u32 indim,u32* outadr,u32 outdim,u32 flags);
+extern "C" Result __wrap_GX_DisplayTransfer(u32* inadr,u32 indim,u32* outadr,u32 outdim,u32 flags){
+ mkw::gpuGuard::checkTransfer(inadr,indim,outadr,outdim);
+ return __real_GX_DisplayTransfer(inadr,indim,outadr,outdim,flags);
+}
+#endif
