@@ -2,7 +2,7 @@
 
 Profile counts for the port's own sources (`src/`, one `.gcda` per source, same
 paths), used by `tools/diag/compile.py` in the Old 3DS variants (`MKW_DIAG_VARIANT`
-`o3dstest` and `o3dsplay`, the Old 3DS play build). There the port's sources are also
+`o3dstest` and `o3dsrelease`). There the port's sources are also
 built with LTO (`MKW_PORT_LTO=off`: without), so Kinoko's small getters inline into the
 port's calls. A source with a profile here is compiled with the same flags as Kinoko's
 (`-fprofile-use -fprofile-partial-training -fno-unroll-loops -fno-peel-loops`), plus
