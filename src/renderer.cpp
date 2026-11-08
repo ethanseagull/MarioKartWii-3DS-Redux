@@ -25,6 +25,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <new>
 #include <sys/stat.h>
 #include <map>
 #include <algorithm>
@@ -133,13 +135,30 @@ C3D_Tex* Texture::sampledGpu(const MaterialSampler* s,unsigned unit){
     if(!renderQuality().mipmaps||s->minFilter<2)view.minLevel=view.maxLevel=0;
     return &view;
 }
-bool Texture::load(const char* path,int halveLarge) {
+namespace {
+// A texture file in a temporary buffer for loadMemory: from the packs, else a loose
+// file. After many races in a row (Old 3DS, 15 VS races) the heap can have megabytes
+// free but no block the size of a results texture (512 KB), and the throwing
+// allocation stopped the game at the finish line. The pack copy then borrows LINEAR,
+// as compressed pack reads do (asset_pack.cpp readEntry).
+template<class Use> bool withTextureFile(const char* path,Use&& use){
+    if(const long packed=pack::size(path);packed>=0){
+        const size_t bytes=size_t(packed);
+        std::unique_ptr<uint8_t[]> heap(new(std::nothrow) uint8_t[bytes?bytes:1]);
+        struct LinearScratch{void* p=nullptr;~LinearScratch(){if(p)linearFree(p);}} borrowed;
+        uint8_t* data=heap.get();
+        if(!data)data=static_cast<uint8_t*>(borrowed.p=linearAlloc(bytes?bytes:1));
+        if(data&&pack::readInto(path,data,bytes))return use(data,bytes);
+    }
     std::vector<uint8_t> file;
-    return (pack::read(path,file)||readFile(path,file))&&loadMemory(file.data(),file.size(),false,halveLarge);
+    return readFile(path,file)&&use(file.data(),file.size());
+}
+}
+bool Texture::load(const char* path,int halveLarge) {
+    return withTextureFile(path,[&](const uint8_t* data,size_t size){return loadMemory(data,size,false,halveLarge);});
 }
 bool Texture::loadVram(const char* path) {
-    std::vector<uint8_t> file;
-    return (pack::read(path,file)||readFile(path,file))&&loadMemory(file.data(),file.size(),true);
+    return withTextureFile(path,[&](const uint8_t* data,size_t size){return loadMemory(data,size,true);});
 }
 bool Texture::loadMemory(const void* data,size_t size,bool vram,int halveLarge) {
     reset();

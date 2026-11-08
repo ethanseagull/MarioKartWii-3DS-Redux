@@ -345,12 +345,50 @@ static void report(const char* text) {
 // in Azahar, a silent stall. The handler frees a block kept for it (fopen
 // itself needs heap), logs the heap and LINEAR state, then lets new fail.
 static void* outOfHeapReserve=nullptr;
+// The request that failed: its size and the code that called new (resolve the
+// address with addr2line on the ELF), set by the operator new below.
+static size_t failedNewBytes=0;static void* failedNewCaller=nullptr;
+// The largest block malloc can still hand out (binary search to 4 KB), in bytes.
+static size_t largestHeapBlock(){
+    const struct mallinfo m=mallinfo();
+    size_t lo=0,hi=size_t(m.fordblks)+(envGetHeapSize()>size_t(m.arena)?envGetHeapSize()-size_t(m.arena):0)+4096;
+    while(hi-lo>4096){const size_t mid=(lo+hi)/2;if(void* p=std::malloc(mid)){std::free(p);lo=mid;}else hi=mid;}
+    return lo;
+}
 static void outOfHeap(){
     std::free(outOfHeapReserve);outOfHeapReserve=nullptr;std::set_new_handler(nullptr);
     const struct mallinfo m=mallinfo();
-    char text[160];snprintf(text,sizeof text,"FAIL out of heap: used %lu KB, free %lu KB in claimed blocks, unclaimed %lu KB, linear free %lu KB",
-        (unsigned long)m.uordblks/1024,(unsigned long)m.fordblks/1024,(unsigned long)(envGetHeapSize()>size_t(m.arena)?envGetHeapSize()-size_t(m.arena):0)/1024,(unsigned long)linearSpaceFree()/1024);
+    char text[224];snprintf(text,sizeof text,"FAIL out of heap: used %lu KB, free %lu KB in claimed blocks, unclaimed %lu KB, linear free %lu KB; request %lu bytes from %08lx, largest block %lu KB",
+        (unsigned long)m.uordblks/1024,(unsigned long)m.fordblks/1024,(unsigned long)(envGetHeapSize()>size_t(m.arena)?envGetHeapSize()-size_t(m.arena):0)/1024,(unsigned long)linearSpaceFree()/1024,
+        (unsigned long)failedNewBytes,(unsigned long)failedNewCaller,(unsigned long)largestHeapBlock()/1024);
     report(text);
+}
+// DIAG replacements of the global new: the same loop as libstdc++'s (malloc, else the
+// new handler, else abort, as bad_alloc did under -fno-exceptions), plus the failed
+// request's size and caller for outOfHeap. A failed nothrow new (its caller has a
+// fallback, such as LINEAR) is only logged ("heap: nothrow new ... failed") and returns
+// null without the handler, so outOfHeap stays armed for a request that has none.
+static void* diagNew(size_t n,void* caller,bool nothrow){
+    if(!n)n=1;
+    for(;;){
+        if(void* p=std::malloc(n))return p;
+        if(nothrow){char text[96];snprintf(text,sizeof text,"heap: nothrow new %lu from %08lx failed, largest block %lu KB",(unsigned long)n,(unsigned long)caller,(unsigned long)largestHeapBlock()/1024);report(text);return nullptr;}
+        failedNewBytes=n;failedNewCaller=caller;
+        const std::new_handler h=std::get_new_handler();
+        if(!h)std::abort();
+        h();
+    }
+}
+void* operator new(size_t n){return diagNew(n,__builtin_return_address(0),false);}
+void* operator new[](size_t n){return diagNew(n,__builtin_return_address(0),false);}
+void* operator new(size_t n,const std::nothrow_t&)noexcept{return diagNew(n,__builtin_return_address(0),true);}
+void* operator new[](size_t n,const std::nothrow_t&)noexcept{return diagNew(n,__builtin_return_address(0),true);}
+// The heap at a race boundary: used, free in claimed blocks, unclaimed top and the
+// largest block (fragmentation shows as free space with a small largest block).
+static void reportHeap(const char* when){
+    const struct mallinfo m=mallinfo();
+    LOGF("heap %s: used %lu KB, free %lu KB in claimed blocks, unclaimed %lu KB, largest block %lu KB",when,
+        (unsigned long)m.uordblks/1024,(unsigned long)m.fordblks/1024,(unsigned long)(envGetHeapSize()>size_t(m.arena)?envGetHeapSize()-size_t(m.arena):0)/1024,(unsigned long)largestHeapBlock()/1024);
 }
 #endif
 // Narrow pause regression trace: the last START/menu transition, timed from
@@ -3870,6 +3908,9 @@ int main() {
                     if(flowUi.loadResultsStep(battleMode)){
                         resultsReported=true;
                         LOGF("race flow results resident bytes=%u linear_free=%lu",flowUi.resultsBytes(),(unsigned long)linearSpaceFree());
+#ifndef MKW_RELEASE
+                        reportHeap("at results");
+#endif
                     }else if(flowUi.resultsFailed()){resultsReported=true;report("FAIL race flow results load");}
                 }
             }
@@ -4199,6 +4240,9 @@ int main() {
         if(raceLoadStart){
             const double ms=double(svcGetSystemTick()-raceLoadStart)*1000.0/SYSCLOCK_ARM11;raceLoadStart=0;lastRaceFrame=0;
             LOGF("race_load_ms=%.1f course=%s driver=%u vehicle=%u failed=%d",ms,Courses[courseChoice].name,driverChoice,vehicleChoice,int(trackLoadFailed));menuProfile->event(line);
+#ifndef MKW_RELEASE
+            reportHeap("after race load");
+#endif
         }
         if(menuProfile->enabled()){const auto now=svcGetSystemTick();menuProfile->raceFrame(lastRaceFrame?float(double(now-lastRaceFrame)*1000.0/SYSCLOCK_ARM11):0.f);lastRaceFrame=now;}
         if(frames==1)report("graphics first frame submitted");
