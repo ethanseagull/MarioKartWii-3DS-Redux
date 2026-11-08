@@ -47,6 +47,10 @@ struct RenderQuality {
     // after the race's VRAM users have loaded, leaving vramReserve bytes free.
     bool vramCourseTextures=true;
     static constexpr std::size_t vramReserve=1024*1024;
+    // New 3DS races: nothing allocates VRAM after the move in a normal race. This
+    // margin covers a Mii driver restored after a pause (Old 3DS pause textures
+    // and the award ceremony still use vramReserve).
+    static constexpr std::size_t raceVramReserve=128*1024;
     // The race's lower screen redraws on every Nth presented frame; an undrawn
     // screen keeps its last picture, fades still draw every frame. 1 everywhere:
     // Old 3DS draws it at 30 Hz like the upper screen (15 Hz saved ~0.7 ms of

@@ -2110,7 +2110,7 @@ int main() {
     auto moveCourseTexturesToVram=[&](){
         if(!mkw::renderQuality().vramCourseTextures)return;
         renderer.waitForGpu();
-        const auto reserve=mkw::RenderQuality::vramReserve;unsigned moved=0,playerMoved=0;mkw::Renderer::VramLeft courseLeft,objectsLeft;
+        const auto reserve=mkw::isNew3ds()?mkw::RenderQuality::raceVramReserve:mkw::RenderQuality::vramReserve;unsigned moved=0,playerMoved=0;mkw::Renderer::VramLeft courseLeft,objectsLeft;
         // The local racer first: large on screen in every frame, up to three
         // texture fetches per pixel (albedo and two light textures).
         const auto vramBefore=vramSpaceFree();
