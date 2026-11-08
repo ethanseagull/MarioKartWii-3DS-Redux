@@ -124,7 +124,16 @@ def compile_one(src, signature):
     return name, run.returncode, (run.stdout + run.stderr)[-3000:]
 
 
+def check_cfl_library():
+    # A libCFL.a older than citro3d's uniform-dirty flag links cleanly, but Mii faces bake blank.
+    library = WORK / 'libCFL.a'
+    symbols = subprocess.run([str(SDK / 'devkitARM/bin/arm-none-eabi-nm'), str(library)], env=env, capture_output=True, text=True, check=True).stdout
+    if 'C3D_FVUnifAnyDirty' not in symbols:
+        raise SystemExit(f'{library} is older than vendor/citro3d (Mii faces would bake blank): rebuild it with tools/build.py.')
+
+
 def main():
+    check_cfl_library()
     OUT.mkdir(parents=True, exist_ok=True)
     headers = sorted(list((ROOT / 'include').rglob('*.hpp')) + list((ROOT / 'include').rglob('*.inc'))
                      + list((ROOT / 'vendor/kinoko').rglob('*.hh')) + list((ROOT / 'vendor/citro3d/include').rglob('*.h'))
