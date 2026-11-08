@@ -269,6 +269,21 @@ void checkTransfer(u32* in,u32 indim,u32* out,u32 outdim){
       (unsigned long)(indim&0xffff),(unsigned long)(indim>>16),(unsigned long)(expected&0xffff),(unsigned long)(expected>>16),(unsigned long)uintptr_t(in));
  }
  const uintptr_t at=uintptr_t(in);
+ // Each screen's source normally changes only when its target is re-created
+ // (the bottom one per race). Log every change: a source inside another
+ // screen's block (not at a block start) means a corrupted target address.
+ static uintptr_t lastSource[3]{};
+ const unsigned slot=out==bottom?0:out==topLeft?1:2;
+ if(lastSource[slot]!=at){
+  RecursiveLock_Lock(&tableLock);
+  const Block* b=containing(at);
+  log("%s screen now transfers from %08lx (%s %08lx+%lu)",screen,(unsigned long)at,
+      !b?"no live block":b->at==at?"start of block":"INSIDE block",(unsigned long)(b?b->at:0),(unsigned long)(b?b->size:0));
+  for(unsigned i=0;i<3;++i)if(i!=slot&&lastSource[i]&&b&&lastSource[i]>=b->at&&lastSource[i]<b->at+b->size)
+   log("SCREENS SHARE VRAM: %s source %08lx and the other screen's %08lx are in one block",screen,(unsigned long)at,(unsigned long)lastSource[i]);
+  RecursiveLock_Unlock(&tableLock);
+  lastSource[slot]=at;
+ }
  if(at>=0x1F000000&&at<0x1F600000){
   RecursiveLock_Lock(&tableLock);
   const Block* b=containing(at);
