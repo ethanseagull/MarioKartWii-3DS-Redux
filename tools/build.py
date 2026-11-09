@@ -213,7 +213,8 @@ def provision(work, sdk):
         exe = os.environ.get(name.upper()) or shutil.which(name)
         if exe and name == 'ffmpeg' and not has_soxr(exe):
             if key != 'windows-x86_64':
-                raise BuildError(f'{exe} was built without libsoxr; install an ffmpeg with soxr (most distribution and Homebrew builds have it).')
+                raise BuildError(f'{exe} was built without libsoxr. Install an ffmpeg that has it and set FFMPEG to its path '
+                                 '(on macOS: brew install ffmpeg-full, see README.md).')
             log(f'{exe} has no soxr resampler; using the pinned ffmpeg instead')
             exe = None
         if exe:
@@ -509,8 +510,12 @@ class Builder:
     # -- helpers ----------------------------------------------------------
 
     def run(self, name, argv, cwd=None, env=None):
+        argv = [str(a) for a in argv]
+        # Apple's linker spells --gc-sections as -dead_strip. Host compiler only: devkitARM links with GNU ld.
+        if sys.platform == 'darwin' and argv[0] == self.cxx:
+            argv = ['-Wl,-dead_strip' if a == '-Wl,--gc-sections' else a for a in argv]
         with (self.logs / (name + '.log')).open('w', encoding='utf-8', errors='replace') as stream:
-            process = subprocess.run([str(a) for a in argv], cwd=cwd or self.root, env=env or self.env,
+            process = subprocess.run(argv, cwd=cwd or self.root, env=env or self.env,
                                      stdout=stream, stderr=subprocess.STDOUT)
         if process.returncode:
             tail = (self.logs / (name + '.log')).read_text(encoding='utf-8', errors='replace').splitlines()[-25:]

@@ -23,13 +23,13 @@ No game files are included. Everything is converted from your own disc.
 ## What you need
 
 - Your own **Mario Kart Wii USA** disc (RMCE01) as an ISO or WBFS
-- A PC with an internet connection and about 30 GB free
+- A Windows, macOS or Linux computer with an internet connection and about 30 GB free
 - A 3DS with Luma3DS and FBI, and about 3 GB free on the SD card
 - DSP firmware dumped with DSP1, if your console has never had homebrew sound
 
 ## Building
 
-On Windows:
+### Windows
 
 1. Download this repository and unzip it, or clone it.
 2. Double-click `Build.bat` and select your disc.
@@ -37,16 +37,63 @@ On Windows:
 Anything missing, including Python, Git and devkitPro, is downloaded for you.
 When it's done it deletes the converted data, leaving about 3 GB.
 
-Or run the build script yourself. Install Python 3.12, Git, devkitPro with
-`3ds-dev`, and a C++ compiler (on Windows, `pacman -S gcc` in devkitPro's MSYS2
-shell). Then, from a clone:
+Or run the build script yourself. Install Python 3.12, Git, and devkitPro with
+`3ds-dev` and `gcc`. Then, from a clone:
 
 ```sh
 py -3.12 tools/build.py --disc "C:/Games/RMCE01.wbfs"
 ```
 
-On Linux or macOS use `python3.12`. Only Windows is tested. Add
-`--delete-converted` to delete the converted data afterwards.
+### macOS
+
+Install [Homebrew](https://brew.sh), then the tools:
+
+```sh
+brew install git python@3.12 node ffmpeg-full gcc@16
+curl -LO https://github.com/devkitPro/pacman/releases/latest/download/devkitpro-pacman-installer.pkg
+sudo installer -pkg devkitpro-pacman-installer.pkg -target /
+```
+
+On Apple Silicon, also run `softwareupdate --install-rosetta`.
+
+Open a new terminal, then build:
+
+```sh
+sudo dkp-pacman -S --needed --noconfirm 3ds-dev
+git clone https://github.com/ethanseagull/MarioKartWii-3DS-Redux.git
+cd MarioKartWii-3DS-Redux
+export CXX=g++-16
+export FFMPEG="$(brew --prefix ffmpeg-full)/bin/ffmpeg"
+python3.12 tools/build.py --disc ~/Games/RMCE01.wbfs
+```
+
+### Linux
+
+On Ubuntu 24.04 (x86-64), install the tools:
+
+```sh
+sudo apt install git python3.12 python3.12-venv build-essential nodejs npm ffmpeg wget
+wget https://apt.devkitpro.org/install-devkitpro-pacman
+chmod +x install-devkitpro-pacman
+sudo ./install-devkitpro-pacman
+sudo dkp-pacman -S --needed --noconfirm 3ds-dev
+```
+
+Then build:
+
+```sh
+git clone https://github.com/ethanseagull/MarioKartWii-3DS-Redux.git
+cd MarioKartWii-3DS-Redux
+python3.12 tools/build.py --disc ~/Games/RMCE01.wbfs
+```
+
+Other distributions need the same tools: Python 3.12 exactly, GCC 13 or newer,
+Node.js, an ffmpeg with soxr, and [devkitPro](https://devkitpro.org/wiki/Getting_Started).
+
+### All systems
+
+Only Windows has been tested so far. Add `--delete-converted` to the build
+script to delete the converted data afterwards.
 
 The first build takes about an hour. If it stops, run it again and it picks up
 where it left off. The results are in `build/standard/output`.
@@ -65,7 +112,8 @@ git pull
 py -3.12 tools/build.py --disc "C:/Games/RMCE01.wbfs"
 ```
 
-Only what changed is rebuilt, which usually takes a few minutes. An update that
+On macOS or Linux, use the `python3.12` command from your build instead, with
+the same `export` lines on macOS. Only what changed is rebuilt, which usually takes a few minutes. An update that
 changes game data does a full build. Then repeat the install steps. Your saves
 are kept.
 
